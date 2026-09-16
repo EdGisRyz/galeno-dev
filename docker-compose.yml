@@ -30,11 +30,21 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # Base de datos
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-galeno_clinica}
       SPRING_DATASOURCE_USERNAME: ${DB_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-postgres}
+
+      # Seguridad JWT RS256
       AUTH_PUBLIC_KEY: ${AUTH_PUBLIC_KEY}
+
+      # Microservicios (WireMock en la misma red Docker)
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://wiremock-auth:8080}
+      NOTIF_SERVICE_URL: ${NOTIF_SERVICE_URL:-http://wiremock-notif:8080}
+      STORAGE_SERVICE_URL: ${STORAGE_SERVICE_URL:-http://wiremock-storage:8080}
+      PAYMENT_SERVICE_URL: ${PAYMENT_SERVICE_URL:-http://wiremock-payment:8080}
+      AUDIT_SERVICE_URL: ${AUDIT_SERVICE_URL:-http://wiremock-audit:8080}
+
     depends_on:
       postgres:
         condition: service_healthy
