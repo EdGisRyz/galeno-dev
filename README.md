@@ -6,14 +6,14 @@ Residencia profesional InToGlobe · ago-2026 a feb-2027 · ITOaxaca
 
 ## Prerequisitos
 
-| Herramienta | Versión                | Nota |
-|---|------------------------|---|
-| Java | 21 (LTS)               | Eclipse Temurin recomendado |
-| Maven | —                      | wrapper incluido (`mvnw`), no se instala |
-| Node | 22 LTS                 | |
-| pnpm | 11.13.0                | fijado vía `packageManager` en `frontend/package.json` |
+| Herramienta | Versión         | Nota |
+|---|-----------------|---|
+| Java | 21 (LTS)        | Eclipse Temurin recomendado |
+| Maven | —               | wrapper incluido (`mvnw`), no se instala |
+| Node | 22 LTS          | |
+| pnpm | 12.4.2                | fijado vía `packageManager` en `frontend/package.json` |
 | Docker | cualquiera con compose | solo para mocks y BD opcional |
-| PostgreSQL | 15+                    | local o contenedor |
+| PostgreSQL | 15+             | local o contenedor |
 
 ## Setup por única vez
 
@@ -96,7 +96,7 @@ cd frontend && pnpm run build       # typecheck + build de producción
 - **Rutas REST:** prefijo `/api/v1/` obligatorio
 - **Config local:** nunca commitear credenciales
 - **Commits:** atómicos, un cambio por commit; features → PR a `develop`
-- **Decisiones:** toda decisión de arquitectura se documenta en `docs/decisiones.md` (estatus: pendiente)
+- **Decisiones:** toda decisión de arquitectura se documenta en `docs/decisiones.md`
 - **Flyway:** migraciones `V{n}__descripcion.sql`; una migración aplicada NO se edita
 
 ## Estado actual

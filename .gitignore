@@ -47,4 +47,6 @@ out/
 backend/src/main/resources/application.properties
 
 # === Docker ===
-docker-compose.override.ymlpackage-lock.json
+docker-compose.override.yml
+
+package-lock.json
