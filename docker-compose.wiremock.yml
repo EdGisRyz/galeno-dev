@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 1. Mock del AuthService (Genera y valida tokens RS256 de prueba)
   auth-mock:
-    image: wiremock/wiremock:latest
+    image: wiremock/wiremock:3.13.2
     container_name: wiremock-auth
     ports:
       - "4001:8080"
@@ -14,7 +14,7 @@ services:
 
   # 2. Mock del NotifService (WhatsApp, Email, etc.)
   notif-mock:
-    image: wiremock/wiremock:latest
+    image: wiremock/wiremock:3.13.2
     container_name: wiremock-notif
     ports:
       - "4002:8080"
@@ -25,7 +25,7 @@ services:
 
   # 3. Mock del StorageService (Subida de archivos)
   storage-mock:
-    image: wiremock/wiremock:latest
+    image: wiremock/wiremock:3.13.2
     container_name: wiremock-storage
     ports:
       - "4003:8080"
@@ -36,7 +36,7 @@ services:
 
   # 4. Mock del PaymentService (Cobros, suscripciones)
   payment-mock:
-    image: wiremock/wiremock:latest
+    image: wiremock/wiremock:3.13.2
     container_name: wiremock-payment
     ports:
       - "4004:8080"
@@ -47,7 +47,7 @@ services:
 
   # 5. Mock del AuditService (Logs de seguridad)
   audit-mock:
-    image: wiremock/wiremock:latest
+    image: wiremock/wiremock:3.13.2
     container_name: wiremock-audit
     ports:
       - "4005:8080"
