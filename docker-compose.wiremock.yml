@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # 1. Mock del AuthService (Genera y valida tokens RS256 de prueba)
+  auth-mock:
+    image: wiremock/wiremock:latest
+    container_name: wiremock-auth
+    ports:
+      - "4001:8080"
+    volumes:
+      - ./wiremock/auth/mappings:/home/wiremock/mappings
+      - ./wiremock/auth/__files:/home/wiremock/__files
+    command: "--global-response-templating --verbose"
+
+  # 2. Mock del NotifService (WhatsApp, Email, etc.)
+  notif-mock:
+    image: wiremock/wiremock:latest
+    container_name: wiremock-notif
+    ports:
+      - "4002:8080"
+    volumes:
+      - ./wiremock/notif/mappings:/home/wiremock/mappings
+      - ./wiremock/notif/__files:/home/wiremock/__files
+    command: "--global-response-templating --verbose"
+
+  # 3. Mock del StorageService (Subida de archivos)
+  storage-mock:
+    image: wiremock/wiremock:latest
+    container_name: wiremock-storage
+    ports:
+      - "4003:8080"
+    volumes:
+      - ./wiremock/storage/mappings:/home/wiremock/mappings
+      - ./wiremock/storage/__files:/home/wiremock/__files
+    command: "--global-response-templating --verbose"
+
+  # 4. Mock del PaymentService (Cobros, suscripciones)
+  payment-mock:
+    image: wiremock/wiremock:latest
+    container_name: wiremock-payment
+    ports:
+      - "4004:8080"
+    volumes:
+      - ./wiremock/payment/mappings:/home/wiremock/mappings
+      - ./wiremock/payment/__files:/home/wiremock/__files
+    command: "--global-response-templating --verbose"
+
+  # 5. Mock del AuditService (Logs de seguridad)
+  audit-mock:
+    image: wiremock/wiremock:latest
+    container_name: wiremock-audit
+    ports:
+      - "4005:8080"
+    volumes:
+      - ./wiremock/audit/mappings:/home/wiremock/mappings
+      - ./wiremock/audit/__files:/home/wiremock/__files
+    command: "--global-response-templating --verbose"

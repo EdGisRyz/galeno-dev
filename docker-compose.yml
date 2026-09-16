@@ -1,0 +1,49 @@
+# El orden de arranque es automático: postgres → backend.
+
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: galeno-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-galeno_clinica}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - galeno-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-galeno_clinica}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: galeno-backend
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-galeno_clinica}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-postgres}
+      AUTH_PUBLIC_KEY: ${AUTH_PUBLIC_KEY}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://wiremock-auth:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - galeno-network
+
+networks:
+  galeno-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
