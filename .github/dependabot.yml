@@ -4,18 +4,33 @@ updates:
     directory: "/backend"
     schedule:
       interval: "weekly"
+    target-branch: "develop"
+    groups:
+      jjwt:
+        patterns: ["io.jsonwebtoken:*"]
+      spring-boot:
+        patterns: ["org.springframework.boot:*"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    target-branch: "develop"
+    groups:
+      types:
+        patterns: ["@types/*"]
 
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "monthly"
+    target-branch: "develop"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
+    target-branch: "develop"
+    groups:
+      acciones-oficiales:
+        patterns: ["actions/*", "pnpm/*"]
