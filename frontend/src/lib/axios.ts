@@ -3,13 +3,17 @@
 // Todos los servicios importan esta instancia — nunca axios directamente.
 
 import axios from 'axios';
+import { setupMockAdapter } from './mock/mockAdapter';
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: import.meta.env.VITE_API_URL || '/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// Activar mocks si está en desarrollo o VITE_USE_MOCKS=true
+setupMockAdapter(api);
 
 // Interceptor de request: adjunta el token JWT si existe en localStorage
 api.interceptors.request.use((config) => {
