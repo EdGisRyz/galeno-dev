@@ -18,6 +18,9 @@ código; **no sustituyen la review humana ni la review externa**.
 - Módulo `configuracion-tenant`: alcance parcial (entidad + repositorio + tests de
   integración), replicando el patrón del módulo 00. La aceptación nativa y la review
   externa del módulo 00 siguen pendientes y NO se asumen aprobadas.
+- Módulo `consultorio`: alcance **COMPLETO** (dominio, repositorio, DTOs, mapper,
+  service, controller, tests y notas). Es el molde de los módulos 3-10. Rutas
+  anidadas para colección y planas para ítem: desviación justificada de GAL-001 §5.8.
 - Fuente de verdad estructural: la tabla `organizacion` de la migración V1. La
   fuente de verdad de negocio es la tarjeta del módulo. Regla rectora:
   **Prohibido texto inventado.**
@@ -318,3 +321,202 @@ fase de seguridad del backend. **Tests verdes no equivalen a review aprobada.**
 - [ ] Confirmé que la limitación del default de WhatsApp está declarada, no maquillada.
 - [ ] Confirmé que no hay conteos de tests ni éxito de suite inventados.
 - [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
+
+---
+
+## consultorio
+
+Módulo 02 con alcance **COMPLETO** (GAL-001 §6): dominio, repositorio, tests de
+integración, DTOs, mapper, service, tests unitarios, controller, tests MVC y estas
+notas. Es el molde de los módulos 3-10.
+
+Expone cinco endpoints bajo `/api/v1`:
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| `POST` | `/api/v1/organizaciones/{organizacionId}/consultorios` | 201 + `Location` |
+| `GET` | `/api/v1/organizaciones/{organizacionId}/consultorios` | 200 (solo activos, por nombre) |
+| `GET` | `/api/v1/consultorios/{id}` | 200 |
+| `PUT` | `/api/v1/consultorios/{id}` | 200 |
+| `DELETE` | `/api/v1/consultorios/{id}` | 204 (baja lógica, idempotente) |
+
+### Decisión 1 — La baja es lógica porque las FK la obligan
+
+**Contexto.** V1 declara `activo BOOLEAN DEFAULT TRUE NOT NULL` y además:
+`medico.consultorio_id UUID NOT NULL → REFERENCES consultorio (id)` **sin
+`ON DELETE`**, y lo mismo `cita.consultorio_id`.
+
+**Decisión.** `desactivar()` pone `activo = false`, es idempotente, y **no se expone
+ningún borrado físico**. `DELETE` responde 204.
+
+**Por qué.** No es preferencia estética: un `DELETE` físico de un consultorio con
+médicos o citas **fallaría con violación de FK**, porque la ausencia de `ON DELETE`
+significa `NO ACTION`. La baja lógica es la única opción viable y además preserva la
+lectura histórica de las citas y los médicos que lo referencian.
+
+*Precisión de evidencia:* esa consecuencia se **deriva** de la FK de V1 y **no se
+ejercitó** con un test, porque `medico` y `cita` todavía no tienen entidades en el
+repositorio. El único comportamiento de FK que sí está probado es el inverso:
+eliminar la organización borra sus consultorios por el `ON DELETE CASCADE` (caso 9 del
+test de repositorio).
+
+### Decisión 2 — `ConsultorioResponse` plano, sin anidar la organización
+
+**Decisión.** La respuesta lleva `organizacionId` (UUID) y **no** la entidad
+`Organizacion`.
+
+**Por qué.** Evita depender del `LAZY` durante la serialización —serializar la
+asociación dispararía una consulta o un `LazyInitializationException` fuera de
+transacción— y no expone la organización completa a quien consulta un consultorio.
+
+**Nota verificada.** El mapper obtiene el identificador con
+`getOrganizacion().getId()`. Un test dedicado afirma que **esa lectura no inicializa el
+proxy** (`Hibernate.isInitialized(...)` sigue en `false` después del `getId()`), así
+que el listado no incurre en N+1. La ausencia de consultas a `organizacion` en ese caso
+se reportó con atribución por testcase del XML de Surefire: la **aserción del test es
+la evidencia primaria** y el conteo de SQL la corroboración. Si en el futuro el listado se vuelve caliente, la
+optimización es una proyección DTO en el repositorio.
+
+### Decisión 3 — `organizacionId` no es un campo del DTO: la inmutabilidad es estructural
+
+**Contexto.** Un consultorio no puede cambiar de organización: sus médicos y citas
+quedarían huérfanos.
+
+**Decisión.** `ConsultorioRequest` tiene exactamente tres campos (`nombre`,
+`direccion`, `telefono`). La organización **no viaja en el cuerpo**: llega por el
+path en la creación y no existe en la actualización. Un único DTO sirve para POST y
+PUT.
+
+**Por qué.** Al no existir el campo no existe el caso de discrepancia: no hace falta
+un 400 específico, ni ignorar un valor en silencio, ni un DTO separado para el PUT.
+La prohibición es *estructural* en lugar de una validación. Y preserva la decisión
+del módulo 00 de no diversificar la validación entre crear y actualizar.
+
+*Nota de proceso:* esta decisión no se eligió entre opciones, **se disolvió** al
+confirmar la ruta anidada para las colecciones. Las tres alternativas barajadas (400
+al discrepar, ignorar en silencio, DTO separado) quedaron descartadas por
+innecesarias.
+
+### Decisión 4 — El listado anidado responde 404 si el padre no existe, y la creación también
+
+**Contexto.** Al adoptar rutas anidadas para las colecciones, la validez del padre
+pasa a ser parte de la dirección.
+
+**Decisión.** `GET /api/v1/organizaciones/{organizacionId}/consultorios` con un
+`organizacionId` inexistente responde **404** (no `200 []`); con una organización
+existente y sin consultorios responde `200 []`. **Extensión:** el `POST` con
+organización inexistente también responde **404**.
+
+**Por qué.** Un `200` vacío ante un id mal escrito oculta un error del cliente. Y en
+la creación hay un motivo obligatorio: sin la comprobación, la FK rechazaría el
+`INSERT`, `DataIntegrityViolationException` **no está mapeada** en
+`GlobalExceptionHandler`, y el cliente recibiría un **500** en lugar de un 404. Un
+`organizacionId` **malformado** sigue siendo 400.
+
+**Costo aceptado.** `ConsultorioService` depende de `OrganizacionRepository`
+(`existsById` al listar; `findById` al crear, que además aporta la entidad que el
+mapper necesita, así que ahí no es una consulta extra).
+
+### Desviaciones deliberadas respecto del plan
+
+- **GAL-001 §7 (slicing).** La tarjeta define 3 unidades; el módulo se commitea en **4**.
+  Se separó `test(consultorio): el proxy LAZY no se inicializa al leer el id` porque el
+  test que cierra ese invariante es de **integración** (vive en
+  `ConsultorioRepositoryTest`, archivo de la unidad de dominio) y no encajaba en el
+  mensaje `contratos y servicio con tests unitarios`. Separarlo mantiene cada unidad con
+  un propósito único y deja el invariante visible en el historial. El caso está
+  sancionado por §6, dentro del "mínimo 3" que exige el repositorio.
+- **GAL-001 §5.8** dicta `@RequestMapping("/api/v1/<recurso>")`. Este módulo usa **dos
+  rutas base**: la colección cuelga de la organización y el ítem va plano. Se adoptó
+  ADR-005 (*recursos anidados con ID*) porque el tenant es contexto real de la
+  colección, porque deja el `organizacionId` del path como el lugar natural para
+  validar el `tenantId` del token cuando llegue el JWT (una comprobación por request
+  en lugar de un query param falsificable) y porque decidirlo **antes de que exista un
+  consumidor** evita necesitar `/api/v2` después.
+- **GAL-001 §4.1** muestra el `@Query` del repositorio **sin `ORDER BY`**. Aquí sí lo
+  lleva, porque §3 de la tarjeta exige "ordenados por nombre" y el caso 4 de §6 lo
+  afirma. El snippet del plan ilustra la regla (nombre en español + `@Query`
+  explícito, sin name-derivation), no el texto exacto de la consulta; el módulo 00 ya
+  ordena.
+
+### Duda abierta
+
+> **¿De dónde sale `organizacionId` cuando llegue el JWT?**
+
+Hoy llega por el path, porque `SecurityConfig` está abierto y no hay tenant en el
+`SecurityContext`. Es la continuación de R8.3(a) del módulo 00. Hipótesis registrada
+como tal, **no decidida**: con JWT, el `tenantId` del claim reemplaza al parámetro
+para roles MEDICO/PACIENTE (el tenant ES la organización) y el parámetro queda solo
+para ADMIN. No se inventan reglas ahora.
+
+### Riesgos declarados (documentarlos no los resuelve)
+
+1. **El `POST` no es idempotente y V1 no tiene unicidad que lo frene.** No hay
+   `UNIQUE` sobre `nombre` ni sobre `(organizacion_id, nombre)`, así que un reintento
+   del cliente por un timeout **crea un consultorio duplicado en silencio**. Salidas
+   conocidas: encabezado `Idempotency-Key` respaldado por tabla, o unicidad por clave
+   natural. Decisión de fase posterior. Aplica también a `organizacion`, `medico`,
+   `paciente`, `cita`, `pago`, `adjunto` y `notificacion`.
+2. **`direccion` es `TEXT` sin límite.** El DTO no la acota a propósito (V1 no declara
+   límite y fijar uno sería inventar una regla), así que acepta entrada de tamaño
+   arbitrario: punto para la fase de endurecimiento. Se evaluaron rangos de referencia
+   (~150/250 caracteres, normativa fiscal mexicana) y se descartaron por ahora;
+   quedaría para una normalización futura de la tabla.
+3. **`organizacion_id` viaja en cada `UPDATE`.** Hibernate incluye la columna porque
+   está mapeada, aunque el atributo Java nunca se reasigne. Se evaluó
+   `@JoinColumn(..., updatable = false)` y **se descartó**: haría que un cambio
+   indebido de organización se **ignore en silencio** (divergencia memoria↔base sin
+   error), mientras que sin la anotación el cambio **falla de forma visible** y lo
+   frenan la regla de dominio y el review. El valor escrito es el mismo que ya tenía:
+   cero efecto sobre los datos.
+4. **Una aserción del test unitario es tautológica.** En
+   `actualizar_shouldReplaceEditableFieldsAndPreserveImmutableOnes`, las comprobaciones
+   de `id` y `createdAt` comparan un valor stubbeado consigo mismo, así que no prueban
+   esa inmutabilidad a nivel de valor. Se deja declarado y **no** se corrigió porque la
+   aserción no es incorrecta sino redundante: la cobertura real está en el test de
+   repositorio (caso 6, con persistencia real y estado releído) y la inmutabilidad es
+   además estructural (la entidad no tiene setters).
+
+### Alcance y archivos protegidos
+
+| Área | Estado |
+|------|--------|
+| `src/main/resources/db/migration/**` (V1) | Congelado, sin cambios |
+| `model/Organizacion.java`, `model/PlanTipo.java`, `model/ConfiguracionTenant.java` | Sin cambios |
+| `security/**`, incluido `SecurityConfig.java` | Sin cambios: el módulo 02 no toca seguridad |
+| `config/**` y su `.gitkeep` | Congelado, sin cambios |
+| `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` | **Reutilizados** sin editar: contrato de error único |
+| `pom.xml` | Sin cambios: no hizo falta ninguna dependencia nueva |
+| `application*.properties` | Sin cambios |
+
+### Límites de verificación
+
+- Suite completa: `sh ./mvnw -q test` con salida **0**; **94 tests** con 0 fallos, 0
+  errores y 0 omitidos (15 de controller, 13 de service, 12 de repositorio del módulo
+  —40 en total— más los **54 previos** de los módulos 00 y 01: 1 de contexto + 21 de
+  controller de organizacion + 9 de configuracion-tenant + 10 de repositorio de
+  organizacion + 13 de service de organizacion). `-q` **no** imprime `BUILD SUCCESS`:
+  no se inventa esa línea.
+- Los tests cursan sobre **H2 en modo PostgreSQL**. H2 **no** prueba PostgreSQL: la
+  validación contra la base real queda pendiente.
+- La violación de FK se afirma como `DataIntegrityViolationException` **a través del
+  repositorio** (`saveAndFlush`), y la violación la produce el motor (`SQLSTATE 23506`),
+  no una validación previa de Hibernate.
+- Commits del módulo, en orden: dominio y repositorio; contratos y servicio;
+  invariante del proxy; API REST y estas notas.
+
+### Estado nativo del módulo
+
+El módulo 02 **no tiene review nativa aprobada**. RDD quedó apagado a nivel de clone
+por decisión de Eduardo, tras el bloqueo por indisponibilidad (429) del proveedor del
+modelo durante el módulo 01. **Tests verdes no equivalen a review aprobada.**
+
+### Checklist de lectura
+
+- [ ] Confirmé que la sección tiene **4 decisiones** y **1 duda**.
+- [ ] Confirmé que la duda (tenant con JWT) queda abierta y con la hipótesis marcada como tal.
+- [ ] Confirmé que las desviaciones respecto de GAL-001 §4.1 y §5.8 están justificadas, no silenciadas.
+- [ ] Confirmé que los 4 riesgos declarados están declarados y que se dice que documentarlos no los resuelve.
+- [ ] Confirmé que la aserción tautológica está declarada y que su cobertura real vive en el test de repositorio.
+- [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
+- [ ] Confirmé que no hay conteos de tests ni éxito de suite inventados.
