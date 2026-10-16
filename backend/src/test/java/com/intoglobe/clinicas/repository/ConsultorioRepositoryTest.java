@@ -299,6 +299,25 @@ class ConsultorioRepositoryTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    @DisplayName("leer el id de la organización proxy no debe inicializar la asociación LAZY")
+    void getOrganizacionId_shouldNotInitializeTheLazyProxy() {
+        var organizacion = persistirOrganizacion("Clínica Proxy Id");
+        var consultorio = new Consultorio(organizacion, "Consultorio Proxy", null, null);
+        consultorioRepository.saveAndFlush(consultorio);
+        UUID id = consultorio.getId();
+        entityManager.clear();
+
+        var encontrada = consultorioRepository.findById(id).orElseThrow();
+        var organizacionProxy = encontrada.getOrganizacion();
+
+        assertThat(organizacionProxy).isNotNull();
+        assertThat(organizacionProxy.getId()).isNotNull();
+        assertThat(Hibernate.isInitialized(organizacionProxy))
+                .as("leer el identificador del proxy NO debe inicializar la asociación (evita el N+1 al mapear)")
+                .isFalse();
+    }
+
     /**
      * Persiste y hace flush de una organización para que tenga identidad antes de
      * asociarle consultorios.
