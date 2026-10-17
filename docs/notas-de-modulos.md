@@ -75,6 +75,40 @@ contrato único para evitar que cada endpoint inventara su propio formato.
 **Por qué.** Un solo cuerpo de error es el contrato de referencia que los módulos
 1-10 deben copiar, en lugar de reinventar formatos.
 
+### Limitaciones declaradas del contrato de error
+
+Documentadas, **no** resueltas. Ninguna afecta el comportamiento real de la API: las
+respuestas que devuelve son las correctas y están cubiertas por tests.
+
+1. **El "Example Value" de Swagger es el mismo para todos los errores y muestra
+   siempre un 404.** `ErrorResponse` declara `example` en sus componentes (`codigo`
+   `"404"`, `error` `"Not Found"`, y un `mensaje`/`ruta` que además nombran
+   `Organizacion`), y como todos los status comparten el mismo esquema, Swagger UI
+   reutiliza ese ejemplo también en los 400 — y también en los endpoints de
+   `consultorio`. Comprobado **en vivo** el 2026-10-16:
+   `GET /api/v1/organizaciones/abc/consultorios` responde **400** con
+   `"error": "Bad Request"` y `"mensaje": "El parámetro 'organizacionId' tiene un
+   formato inválido"`, mientras la documentación muestra el ejemplo del 404. **El
+   contrato documentado (status + `description`) sí es correcto**; lo que engaña es
+   solo el ejemplo autogenerado.
+   **Remediación si se decide (opción B):** quitar de `ErrorResponse` los `example`
+   que dependen del status y dejar solo `description`, porque **un esquema compartido
+   no puede llevar un ejemplo específico de status**. Coste: un archivo, cero cambio
+   de comportamiento; a cambio Swagger muestra los valores por defecto del tipo,
+   menos ilustrativos pero no falsos. Si un revisor pidiera ejemplos concretos por
+   status, la variante acotada es declarar los ejemplos nombrados **una sola vez** y
+   referenciarlos por `ref` (una línea por status), en lugar de escribirlos en cada
+   `@ApiResponse`.
+2. **Una URL no mapeada no pasa por el contrato de error.** Un 404 por ruta
+   inexistente —por ejemplo `/api/v1/organizaciones/{id}/consultorio` en singular, o
+   cualquier path sin `@RequestMapping`— devuelve la **página por defecto de Spring
+   Boot** (`Whitelabel Error Page`, con su propio formato y su propio timestamp) en
+   lugar de `ErrorResponse`. Es decir: el contrato único cubre las excepciones que el
+   `GlobalExceptionHandler` conoce, **no** los errores de enrutamiento. Observado en
+   vivo el 2026-10-16. Remediación posible cuando se aborde el endurecimiento
+   (mapear `NoHandlerFoundException` o un `ErrorController` propio); **no** se
+   implementa ahora.
+
 ### Decisión 3 — `SecurityConfig` abierto y sin estado: temporal, NO de producción
 
 **Contexto.** El filtro JWT y el RBAC están fuera de alcance en esta fase (R8.1).
