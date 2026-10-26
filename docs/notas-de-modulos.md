@@ -7,9 +7,9 @@ código; **no sustituyen la review humana ni la review externa**.
 ## Estado de lectura rápida
 
 - Módulo `organizacion`: implementación inicial y pruebas enfocadas por tarea.
-  **Todavía no es la referencia de los módulos 1-10**: requiere review línea por
-  línea de Eduardo (`/home/gise/Plan + Cards/Modulo_00_Organizacion.md` §11) y
-  review externa antes de recibir ese estatus.
+  **Todavía no es la referencia de los módulos 1-10**: requiere una revisión línea por
+  línea contra la tarjeta del módulo 00 y una revisión externa antes de recibir ese
+  estatus.
 - La suite completa `sh ./mvnw -q test` pasó en la verificación independiente de T5
   (2026-10-12 01:20 UTC): salida real **0**, **45 tests**, 0 fallos, 0 errores y
   0 omitidos (total calculado desde cuatro reportes Surefire actuales).
@@ -591,7 +591,7 @@ colección cuelga de su dueño inmediato**, el ítem va plano):
 borrado físico**.
 
 **Por qué.** El borrado físico **o está bloqueado o destruye datos sin avisar**. No es una
-preferencia: es el esquema. Es el mismo razonamiento que en `consultorio`, pero acá con tres
+preferencia: es el esquema. Es el mismo razonamiento que en `consultorio`, pero aquí con tres
 comportamientos distintos conviviendo, y uno de ellos (CASCADE sobre horarios) es silencioso
 — el peor de los tres.
 
