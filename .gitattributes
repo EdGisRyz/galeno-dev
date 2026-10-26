@@ -1,0 +1,34 @@
+# Detectar automáticamente archivos de texto
+* text=auto
+
+# Forzar fin de línea Linux (LF) en todo el código Java
+*.java text eol=lf
+
+# Opcional: configuraciones de Maven y propiedades
+*.xml text eol=lf
+*.properties text eol=lf
+*.md text eol=lf
+
+# Frontend (Vite + TypeScript): mismo motivo que el backend, y sin .gitattributes propio
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Scripts de Windows: DEBEN conservar CRLF (cmd.exe rompe con LF)
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binarios: explícitamente fuera de la normalización
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
