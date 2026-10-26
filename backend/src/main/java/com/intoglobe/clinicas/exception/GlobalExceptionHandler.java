@@ -49,6 +49,25 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Responde 400 cuando la actualización intenta reasignar el consultorio de un
+     * médico a otro distinto del actual.
+     *
+     * <p>Es una regla de negocio que depende del estado de la base —compara el
+     * consultorio enviado con el persistido—, así que no es expresable con anotaciones
+     * del DTO y necesita su propio caso. Reusa el mismo constructor de respuesta que el
+     * resto del traductor para no abrir un camino paralelo.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 400 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(CambioDeConsultorioNoPermitidoException.class)
+    public ResponseEntity<ErrorResponse> manejarCambioDeConsultorioNoPermitido(
+            CambioDeConsultorioNoPermitidoException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.BAD_REQUEST, excepcion.getMessage(), peticion);
+    }
+
+    /**
      * Responde 400 con un resumen en español de los campos inválidos.
      *
      * @param excepcion excepción con el resultado del Bean Validation
