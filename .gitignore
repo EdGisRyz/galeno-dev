@@ -11,6 +11,7 @@ dist/
 dist-ssr/
 *.local
 .tools/
+.vite/
 
 # === Logs (universales) ===
 *.log
