@@ -289,7 +289,8 @@ class MedicoRepositoryTest {
         // El consultorio vive en OTRA organización a propósito: H2 aplica las
         // cascadas de una misma sentencia en un orden que violaría la FK
         // medico -> consultorio si ambos se borraran desde la misma organización
-        // (PostgreSQL sí resuelve el borrado en conjunto, H2 no). Con el
+        // (PostgreSQL sí resuelve el borrado en conjunto, H2 no; comportamiento
+        // verificado en PostgreSQL el 2026-10-26 con datos desechables). Con el
         // consultorio fuera del alcance del DELETE, el único efecto cascada que
         // queda por probar es el que nos importa: medico.organizacion_id.
         var otraOrganizacion = persistirOrganizacion("Clínica Cascada Ajena");

@@ -21,6 +21,10 @@ código; **no sustituyen la review humana ni la review externa**.
 - Módulo `consultorio`: alcance **COMPLETO** (dominio, repositorio, DTOs, mapper,
   service, controller, tests y notas). Es el molde de los módulos 3-10. Rutas
   anidadas para colección y planas para ítem: desviación justificada de GAL-001 §5.8.
+- Módulo `medico`: alcance **COMPLETO**. **Cierra los 3 modelos de la rama**
+  (`Organizacion`, `Consultorio`, `Medico`). Misma convención de rutas. Incluye la
+  primera excepción de negocio del proyecto que responde **400** y la primera
+  verificación hecha **a mano contra PostgreSQL** (cascada organización→médicos).
 - Fuente de verdad estructural: la tabla `organizacion` de la migración V1. La
   fuente de verdad de negocio es la tarjeta del módulo. Regla rectora:
   **Prohibido texto inventado.**
@@ -552,5 +556,187 @@ modelo durante el módulo 01. **Tests verdes no equivalen a review aprobada.**
 - [ ] Confirmé que las desviaciones respecto de GAL-001 §4.1 y §5.8 están justificadas, no silenciadas.
 - [ ] Confirmé que los 4 riesgos declarados están declarados y que se dice que documentarlos no los resuelve.
 - [ ] Confirmé que la aserción tautológica está declarada y que su cobertura real vive en el test de repositorio.
+- [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
+- [ ] Confirmé que no hay conteos de tests ni éxito de suite inventados.
+
+---
+
+## medico
+
+Módulo 03 con alcance **COMPLETO** (GAL-001 §6). **Cierra los 3 modelos de la rama**
+(`Organizacion`, `Consultorio`, `Medico`).
+
+Expone cinco endpoints bajo `/api/v1`, con la convención de rutas del proyecto (**la
+colección cuelga de su dueño inmediato**, el ítem va plano):
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| `POST` | `/api/v1/organizaciones/{organizacionId}/medicos` | 201 + `Location` |
+| `GET` | `/api/v1/organizaciones/{organizacionId}/medicos` | 200 (solo activos, por nombre) |
+| `GET` | `/api/v1/medicos/{id}` | 200 |
+| `PUT` | `/api/v1/medicos/{id}` | 200 |
+| `DELETE` | `/api/v1/medicos/{id}` | 204 (baja lógica, idempotente) |
+
+### Decisión 1 — La baja es lógica porque las TRES FK entrantes lo obligan
+
+**Contexto.** Tres tablas apuntan a `medico`, y **cada una se comporta distinto**:
+
+| Tabla | Columna | `ON DELETE` | Efecto de un borrado físico del médico |
+|---|---|---|---|
+| `horario_medico` | `medico_id` NOT NULL | **CASCADE** | sus horarios se borran **en silencio** |
+| `cita` | `medico_id` NOT NULL | **NO ACTION** | **falla** si tiene citas |
+| `usuario` | `medico_id` (nullable) | **SET NULL** | el usuario sobrevive huérfano |
+
+**Decisión.** `desactivar()` pone `activo = false`, es idempotente, y **no hay endpoint de
+borrado físico**.
+
+**Por qué.** El borrado físico **o está bloqueado o destruye datos sin avisar**. No es una
+preferencia: es el esquema. Es el mismo razonamiento que en `consultorio`, pero acá con tres
+comportamientos distintos conviviendo, y uno de ellos (CASCADE sobre horarios) es silencioso
+— el peor de los tres.
+
+### Decisión 2 — `tarifaBase` en `BigDecimal`, y el mínimo es una regla de APLICACIÓN
+
+**Decisión.**
+- `BigDecimal` con `@Column(precision = 10, scale = 2)` (nunca `double`: `0.1 + 0.2 != 0.3`).
+- En el DTO: **`@Digits(integer = 8, fraction = 2)`**, que **espeja la precisión declarada** y
+  convierte un desborde de **500** (el `INSERT` revienta y `DataIntegrityViolationException`
+  no está mapeada) en un **400**.
+- **`@DecimalMin("0.0")`**: V1 **no declara** ningún `CHECK` sobre `tarifa_base`, así que una
+  tarifa negativa **es válida para la base**. Este mínimo es una **regla de aplicación
+  autorizada por Eduardo**, no una regla del esquema, y así queda declarado.
+- La tarifa es **nullable** (V1 lo es): sin `@NotNull`.
+
+**Regla de test vinculante.** Las aserciones de `BigDecimal` se escriben con
+**`isEqualByComparingTo(...)`**, nunca `isEqualTo(...)`: `equals` compara **escala**, y
+`new BigDecimal("500.0").equals(new BigDecimal("500.00"))` es **false**.
+
+### Decisión 3 — El módulo no expone listado de médicos por consultorio
+
+**Decisión.** No existe `GET /consultorios/{id}/medicos`.
+
+**Por qué.** (a) V1 **no tiene índice** sobre `medico.consultorio_id` (el único es
+`idx_medico_org`): ese endpoint haría *seq scan*; (b) el plan §4.1 dicta únicamente
+`listarPorOrganizacion`; (c) sería inventar superficie de API sin demanda comprobada.
+
+**Consecuencia declarada.** Si la UI necesita los médicos de un consultorio, hoy filtra en
+cliente sobre el listado de la organización. Si se vuelve necesidad real, entra junto con el
+índice en el **V2 agrupado**.
+
+### Decisión 4 — Un 400 de negocio usa excepción propia y un caso nuevo en el traductor
+
+**Contexto.** En el `PUT`, un `consultorioId` distinto del actual debe responder **400**. Esa
+condición **depende del estado de la base**, así que no es expresable con anotaciones del
+DTO, y el handler no tenía ningún caso de negocio que devolviera 400.
+
+**Decisión.** El service hace la comparación y lanza
+`exception/CambioDeConsultorioNoPermitidoException`; `GlobalExceptionHandler` suma **un**
+`@ExceptionHandler` que la traduce a 400 reusando el `construir(...)` existente.
+
+**Por qué esta y no otra.** Se evaluaron tres caminos:
+- **Elegida:** excepción **específica** + un caso en el traductor único. El service no sabe de
+  HTTP, el controller no tiene lógica de negocio, y el status se decide en un solo lugar. El
+  criterio decisivo **no es el handler**: es que el tipo propio permite afirmar
+  `isInstanceOf(CambioDeConsultorioNoPermitidoException.class)` en el test, lo que distingue
+  *esa* regla de cualquier otra.
+- **Descartada:** una `ReglaDeNegocioException` genérica. Menos boilerplate, pero el tipo no
+  distingue reglas: un test con `isInstanceOf` pasaría **aunque se lanzara la regla
+equivocada**, y habría que afirmar el texto del mensaje.
+- **Descartada:** validar en el controller. Mete lógica de negocio en la capa web, exige una
+  **consulta extra** y construye un `ErrorResponse` **a mano** — un segundo camino de error,
+  justo lo que prohíbe la Decisión 2 del módulo 00.
+
+**Alcance de la autorización.** Extender el traductor **no** es crear un camino paralelo;
+reestructurarlo o duplicarlo sí. La tarjeta (R20) quedó enmendada para dejarlo explícito.
+
+### Duda abierta
+
+> **¿Un médico puede cambiar de consultorio?**
+
+Hoy **no**: el `PUT` responde 400 si el cuerpo trae un consultorio distinto (Decisión 4). Es
+la opción coherente con «un 200 que no aplica lo pedido miente», pero **no está decidido** si
+la realidad del negocio permite la mudanza. Si la permite, corresponde un método de dominio
+`reasignarConsultorio(...)` y un endpoint propio — **fuera** del alcance de este módulo.
+
+*Contexto de roadmap que este módulo no responde:* ¿`cedula` debe ser única? V1 no lo declara.
+La cédula profesional identifica a una **persona**, lo que sugeriría unicidad global, pero un
+médico que cambie de clínica chocaría si se duplica la fila. Decisión de negocio pendiente; si
+es que sí, entra en el V2 agrupado.
+
+### Riesgos y observaciones declaradas (documentarlos no los resuelve)
+
+1. **`medico` no tiene `created_at`** en V1. La entidad **no** lo mapea: agregarlo sin
+   migración rompería `ddl-auto=validate`. Va al **V2 agrupado**, y cuando llegue habrá que
+   retocar **4 capas** (entidad, `MedicoResponse`, mapper y tests). Un `DEFAULT NOW()` en su
+   momento **no** recupera la fecha real de las filas preexistentes.
+2. **No se valida que el consultorio pertenezca a la organización del médico.** El esquema no
+   lo impide y este módulo tampoco: la API **acepta** esa combinación sin avisar. Es un
+   agujero de **integridad de datos** (distinto del aislamiento por autenticación del T8). Con
+   la API hoy abierta (`permitAll`), no es peor que el resto; el día que llegue RS256 pasa a
+   importar mucho más.
+3. **`cedula` sin `UNIQUE`** (ver la duda de arriba).
+4. **Una tarifa negativa sigue siendo válida para el esquema.** El `@DecimalMin` la frena en
+   la aplicación, pero un `INSERT` directo la acepta.
+5. **El mensaje del 400 de tarifa es genérico.** `@Digits` y `@DecimalMin` no están en el mapa
+   `MENSAJES_POR_CODIGO` del handler, así que ambos responden «El campo tarifaBase es
+   inválido», sin decir **por qué**. Mejorarlo es agregar dos entradas a ese mapa.
+6. **La cascada organización→médicos está VERIFICADA en PostgreSQL** (2026-10-26, con datos
+   desechables sobre una base de desarrollo). `DELETE FROM organizacion` **funciona**. Motivo:
+   `medico.consultorio_id` es **`NO ACTION` y no `RESTRICT`**, y `NO ACTION` verifica la FK **al
+   final de la sentencia**, cuando el médico ya fue borrado por la otra cascada. **H2 diverge**
+   (falla por el orden en que aplica las cascadas), y por eso el test coloca el consultorio en
+   otra organización: así prueba el cascade `medico.organizacion_id` sin que el orden de H2 lo
+   estorbe. La app **nunca** hace ese `DELETE` (todas las bajas son lógicas).
+   **Límite de esta evidencia:** la verificación la hizo el humano responsable **a mano** sobre
+   su PostgreSQL de desarrollo; **no hay script ni salida versionados en el repo**, así que un
+   tercero no puede reproducirla desde el código — la suite automática solo cubre H2. Si en el
+   futuro se quiere una prueba reproducible, el camino es un test de integración contra un
+   PostgreSQL real en CI (Testcontainers o equivalente), que **hoy no existe**.
+7. **Aserciones débiles o tautológicas del test unitario, declaradas:** los `isSameAs(...)`
+   sobre `organizacion`/`consultorio` son inviolables por construcción (`actualizarDatos` no
+   las recibe); funcionan como **canario de evolución de la firma**, no como prueba de
+   comportamiento. `hasMessageContaining("consultorio")` no verifica que se pasen los UUID
+   correctos a la excepción. Y el caso «mismo consultorio procede» no afirma que se hayan
+   aplicado los 5 campos (la brecha la cubre el caso «actualizar ok»).
+
+### Alcance y archivos protegidos
+
+| Área | Estado |
+|------|--------|
+| `src/main/resources/db/migration/**` (V1) | Congelado, sin cambios |
+| `model/Organizacion.java`, `PlanTipo.java`, `ConfiguracionTenant.java`, `Consultorio.java` | Sin cambios |
+| `security/**`, incluido `SecurityConfig.java` | Sin cambios: el módulo 03 no toca seguridad |
+| `config/**` y su `.gitkeep` | Congelado, sin cambios |
+| `ErrorResponse`, `ResourceNotFoundException` | **Reutilizados** sin editar |
+| `GlobalExceptionHandler` | **Extendido**: +1 `@ExceptionHandler`, cero líneas existentes modificadas (R20) |
+| `pom.xml` | Sin cambios: no hizo falta ninguna dependencia nueva |
+| `application*.properties` | Sin cambios |
+
+### Límites de verificación
+
+- Suite completa: `sh ./mvnw -q test` con salida **0**; **139 tests** con 0 fallos, 0 errores y
+  0 omitidos. `-q` **no** imprime `BUILD SUCCESS`: no se inventa esa línea.
+- Los tests cursan sobre **H2 en modo PostgreSQL**. H2 **no** prueba PostgreSQL: la cascada
+  multi-tabla es el caso concreto donde los dos motores **divergen**, y quedó verificado a
+  mano contra PostgreSQL el 2026-10-26.
+- Las violaciones de FK se afirman como `DataIntegrityViolationException` **a través del
+  repositorio**; en los `DELETE` se usa `delete` + `flush`, porque un `DELETE` no tiene
+  `saveAndFlush`.
+- Commits del módulo, en orden: `dominio y repositorio` · `contratos y servicio` · **`API REST y todas estas notas`** (el tercero se crea junto con esta misma unidad).
+
+### Estado nativo del módulo
+
+El módulo 03 **no tiene review nativa aprobada**. RDD sigue **apagado a nivel de clone** por
+decisión de Eduardo. **Tests verdes no equivalen a review aprobada.**
+
+### Checklist de lectura
+
+- [ ] Confirmé que la sección tiene **4 decisiones** y **1 duda**.
+- [ ] Confirmé que la duda (¿puede un médico cambiar de consultorio?) queda abierta y con la salida propuesta.
+- [ ] Confirmé que el `@DecimalMin` está declarado como **regla de aplicación** y no como regla del esquema.
+- [ ] Confirmé que la ausencia de `created_at` está declarada con su costo de 4 capas.
+- [ ] Confirmé que el hueco de integridad (consultorio de otra organización) está declarado y NO resuelto.
+- [ ] Confirmé que la cascada está declarada como **verificada en PostgreSQL** y que **H2 diverge**.
+- [ ] Confirmé que las aserciones débiles están declaradas, no maquilladas.
 - [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
 - [ ] Confirmé que no hay conteos de tests ni éxito de suite inventados.
