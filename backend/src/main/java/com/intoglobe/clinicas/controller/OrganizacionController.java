@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.intoglobe.clinicas.dto.request.OrganizacionRequest;
 import com.intoglobe.clinicas.dto.response.ErrorResponse;
 import com.intoglobe.clinicas.dto.response.OrganizacionResponse;
+import com.intoglobe.clinicas.security.TenantAccessGuard;
 import com.intoglobe.clinicas.service.OrganizacionService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,6 +39,14 @@ import jakarta.validation.Valid;
  * contrato de error sea único en todos los módulos. La cabecera {@code Location}
  * del alta se emite como ruta relativa para que sea correcta detrás de cualquier
  * proxy reverso.</p>
+ *
+ * <p><strong>Tenant y rol (R-SEG-04 a R-SEG-06, ADR-013):</strong> el rol lo exige la
+ * cadena de filtros ({@code ADMIN} para todo el módulo) y el tenant sale del claim. El
+ * {@code {id}} del path solo se acepta si coincide con el {@code tenantId} del token, y
+ * para eso se consulta {@link TenantAccessGuard}: si no coincide, la respuesta es {@code 403}
+ * <em>también</em> para {@code ADMIN}, porque no existe un rol de plataforma (D5 corregido el
+ * 2026-10-29). El {@code id} que se propaga al service es el del token, nunca el del path.
+ * El listado devuelve únicamente la organización del token.</p>
  */
 @RestController
 @RequestMapping("/api/v1/organizaciones")
@@ -45,24 +54,42 @@ import jakarta.validation.Valid;
 public class OrganizacionController {
 
     private final OrganizacionService organizacionService;
+    private final TenantAccessGuard tenantAccessGuard;
 
-    public OrganizacionController(OrganizacionService organizacionService) {
+    public OrganizacionController(OrganizacionService organizacionService,
+            TenantAccessGuard tenantAccessGuard) {
         this.organizacionService = organizacionService;
+        this.tenantAccessGuard = tenantAccessGuard;
     }
 
     /**
-     * Registra una organización nueva.
+     * Registra una organización nueva. Método conservado para el flujo de onboarding: hoy
+     * <strong>no es alcanzable por HTTP</strong>.
+     *
+     * <p><strong>El alta está bloqueada a propósito.</strong> {@code POST /api/v1/organizaciones}
+     * responde {@code 403} para {@code ADMIN}, {@code MEDICO} y {@code PACIENTE} porque, con el
+     * aislamiento por tenant aplicado, la organización recién creada quedaría inalcanzable para
+     * quien la crea —el {@code Location} del {@code 201} respondería {@code 403} a la lectura, al
+     * alta de hijos y a la baja— y dejaría una fila activa huérfana. Es una decisión de producto
+     * del 2026-10-29 y la regla vive en {@code SecurityConfig}, que documenta el bloqueo y pide no
+     * reabrirlo sin el onboarding. El método, su firma y su lógica se conservan intactos para ese
+     * flujo (Sprint 2), que es cuando este contrato vuelve a publicar el {@code 201}.</p>
+     *
+     * <p><strong>El {@code 400} ya no se documenta porque no es alcanzable:</strong> la cadena de
+     * filtros deniega antes de deserializar y validar, así que ni un JSON mal formado ni un campo
+     * inválido llegan a producir un {@code 400} en esta ruta. Las reglas de
+     * {@link OrganizacionRequest} (Bean Validation, enum y fecha) siguen cubiertas a través de
+     * {@code PUT /organizaciones/{id}}, que recibe el mismo DTO y sigue permitido; documentar aquí
+     * un {@code 400} que nadie puede recibir sería exactamente el contrato que este cambio corrige.</p>
      *
      * @param request datos de entrada validados
      * @return 201 con la organización creada y la cabecera {@code Location} hacia su recurso
      */
     @PostMapping
-    @Operation(summary = "Crear organización",
-            description = "Registra una organización nueva y devuelve su representación junto con la cabecera Location apuntando al recurso creado.")
+    @Operation(summary = "Crear organización (bloqueada temporalmente)",
+            description = "El alta de organizaciones está bloqueada a propósito: responde 403 para todos los roles hasta que exista el flujo de onboarding dedicado (Sprint 2). La regla y su justificación están en SecurityConfig.")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Organización creada",
-                    content = @Content(schema = @Schema(implementation = OrganizacionResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos, JSON mal formado, enum o fecha inválidos",
+            @ApiResponse(responseCode = "403", description = "El alta de organizaciones está bloqueada para todos los roles hasta que exista el flujo de onboarding dedicado",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<OrganizacionResponse> crear(@Valid @RequestBody OrganizacionRequest request) {
@@ -71,9 +98,9 @@ public class OrganizacionController {
     }
 
     /**
-     * Consulta una organización existente.
+     * Consulta una organización existente de la propia organización del token.
      *
-     * @param id identificador de la organización
+     * @param id identificador de la organización; debe ser el {@code tenantId} del token
      * @return 200 con la organización encontrada
      */
     @GetMapping("/{id}")
@@ -90,29 +117,33 @@ public class OrganizacionController {
     public ResponseEntity<OrganizacionResponse> buscarPorId(
             @Parameter(description = "Identificador UUID de la organización.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID id) {
-        return ResponseEntity.ok(organizacionService.buscarPorId(id));
+        // El id que se consulta es el del claim; el del path solo sirve de comprobación cruzada.
+        return ResponseEntity.ok(organizacionService.buscarPorId(tenantAccessGuard.exigirTenantDeLaRuta(id)));
     }
 
     /**
-     * Lista las organizaciones activas ordenadas por nombre.
+     * Lista las organizaciones activas visibles para el token.
      *
-     * @return 200 con el arreglo de organizaciones activas
+     * <p>Resuelve la pregunta abierta R8.3(a): el endpoint ya no enumera la plataforma y
+     * devuelve exclusivamente la organización del token, en un arreglo de cero o un elemento.</p>
+     *
+     * @return 200 con el arreglo de organizaciones activas del token
      */
     @GetMapping
     @Operation(summary = "Listar organizaciones activas",
-            description = "Devuelve todas las organizaciones activas ordenadas alfabéticamente por nombre.")
+            description = "Devuelve la organización activa del token. El endpoint ya no enumera organizaciones de otros tenants.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Listado de organizaciones activas",
+            @ApiResponse(responseCode = "200", description = "Organización activa del token, en un arreglo de cero o un elemento",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = OrganizacionResponse.class))))
     })
     public ResponseEntity<List<OrganizacionResponse>> listarActivas() {
-        return ResponseEntity.ok(organizacionService.listarActivas());
+        return ResponseEntity.ok(organizacionService.listarActivas(tenantAccessGuard.tenantActual()));
     }
 
     /**
      * Reemplaza los campos editables de una organización.
      *
-     * @param id      identificador de la organización
+     * @param id      identificador de la organización; debe ser el {@code tenantId} del token
      * @param request datos de entrada validados
      * @return 200 con la organización actualizada
      */
@@ -131,14 +162,15 @@ public class OrganizacionController {
             @Parameter(description = "Identificador UUID de la organización a actualizar.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID id,
             @Valid @RequestBody OrganizacionRequest request) {
-        return ResponseEntity.ok(organizacionService.actualizar(id, request));
+        return ResponseEntity.ok(
+                organizacionService.actualizar(tenantAccessGuard.exigirTenantDeLaRuta(id), request));
     }
 
     /**
      * Aplica la baja lógica de una organización. Es idempotente: repetir la
      * operación sobre una organización ya inactiva sigue devolviendo 204.
      *
-     * @param id identificador de la organización
+     * @param id identificador de la organización; debe ser el {@code tenantId} del token
      * @return 204 sin cuerpo
      */
     @DeleteMapping("/{id}")
@@ -155,7 +187,7 @@ public class OrganizacionController {
     public ResponseEntity<Void> desactivar(
             @Parameter(description = "Identificador UUID de la organización a desactivar.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID id) {
-        organizacionService.desactivar(id);
+        organizacionService.desactivar(tenantAccessGuard.exigirTenantDeLaRuta(id));
         return ResponseEntity.noContent().build();
     }
 }

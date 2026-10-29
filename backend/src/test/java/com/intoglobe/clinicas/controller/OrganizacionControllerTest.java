@@ -4,9 +4,13 @@ import java.lang.reflect.Method;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -43,7 +47,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,6 +61,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * cadena con {@link DynamicPropertySource}: no se usan post-procesadores de seguridad ni
  * usuarios simulados, así que el filtro JWT, el entry point y el contrato de error siguen
  * siendo los reales.</p>
+ *
+ * <p><strong>El alta ({@code POST}) está bloqueada por la cadena</strong> (decisión de producto
+ * del 2026-10-29, ver {@link SecurityConfig}): aquí se fija que responde {@code 403} y que el
+ * service nunca se invoca, con un cuerpo válido y con los cuerpos que el DTO rechazaría, porque
+ * la denegación ocurre antes de deserializar. Por eso las pruebas de {@code OrganizacionRequest}
+ * (Bean Validation, enum y fecha) viven en {@code PUT /organizaciones/{id}}, que recibe el mismo
+ * DTO y sigue permitido; y la lógica de alta se prueba en {@code OrganizacionServiceTest} y
+ * {@code OrganizacionRepositoryTest}, donde el endpoint no interviene.</p>
  */
 @WebMvcTest(OrganizacionController.class)
 @ActiveProfiles("test")
@@ -75,7 +86,12 @@ class OrganizacionControllerTest {
     private static final String MENSAJE_ID_INVALIDO =
             "El parámetro 'id' tiene un formato inválido";
 
-    private static final String TOKEN = ClaveRsaDePrueba.token().compactar();
+    /**
+     * Token {@code ADMIN} cuyo {@code tenantId} es exactamente el {@code id} que usan las
+     * rutas de estas pruebas: así el path coincide con el claim y lo que se ejerce es el
+     * contrato del endpoint, no la guardia de tenant.
+     */
+    private static final String TOKEN = ClaveRsaDePrueba.tokenPara("ADMIN", ID);
     @Autowired
     private MockMvc mockMvc;
 
@@ -83,68 +99,68 @@ class OrganizacionControllerTest {
     private OrganizacionService organizacionService;
 
     @Test
-    @DisplayName("POST devuelve 201, Location relativo versionado y cuerpo de la organización")
-    void crear_shouldReturn201WithLocationAndBody() throws Exception {
-        when(organizacionService.crear(any(OrganizacionRequest.class)))
-                .thenReturn(respuesta(ID, "Clínica San Rafael", PlanTipo.CLINICA, "sub-rafael", TRIAL_HASTA, true));
-
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("POST queda bloqueado por la cadena: 403 con ErrorResponse y el service nunca se invoca")
+    void crear_shouldReturn403WithTheErrorContract_andNeverReachTheService() throws Exception {
+        // Decisión de producto del 2026-10-29: el alta de organizaciones está bloqueada para
+        // los tres roles porque, con el aislamiento por tenant aplicado (ADR-013), la
+        // organización recién creada quedaría inalcanzable y dejaría una fila huérfana activa.
+        // El endpoint y su lógica se conservan para el flujo de alta dedicado (Sprint 2).
+        afirmarAccesoDenegado(perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"nombre":"Clínica San Rafael","plan":"CLINICA","subscriptionId":"sub-rafael","trialHasta":"2026-12-31T23:59:59-05:00"}
-                                """))
-                .andExpect(status().isCreated())
-                .andExpect(header().string("Location", "/api/v1/organizaciones/" + ID))
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.id").value(ID.toString()))
-                .andExpect(jsonPath("$.nombre").value("Clínica San Rafael"))
-                .andExpect(jsonPath("$.plan").value("CLINICA"))
-                .andExpect(jsonPath("$.subscriptionId").value("sub-rafael"))
-                .andExpect(jsonPath("$.activo").value(true));
+                                {"nombre":"Clínica San Rafael","plan":"CLINICA","subscriptionId":"sub-rafael"}
+                                """)),
+                "/api/v1/organizaciones");
+        verifyNoInteractions(organizacionService);
     }
 
-    @Test
-    @DisplayName("POST acepta subscriptionId opcional de longitud máxima 100")
-    void crear_shouldReturn201_whenSubscriptionIdHasMaxLength() throws Exception {
-        String subscriptionId = "s".repeat(100);
-        when(organizacionService.crear(any(OrganizacionRequest.class)))
-                .thenReturn(respuesta(ID, "Clínica Límite", PlanTipo.SOLO, subscriptionId, null, true));
-
-        perform(post("/api/v1/organizaciones")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"nombre":"Clínica Límite","plan":"SOLO","subscriptionId":"%s"}
-                                """.formatted(subscriptionId)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.subscriptionId").value(subscriptionId));
+    /**
+     * Cuerpos representativos del alta: válidos y con cada uno de los defectos que el DTO
+     * rechaza. Ninguno puede llegar a deserializarse ni validarse porque la denegación ocurre
+     * en la cadena de filtros, antes del controlador.
+     *
+     * @return descripción del cuerpo y su JSON
+     */
+    static Stream<Arguments> cuerposDeAltaBloqueada() {
+        return Stream.of(
+                Arguments.of("válido", """
+                        {"nombre":"Clínica Nueva","plan":"SOLO"}
+                        """),
+                Arguments.of("sin plan", """
+                        {"nombre":"Clínica Sin Plan"}
+                        """),
+                Arguments.of("nombre en blanco", """
+                        {"nombre":"   ","plan":"CLINICA"}
+                        """),
+                Arguments.of("nombre de 121 caracteres", """
+                        {"nombre":"%s","plan":"SOLO"}
+                        """.formatted("n".repeat(121))),
+                Arguments.of("subscriptionId de 101 caracteres", """
+                        {"nombre":"Clínica Límite","plan":"SOLO","subscriptionId":"%s"}
+                        """.formatted("s".repeat(101))),
+                Arguments.of("enum de plan inválido", """
+                        {"nombre":"Clínica Premium","plan":"PREMIUM"}
+                        """),
+                Arguments.of("fecha inválida", """
+                        {"nombre":"Clínica Fecha","plan":"CLINICA","trialHasta":"31-12-2026"}
+                        """),
+                Arguments.of("JSON mal formado", "{\"nombre\":\"Clínica Rota\",\"plan\":"));
     }
 
-    @Test
-    @DisplayName("POST deserializa el request y entrega los opcionales nulos cuando se omiten")
-    void crear_shouldBindRequestWithNullOptionals_whenTheyAreOmitted() throws Exception {
-        when(organizacionService.crear(any(OrganizacionRequest.class)))
-                .thenReturn(respuesta(ID, "Consultorio Solo", PlanTipo.SOLO, null, null, true));
-        var captor = org.mockito.ArgumentCaptor.forClass(OrganizacionRequest.class);
-
-        perform(post("/api/v1/organizaciones")
+    @ParameterizedTest(name = "POST con cuerpo {0} responde 403 sin deserializar ni validar")
+    @MethodSource("cuerposDeAltaBloqueada")
+    void crear_shouldReturn403_regardlessOfTheBody(String descripcion, String cuerpo) throws Exception {
+        afirmarAccesoDenegado(perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"nombre":"Consultorio Solo","plan":"SOLO"}
-                                """))
-                .andExpect(status().isCreated());
-
-        verify(organizacionService).crear(captor.capture());
-        var enviado = captor.getValue();
-        assertThat(enviado.nombre()).isEqualTo("Consultorio Solo");
-        assertThat(enviado.plan()).isEqualTo(PlanTipo.SOLO);
-        assertThat(enviado.subscriptionId()).isNull();
-        assertThat(enviado.trialHasta()).isNull();
+                        .content(cuerpo)),
+                "/api/v1/organizaciones");
+        verifyNoInteractions(organizacionService);
     }
 
     @Test
     @DisplayName("Las rutas solo existen bajo /api/v1/organizaciones")
     void rutas_shouldExposeOnlyTheVersionedV1Path() throws Exception {
-        when(organizacionService.listarActivas()).thenReturn(java.util.List.of());
+        when(organizacionService.listarActivas(ID)).thenReturn(java.util.List.of());
 
         perform(get("/api/organizaciones"))
                 .andExpect(status().isNotFound());
@@ -170,19 +186,51 @@ class OrganizacionControllerTest {
     }
 
     @Test
-    @DisplayName("GET devuelve 200 con el arreglo de organizaciones activas")
+    @DisplayName("GET devuelve 200 con el arreglo de organizaciones activas del token")
     void listarActivas_shouldReturn200WithArray() throws Exception {
-        when(organizacionService.listarActivas()).thenReturn(java.util.List.of(
-                respuesta(UUID.randomUUID(), "Alfa Salud", PlanTipo.SOLO, null, null, true),
-                respuesta(UUID.randomUUID(), "Beta Médica", PlanTipo.CLINICA, "sub-beta", TRIAL_HASTA, true)));
+        // R8.3(a): el listado solo puede devolver la organización del token, así que el
+        // contrato es un arreglo de cero o un elemento; el service recibe el tenant del claim.
+        when(organizacionService.listarActivas(ID)).thenReturn(java.util.List.of(
+                respuesta(ID, "Alfa Salud", PlanTipo.SOLO, null, null, true)));
 
         perform(get("/api/v1/organizaciones"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(ID.toString()))
                 .andExpect(jsonPath("$[0].nombre").value("Alfa Salud"))
-                .andExpect(jsonPath("$[1].nombre").value("Beta Médica"))
                 .andExpect(jsonPath("$[*].activo", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(true))));
+        verify(organizacionService).listarActivas(ID);
+    }
+
+    @Test
+    @DisplayName("El listado con token de un tenant sin organización activa devuelve 200 con arreglo vacío")
+    void listarActivas_shouldReturn200WithEmptyArray_whenTheTenantHasNoActiveOrganization() throws Exception {
+        when(organizacionService.listarActivas(ID)).thenReturn(java.util.List.of());
+
+        perform(get("/api/v1/organizaciones"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("GET/PUT/DELETE con el id de otra organización responden 403 aunque el rol sea ADMIN")
+    void rutasPorId_shouldReturn403_whenThePathTenantDiffersFromTheClaim() throws Exception {
+        UUID organizacionAjena = UUID.randomUUID();
+
+        afirmarAccesoDenegado(perform(get("/api/v1/organizaciones/{id}", organizacionAjena)),
+                "/api/v1/organizaciones/" + organizacionAjena);
+        afirmarAccesoDenegado(perform(put("/api/v1/organizaciones/{id}", organizacionAjena)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Clínica Ajena","plan":"SOLO"}
+                                """)),
+                "/api/v1/organizaciones/" + organizacionAjena);
+        afirmarAccesoDenegado(perform(delete("/api/v1/organizaciones/{id}", organizacionAjena)),
+                "/api/v1/organizaciones/" + organizacionAjena);
+
+        verifyNoInteractions(organizacionService);
     }
 
     @Test
@@ -268,9 +316,47 @@ class OrganizacionControllerTest {
     }
 
     @Test
-    @DisplayName("POST con nombre en blanco devuelve 400 con mensaje de negocio en español")
-    void crear_shouldReturn400_whenNombreIsBlank() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT /{id} acepta subscriptionId opcional de longitud máxima 100")
+    void actualizar_shouldReturn200_whenSubscriptionIdHasMaxLength() throws Exception {
+        String subscriptionId = "s".repeat(100);
+        when(organizacionService.actualizar(any(UUID.class), any(OrganizacionRequest.class)))
+                .thenReturn(respuesta(ID, "Clínica Límite", PlanTipo.SOLO, subscriptionId, null, true));
+
+        perform(put("/api/v1/organizaciones/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Clínica Límite","plan":"SOLO","subscriptionId":"%s"}
+                                """.formatted(subscriptionId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subscriptionId").value(subscriptionId));
+    }
+
+    @Test
+    @DisplayName("PUT /{id} deserializa el request y entrega los opcionales nulos cuando se omiten")
+    void actualizar_shouldBindRequestWithNullOptionals_whenTheyAreOmitted() throws Exception {
+        when(organizacionService.actualizar(any(UUID.class), any(OrganizacionRequest.class)))
+                .thenReturn(respuesta(ID, "Consultorio Solo", PlanTipo.SOLO, null, null, true));
+        var captor = org.mockito.ArgumentCaptor.forClass(OrganizacionRequest.class);
+
+        perform(put("/api/v1/organizaciones/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio Solo","plan":"SOLO"}
+                                """))
+                .andExpect(status().isOk());
+
+        verify(organizacionService).actualizar(any(UUID.class), captor.capture());
+        var enviado = captor.getValue();
+        assertThat(enviado.nombre()).isEqualTo("Consultorio Solo");
+        assertThat(enviado.plan()).isEqualTo(PlanTipo.SOLO);
+        assertThat(enviado.subscriptionId()).isNull();
+        assertThat(enviado.trialHasta()).isNull();
+    }
+
+    @Test
+    @DisplayName("PUT con nombre en blanco devuelve 400 con mensaje de negocio en español")
+    void actualizar_shouldReturn400_whenNombreIsBlank() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"   ","plan":"CLINICA"}
@@ -279,14 +365,14 @@ class OrganizacionControllerTest {
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
                 .andExpect(jsonPath("$.mensaje").value("El campo nombre no puede estar vacío"))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
         verifyNoInteractions(organizacionService);
     }
 
     @Test
-    @DisplayName("POST con nombre de más de 120 caracteres devuelve 400")
-    void crear_shouldReturn400_whenNombreIsTooLong() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT con nombre de más de 120 caracteres devuelve 400")
+    void actualizar_shouldReturn400_whenNombreIsTooLong() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"%s","plan":"SOLO"}
@@ -294,13 +380,13 @@ class OrganizacionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.mensaje").value("El campo nombre tiene una longitud fuera del rango permitido"))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
     }
 
     @Test
-    @DisplayName("POST con subscriptionId de más de 100 caracteres devuelve 400")
-    void crear_shouldReturn400_whenSubscriptionIdIsTooLong() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT con subscriptionId de más de 100 caracteres devuelve 400")
+    void actualizar_shouldReturn400_whenSubscriptionIdIsTooLong() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Límite","plan":"SOLO","subscriptionId":"%s"}
@@ -308,13 +394,13 @@ class OrganizacionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.mensaje").value("El campo subscriptionId tiene una longitud fuera del rango permitido"))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
     }
 
     @Test
-    @DisplayName("POST con plan nulo devuelve 400")
-    void crear_shouldReturn400_whenPlanIsNull() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT con plan nulo devuelve 400")
+    void actualizar_shouldReturn400_whenPlanIsNull() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Sin Plan"}
@@ -322,26 +408,26 @@ class OrganizacionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.mensaje").value("El campo plan es obligatorio"))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
     }
 
     @Test
-    @DisplayName("POST con JSON mal formado devuelve 400 sin detalles internos del parser")
-    void crear_shouldReturn400_whenJsonIsMalformed() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT con JSON mal formado devuelve 400 sin detalles internos del parser")
+    void actualizar_shouldReturn400_whenJsonIsMalformed() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Clínica Rota\",\"plan\":"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
                 .andExpect(jsonPath("$.mensaje").value(MENSAJE_CUERPO_MAL_FORMADO))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
     }
 
     @Test
-    @DisplayName("POST con enum de plan inválido devuelve 400 sin detalles internos")
-    void crear_shouldReturn400_whenPlanEnumIsInvalid() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT con enum de plan inválido devuelve 400 sin detalles internos")
+    void actualizar_shouldReturn400_whenPlanEnumIsInvalid() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Premium","plan":"PREMIUM"}
@@ -349,13 +435,13 @@ class OrganizacionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.mensaje").value(MENSAJE_CUERPO_MAL_FORMADO))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
     }
 
     @Test
-    @DisplayName("POST con fecha inválida devuelve 400 sin detalles internos")
-    void crear_shouldReturn400_whenTrialHastaIsInvalid() throws Exception {
-        perform(post("/api/v1/organizaciones")
+    @DisplayName("PUT con fecha inválida devuelve 400 sin detalles internos")
+    void actualizar_shouldReturn400_whenTrialHastaIsInvalid() throws Exception {
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Fecha","plan":"CLINICA","trialHasta":"31-12-2026"}
@@ -363,7 +449,7 @@ class OrganizacionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.mensaje").value(MENSAJE_CUERPO_MAL_FORMADO))
-                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones"));
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ID));
     }
 
     @Test
@@ -412,10 +498,19 @@ class OrganizacionControllerTest {
         assertThat(sinCuerpo.content()[0].array().schema().implementation()).isEqualTo(Void.class);
 
         Method alta = OrganizacionController.class.getMethod("crear", OrganizacionRequest.class);
-        ApiResponse creado = buscarApiResponse(alta, "201");
-        assertThat(creado.content()[0].schema().implementation()).isEqualTo(OrganizacionResponse.class);
-        assertThat(buscarApiResponse(alta, "400").content()[0].schema().implementation())
+        ApiResponse bloqueada = buscarApiResponse(alta, "403");
+        assertThat(bloqueada.content()).hasSize(1);
+        assertThat(bloqueada.content()[0].schema().implementation())
                 .isEqualTo(com.intoglobe.clinicas.dto.response.ErrorResponse.class);
+        assertThat(codigosDeRespuesta(alta))
+                .as("el alta está bloqueada por la cadena: no puede publicar un 201 ni un 400 que nadie recibe")
+                .doesNotContain("201", "400");
+    }
+
+    private static java.util.List<String> codigosDeRespuesta(Method metodo) {
+        return Arrays.stream(metodo.getAnnotationsByType(ApiResponse.class))
+                .map(ApiResponse::responseCode)
+                .toList();
     }
 
     private static ApiResponse buscarApiResponse(Method metodo, String codigo) {
@@ -444,6 +539,26 @@ class OrganizacionControllerTest {
         registro.add("auth.public.key", () -> ClaveRsaDePrueba.CLAVE_PUBLICA_BASE64);
         registro.add("auth.issuer", () -> ClaveRsaDePrueba.EMISOR);
         registro.add("auth.audience", () -> ClaveRsaDePrueba.AUDIENCIA);
+    }
+
+    /**
+     * Afirma el contrato del {@code 403} que produce una discrepancia entre el tenant del
+     * path y el del claim: estado, forma del {@code ErrorResponse} y mensaje compartido con
+     * la cadena de filtros.
+     *
+     * @param resultado resultado de la petición
+     * @param ruta      ruta esperada en el campo {@code ruta}
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    private static void afirmarAccesoDenegado(ResultActions resultado, String ruta) throws Exception {
+        resultado
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.codigo").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.mensaje").value(
+                        com.intoglobe.clinicas.security.SecurityErrorResponder.MENSAJE_ACCESO_DENEGADO))
+                .andExpect(jsonPath("$.ruta").value(ruta));
     }
 
     /**

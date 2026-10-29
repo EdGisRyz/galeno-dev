@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.intoglobe.clinicas.dto.request.ConsultorioRequest;
 import com.intoglobe.clinicas.dto.response.ConsultorioResponse;
 import com.intoglobe.clinicas.dto.response.ErrorResponse;
+import com.intoglobe.clinicas.security.TenantAccessGuard;
 import com.intoglobe.clinicas.service.ConsultorioService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,6 +48,14 @@ import jakarta.validation.Valid;
  * cabecera {@code Location} del alta apunta siempre a la ruta plana del ítem y se
  * emite como ruta relativa para que sea correcta detrás de cualquier proxy
  * reverso.</p>
+ *
+ * <p><strong>Tenant y rol (R-SEG-04 a R-SEG-06, ADR-013):</strong> la cadena de filtros
+ * exige {@code ADMIN} para crear, actualizar y desactivar, y admite {@code MEDICO} solo en
+ * las lecturas. El {@code organizacionId} del path se acepta únicamente si coincide con el
+ * {@code tenantId} del token —{@link TenantAccessGuard} responde {@code 403} en caso
+ * contrario, sin exención de {@code ADMIN}— y es el tenant del claim el que se propaga al
+ * service. En las rutas planas el tenant también sale del claim, y un consultorio de otra
+ * organización responde {@code 404} para no revelar que existe.</p>
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -54,19 +63,23 @@ import jakarta.validation.Valid;
 public class ConsultorioController {
 
     private final ConsultorioService consultorioService;
+    private final TenantAccessGuard tenantAccessGuard;
 
-    public ConsultorioController(ConsultorioService consultorioService) {
+    public ConsultorioController(ConsultorioService consultorioService,
+            TenantAccessGuard tenantAccessGuard) {
         this.consultorioService = consultorioService;
+        this.tenantAccessGuard = tenantAccessGuard;
     }
 
     /**
      * Registra un consultorio dentro de la organización indicada en el path.
      *
      * <p>La organización no se recibe en el cuerpo: llega por la ruta porque un
-     * consultorio no puede cambiar de dueño. Ese mismo id lo resuelve el service
-     * contra la base; si no existe, la excepción de negocio se traduce en 404.</p>
+     * consultorio no puede cambiar de dueño. El path se valida contra el claim del token y,
+     * si coincide, el service resuelve el tenant del token contra la base; si no existe, la
+     * excepción de negocio se traduce en 404.</p>
      *
-     * @param organizacionId organización dueña, tomada del path de la petición
+     * @param organizacionId organización dueña tomada del path, validada contra el token
      * @param request        datos de entrada validados
      * @return 201 con el consultorio creado y la cabecera {@code Location} hacia su recurso
      */
@@ -85,7 +98,7 @@ public class ConsultorioController {
             @Parameter(description = "Identificador UUID de la organización dueña del consultorio.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID organizacionId,
             @Valid @RequestBody ConsultorioRequest request) {
-        var creado = consultorioService.crear(organizacionId, request);
+        var creado = consultorioService.crear(tenantAccessGuard.exigirTenantDeLaRuta(organizacionId), request);
         return ResponseEntity.created(URI.create("/api/v1/consultorios/" + creado.id())).body(creado);
     }
 
@@ -96,7 +109,7 @@ public class ConsultorioController {
      * inexistente responde 404 en vez de un {@code 200 []} que ocultaría el error
      * del cliente. Esa comprobación vive en el service, no aquí.</p>
      *
-     * @param organizacionId organización dueña de los consultorios
+     * @param organizacionId organización dueña de los consultorios, validada contra el token
      * @return 200 con el arreglo de consultorios activos
      */
     @GetMapping("/organizaciones/{organizacionId}/consultorios")
@@ -113,11 +126,15 @@ public class ConsultorioController {
     public ResponseEntity<List<ConsultorioResponse>> listarPorOrganizacion(
             @Parameter(description = "Identificador UUID de la organización cuyos consultorios se listan.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID organizacionId) {
-        return ResponseEntity.ok(consultorioService.listarPorOrganizacion(organizacionId));
+        return ResponseEntity.ok(
+                consultorioService.listarPorOrganizacion(tenantAccessGuard.exigirTenantDeLaRuta(organizacionId)));
     }
 
     /**
-     * Consulta un consultorio existente.
+     * Consulta un consultorio existente de la propia organización del token.
+     *
+     * <p>Un consultorio de otra organización responde {@code 404}, igual que un
+     * identificador inexistente: el mensaje de error no confirma que el recurso exista.</p>
      *
      * @param id identificador del consultorio
      * @return 200 con el consultorio encontrado
@@ -136,7 +153,7 @@ public class ConsultorioController {
     public ResponseEntity<ConsultorioResponse> buscarPorId(
             @Parameter(description = "Identificador UUID del consultorio.", example = "7d2e4c18-5b6a-4f3d-8e01-9a2b3c4d5e6f")
             @PathVariable UUID id) {
-        return ResponseEntity.ok(consultorioService.buscarPorId(id));
+        return ResponseEntity.ok(consultorioService.buscarPorId(id, tenantAccessGuard.tenantActual()));
     }
 
     /**
@@ -165,7 +182,8 @@ public class ConsultorioController {
             @Parameter(description = "Identificador UUID del consultorio a actualizar.", example = "7d2e4c18-5b6a-4f3d-8e01-9a2b3c4d5e6f")
             @PathVariable UUID id,
             @Valid @RequestBody ConsultorioRequest request) {
-        return ResponseEntity.ok(consultorioService.actualizar(id, request));
+        return ResponseEntity.ok(
+                consultorioService.actualizar(id, tenantAccessGuard.tenantActual(), request));
     }
 
     /**
@@ -190,7 +208,7 @@ public class ConsultorioController {
     public ResponseEntity<Void> desactivar(
             @Parameter(description = "Identificador UUID del consultorio a desactivar.", example = "7d2e4c18-5b6a-4f3d-8e01-9a2b3c4d5e6f")
             @PathVariable UUID id) {
-        consultorioService.desactivar(id);
+        consultorioService.desactivar(id, tenantAccessGuard.tenantActual());
         return ResponseEntity.noContent().build();
     }
 }

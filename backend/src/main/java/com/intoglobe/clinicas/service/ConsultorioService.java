@@ -29,6 +29,13 @@ import com.intoglobe.clinicas.repository.OrganizacionRepository;
  * extra, porque aporta la entidad que el mapper necesita. En el listado anidado la
  * existencia del padre es parte del contrato: un id inexistente responde 404 y no
  * un {@code 200 []} que ocultaría el error del cliente.</p>
+ *
+ * <p><strong>Aislamiento por tenant (R-SEG-04, D5.6):</strong> las tres operaciones por id
+ * reciben el {@code tenantId} del token y consultan con
+ * {@link ConsultorioRepository#buscarPorIdYOrganizacion}. Un consultorio de otra
+ * organización responde {@code 404}, igual que un identificador inexistente, para no
+ * revelar que existe. El tenant lo aporta el llamador desde el claim del token —nunca desde
+ * el path sin validar— porque el controlador ya lo obtuvo de {@code TenantAccessGuard}.</p>
  */
 @Service
 public class ConsultorioService {
@@ -45,7 +52,8 @@ public class ConsultorioService {
     /**
      * Crea un consultorio dentro de la organización indicada.
      *
-     * @param organizacionId organización dueña, tomada del path de la petición
+     * @param organizacionId organización dueña: el tenant del token, ya validado contra el
+     *                       path por el controlador
      * @param request        datos de entrada validados
      * @return representación del consultorio persistido
      * @throws ResourceNotFoundException si no existe una organización con ese id
@@ -60,15 +68,18 @@ public class ConsultorioService {
     }
 
     /**
-     * Busca un consultorio por su identificador.
+     * Busca un consultorio por su identificador dentro del tenant indicado.
      *
-     * @param id identificador del consultorio
+     * @param id       identificador del consultorio
+     * @param tenantId organización del token de la petición
      * @return representación del consultorio encontrado
-     * @throws ResourceNotFoundException si no existe un consultorio con ese id
+     * @throws ResourceNotFoundException si no existe un consultorio con ese id <em>en ese
+     *                                   tenant</em>; un consultorio de otra organización cae
+     *                                   aquí a propósito, para no revelar que existe
      */
     @Transactional(readOnly = true)
-    public ConsultorioResponse buscarPorId(UUID id) {
-        return ConsultorioMapper.aResponse(buscarOFallar(id));
+    public ConsultorioResponse buscarPorId(UUID id, UUID tenantId) {
+        return ConsultorioMapper.aResponse(buscarDelTenant(id, tenantId));
     }
 
     /**
@@ -97,14 +108,15 @@ public class ConsultorioService {
      * <p>La organización nunca cambia: el request no la contiene y el mapper no la
      * toca, porque mover un consultorio dejaría huérfanos a sus médicos y citas.</p>
      *
-     * @param id      identificador del consultorio a actualizar
-     * @param request datos de entrada validados
+     * @param id       identificador del consultorio a actualizar
+     * @param tenantId organización del token de la petición
+     * @param request  datos de entrada validados
      * @return representación del consultorio actualizado
-     * @throws ResourceNotFoundException si no existe un consultorio con ese id
+     * @throws ResourceNotFoundException si no existe un consultorio con ese id en ese tenant
      */
     @Transactional
-    public ConsultorioResponse actualizar(UUID id, ConsultorioRequest request) {
-        var consultorio = buscarOFallar(id);
+    public ConsultorioResponse actualizar(UUID id, UUID tenantId, ConsultorioRequest request) {
+        var consultorio = buscarDelTenant(id, tenantId);
         ConsultorioMapper.actualizarEntidad(consultorio, request);
         var guardado = consultorioRepository.save(consultorio);
         return ConsultorioMapper.aResponse(guardado);
@@ -114,25 +126,27 @@ public class ConsultorioService {
      * Aplica la baja lógica de un consultorio. Es idempotente: desactivar un
      * consultorio ya inactivo no produce error.
      *
-     * @param id identificador del consultorio a desactivar
-     * @throws ResourceNotFoundException si no existe un consultorio con ese id
+     * @param id       identificador del consultorio a desactivar
+     * @param tenantId organización del token de la petición
+     * @throws ResourceNotFoundException si no existe un consultorio con ese id en ese tenant
      */
     @Transactional
-    public void desactivar(UUID id) {
-        var consultorio = buscarOFallar(id);
+    public void desactivar(UUID id, UUID tenantId) {
+        var consultorio = buscarDelTenant(id, tenantId);
         consultorio.desactivar();
         consultorioRepository.save(consultorio);
     }
 
     /**
-     * Recupera la entidad o lanza la excepción de negocio correspondiente.
+     * Recupera el consultorio del tenant indicado o lanza la excepción de negocio.
      *
-     * @param id identificador buscado
-     * @return la entidad encontrada
-     * @throws ResourceNotFoundException si no existe un consultorio con ese id
+     * @param id       identificador buscado
+     * @param tenantId organización del token de la petición
+     * @return la entidad encontrada en ese tenant
+     * @throws ResourceNotFoundException si no existe en ese tenant
      */
-    private Consultorio buscarOFallar(UUID id) {
-        return consultorioRepository.findById(id)
+    private Consultorio buscarDelTenant(UUID id, UUID tenantId) {
+        return consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Consultorio", id));
     }
 }

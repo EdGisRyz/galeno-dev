@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.intoglobe.clinicas.dto.request.MedicoRequest;
 import com.intoglobe.clinicas.dto.response.ErrorResponse;
 import com.intoglobe.clinicas.dto.response.MedicoResponse;
+import com.intoglobe.clinicas.security.TenantAccessGuard;
 import com.intoglobe.clinicas.service.MedicoService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -49,6 +50,15 @@ import jakarta.validation.Valid;
  * médico y no su dueño. La cabecera {@code Location} del alta apunta siempre a la ruta
  * plana del ítem y se emite como ruta relativa para que sea correcta detrás de
  * cualquier proxy reverso.</p>
+ *
+ * <p><strong>Tenant y rol (R-SEG-04 a R-SEG-06, ADR-013):</strong> la cadena de filtros
+ * exige {@code ADMIN} para crear, actualizar y desactivar, y admite {@code MEDICO} solo en
+ * las lecturas. El {@code organizacionId} del path se acepta únicamente si coincide con el
+ * {@code tenantId} del token —{@link TenantAccessGuard} responde {@code 403} en caso
+ * contrario, sin exención de {@code ADMIN}— y es el tenant del claim el que se propaga al
+ * service. En las rutas planas el tenant también sale del claim, y un médico de otra
+ * organización responde {@code 404} para no revelar que existe: es el cierre del IDOR que
+ * tenía este módulo cuando se buscaba por id sin mirar la organización.</p>
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -56,20 +66,23 @@ import jakarta.validation.Valid;
 public class MedicoController {
 
     private final MedicoService medicoService;
+    private final TenantAccessGuard tenantAccessGuard;
 
-    public MedicoController(MedicoService medicoService) {
+    public MedicoController(MedicoService medicoService, TenantAccessGuard tenantAccessGuard) {
         this.medicoService = medicoService;
+        this.tenantAccessGuard = tenantAccessGuard;
     }
 
     /**
      * Registra un médico dentro de la organización indicada en el path.
      *
      * <p>La organización no se recibe en el cuerpo: llega por la ruta porque un médico
-     * no puede cambiar de dueño. Ese id y el {@code consultorioId} del cuerpo los
-     * resuelve el service contra la base; si alguno no existe, la excepción de negocio
-     * se traduce en 404 en vez de dejar que la clave foránea produzca un 500.</p>
+     * no puede cambiar de dueño. El path se valida contra el claim del token; el tenant del
+     * claim y el {@code consultorioId} del cuerpo los resuelve el service contra la base; si
+     * alguno no existe, la excepción de negocio se traduce en 404 en vez de dejar que la
+     * clave foránea produzca un 500.</p>
      *
-     * @param organizacionId organización dueña, tomada del path de la petición
+     * @param organizacionId organización dueña tomada del path, validada contra el token
      * @param request        datos de entrada validados
      * @return 201 con el médico creado y la cabecera {@code Location} hacia su recurso
      */
@@ -88,7 +101,7 @@ public class MedicoController {
             @Parameter(description = "Identificador UUID de la organización dueña del médico.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID organizacionId,
             @Valid @RequestBody MedicoRequest request) {
-        var creado = medicoService.crear(organizacionId, request);
+        var creado = medicoService.crear(tenantAccessGuard.exigirTenantDeLaRuta(organizacionId), request);
         return ResponseEntity.created(URI.create("/api/v1/medicos/" + creado.id())).body(creado);
     }
 
@@ -100,7 +113,7 @@ public class MedicoController {
      * cliente. Esa comprobación vive en el service, no aquí. Los médicos dados de baja
      * lógica quedan fuera del listado.</p>
      *
-     * @param organizacionId organización dueña de los médicos
+     * @param organizacionId organización dueña de los médicos, validada contra el token
      * @return 200 con el arreglo de médicos activos
      */
     @GetMapping("/organizaciones/{organizacionId}/medicos")
@@ -117,11 +130,15 @@ public class MedicoController {
     public ResponseEntity<List<MedicoResponse>> listarPorOrganizacion(
             @Parameter(description = "Identificador UUID de la organización cuyos médicos se listan.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID organizacionId) {
-        return ResponseEntity.ok(medicoService.listarPorOrganizacion(organizacionId));
+        return ResponseEntity.ok(
+                medicoService.listarPorOrganizacion(tenantAccessGuard.exigirTenantDeLaRuta(organizacionId)));
     }
 
     /**
-     * Consulta un médico existente.
+     * Consulta un médico existente de la propia organización del token.
+     *
+     * <p>Un médico de otra organización responde {@code 404}, igual que un identificador
+     * inexistente: el mensaje de error no confirma que el recurso exista.</p>
      *
      * @param id identificador del médico
      * @return 200 con el médico encontrado
@@ -140,7 +157,7 @@ public class MedicoController {
     public ResponseEntity<MedicoResponse> buscarPorId(
             @Parameter(description = "Identificador UUID del médico.", example = "b1a2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
             @PathVariable UUID id) {
-        return ResponseEntity.ok(medicoService.buscarPorId(id));
+        return ResponseEntity.ok(medicoService.buscarPorId(id, tenantAccessGuard.tenantActual()));
     }
 
     /**
@@ -173,7 +190,7 @@ public class MedicoController {
             @Parameter(description = "Identificador UUID del médico a actualizar.", example = "b1a2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
             @PathVariable UUID id,
             @Valid @RequestBody MedicoRequest request) {
-        return ResponseEntity.ok(medicoService.actualizar(id, request));
+        return ResponseEntity.ok(medicoService.actualizar(id, tenantAccessGuard.tenantActual(), request));
     }
 
     /**
@@ -199,7 +216,7 @@ public class MedicoController {
     public ResponseEntity<Void> desactivar(
             @Parameter(description = "Identificador UUID del médico a desactivar.", example = "b1a2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
             @PathVariable UUID id) {
-        medicoService.desactivar(id);
+        medicoService.desactivar(id, tenantAccessGuard.tenantActual());
         return ResponseEntity.noContent().build();
     }
 }

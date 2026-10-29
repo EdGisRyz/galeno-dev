@@ -92,14 +92,15 @@ class ConsultorioServiceTest {
     }
 
     @Test
-    @DisplayName("buscarPorId devuelve los siete campos del consultorio cuando existe")
+    @DisplayName("buscarPorId devuelve los siete campos del consultorio cuando existe en el tenant")
     void buscarPorId_shouldReturnAllSevenFields_whenConsultorioExists() {
         var organizacionId = UUID.randomUUID();
         var consultorio = consultorioPersistido(organizacionConId(organizacionId), "Consultorio Norte",
                 "Calzada Vallejo 500, CDMX", "+52 55 1234 5678", true);
-        when(consultorioRepository.findById(consultorio.getId())).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorio.getId(), organizacionId))
+                .thenReturn(Optional.of(consultorio));
 
-        var respuesta = consultorioService.buscarPorId(consultorio.getId());
+        var respuesta = consultorioService.buscarPorId(consultorio.getId(), organizacionId);
 
         assertThat(respuesta.id()).isEqualTo(consultorio.getId());
         assertThat(respuesta.organizacionId()).isEqualTo(organizacionId);
@@ -114,12 +115,29 @@ class ConsultorioServiceTest {
     @DisplayName("buscarPorId lanza ResourceNotFoundException cuando el consultorio no existe")
     void buscarPorId_shouldThrowResourceNotFoundException_whenConsultorioMissing() {
         var id = UUID.randomUUID();
-        when(consultorioRepository.findById(id)).thenReturn(Optional.empty());
+        var tenantId = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> consultorioService.buscarPorId(id))
+        assertThatThrownBy(() -> consultorioService.buscarPorId(id, tenantId))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Consultorio")
                 .hasMessageContaining(id.toString());
+    }
+
+    @Test
+    @DisplayName("buscarPorId de un consultorio de otro tenant lanza ResourceNotFoundException (404, no 403)")
+    void buscarPorId_shouldThrowResourceNotFound_whenConsultorioBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        // La consulta está acotada por organización: para un tenant ajeno el repositorio no
+        // devuelve la fila aunque exista, y el service responde 404 en vez de 403.
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> consultorioService.buscarPorId(id, otroTenant))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Consultorio")
+                .hasMessageContaining(id.toString());
+        verify(consultorioRepository).buscarPorIdYOrganizacion(id, otroTenant);
     }
 
     @Test
@@ -179,11 +197,12 @@ class ConsultorioServiceTest {
                 false);
         var idOriginal = consultorio.getId();
         var createdAtOriginal = consultorio.getCreatedAt();
-        when(consultorioRepository.findById(idOriginal)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.buscarPorIdYOrganizacion(idOriginal, organizacionId))
+                .thenReturn(Optional.of(consultorio));
         when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = new ConsultorioRequest("Consultorio Renombrado", "Calle Nueva 2", "555-1111");
 
-        var respuesta = consultorioService.actualizar(idOriginal, request);
+        var respuesta = consultorioService.actualizar(idOriginal, organizacionId, request);
 
         assertThat(respuesta.nombre()).isEqualTo("Consultorio Renombrado");
         assertThat(respuesta.direccion()).isEqualTo("Calle Nueva 2");
@@ -206,13 +225,14 @@ class ConsultorioServiceTest {
     @DisplayName("actualizar limpia direccion y telefono cuando el request los envía en null")
     void actualizar_shouldClearDireccionAndTelefono_whenRequestSendsNull() {
         var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
         var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Con Datos", "Calle Vieja 1",
                 "555-0000");
-        when(consultorioRepository.findById(id)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
         when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = new ConsultorioRequest("Consultorio Sin Datos", null, null);
 
-        var respuesta = consultorioService.actualizar(id, request);
+        var respuesta = consultorioService.actualizar(id, tenantId, request);
 
         assertThat(respuesta.nombre()).isEqualTo("Consultorio Sin Datos");
         assertThat(respuesta.direccion()).isNull();
@@ -225,10 +245,11 @@ class ConsultorioServiceTest {
     @DisplayName("actualizar lanza ResourceNotFoundException cuando el consultorio no existe")
     void actualizar_shouldThrowResourceNotFoundException_whenConsultorioMissing() {
         var id = UUID.randomUUID();
-        when(consultorioRepository.findById(id)).thenReturn(Optional.empty());
+        var tenantId = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
         var request = new ConsultorioRequest("Consultorio Fantasma", "Calle Falsa 123", null);
 
-        assertThatThrownBy(() -> consultorioService.actualizar(id, request))
+        assertThatThrownBy(() -> consultorioService.actualizar(id, tenantId, request))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Consultorio")
                 .hasMessageContaining(id.toString());
@@ -236,14 +257,28 @@ class ConsultorioServiceTest {
     }
 
     @Test
+    @DisplayName("actualizar un consultorio de otro tenant no persiste nada (404, no 403)")
+    void actualizar_shouldNotSave_whenConsultorioBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+        var request = new ConsultorioRequest("Consultorio Ajeno", null, null);
+
+        assertThatThrownBy(() -> consultorioService.actualizar(id, otroTenant, request))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verify(consultorioRepository, never()).save(any(Consultorio.class));
+    }
+
+    @Test
     @DisplayName("desactivar deja inactivo un consultorio activo y lo persiste")
     void desactivar_shouldDeactivateConsultorioAndPersistIt() {
         var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
         var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Activo", null, null);
-        when(consultorioRepository.findById(id)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
         when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        consultorioService.desactivar(id);
+        consultorioService.desactivar(id, tenantId);
 
         assertThat(consultorio.isActivo()).isFalse();
         verify(consultorioRepository).save(consultorio);
@@ -253,16 +288,17 @@ class ConsultorioServiceTest {
     @DisplayName("desactivar es idempotente: dos llamadas sobre uno ya inactivo no lanzan excepción")
     void desactivar_shouldRemainIdempotent_whenConsultorioIsAlreadyInactive() {
         var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
         var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Ya Inactivo", null, null);
         consultorio.desactivar();
-        when(consultorioRepository.findById(id)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
         when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        consultorioService.desactivar(id);
-        consultorioService.desactivar(id);
+        consultorioService.desactivar(id, tenantId);
+        consultorioService.desactivar(id, tenantId);
 
         assertThat(consultorio.isActivo()).isFalse();
-        verify(consultorioRepository, times(2)).findById(id);
+        verify(consultorioRepository, times(2)).buscarPorIdYOrganizacion(id, tenantId);
         verify(consultorioRepository, times(2)).save(consultorio);
     }
 
@@ -270,12 +306,25 @@ class ConsultorioServiceTest {
     @DisplayName("desactivar lanza ResourceNotFoundException cuando el consultorio no existe")
     void desactivar_shouldThrowResourceNotFoundException_whenConsultorioMissing() {
         var id = UUID.randomUUID();
-        when(consultorioRepository.findById(id)).thenReturn(Optional.empty());
+        var tenantId = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> consultorioService.desactivar(id))
+        assertThatThrownBy(() -> consultorioService.desactivar(id, tenantId))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Consultorio")
                 .hasMessageContaining(id.toString());
+        verify(consultorioRepository, never()).save(any(Consultorio.class));
+    }
+
+    @Test
+    @DisplayName("desactivar un consultorio de otro tenant no lo desactiva (404, no 403)")
+    void desactivar_shouldNotDeactivate_whenConsultorioBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> consultorioService.desactivar(id, otroTenant))
+                .isInstanceOf(ResourceNotFoundException.class);
         verify(consultorioRepository, never()).save(any(Consultorio.class));
     }
 

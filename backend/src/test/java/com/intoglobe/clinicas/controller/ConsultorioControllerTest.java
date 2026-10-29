@@ -74,7 +74,12 @@ class ConsultorioControllerTest {
     private static final String MENSAJE_ORG_ID_INVALIDO =
             "El parámetro 'organizacionId' tiene un formato inválido";
 
-    private static final String TOKEN = ClaveRsaDePrueba.token().compactar();
+    /**
+     * Token {@code ADMIN} cuyo {@code tenantId} es exactamente el {@code organizacionId} que
+     * usan las rutas anidadas de estas pruebas: el path coincide con el claim y lo que se
+     * ejerce es el contrato del endpoint, no la guardia de tenant.
+     */
+    private static final String TOKEN = ClaveRsaDePrueba.tokenPara("ADMIN", ORG_ID);
     @Autowired
     private MockMvc mockMvc;
 
@@ -106,7 +111,7 @@ class ConsultorioControllerTest {
     @Test
     @DisplayName("GET /{id} devuelve 200 con el consultorio encontrado")
     void buscarPorId_shouldReturn200WithBody() throws Exception {
-        when(consultorioService.buscarPorId(ID))
+        when(consultorioService.buscarPorId(ID, ORG_ID))
                 .thenReturn(respuesta(ID, ORG_ID, "Consultorio Norte", null, null, true));
 
         perform(get("/api/v1/consultorios/{id}", ID))
@@ -170,7 +175,7 @@ class ConsultorioControllerTest {
     @Test
     @DisplayName("PUT /{id} devuelve 200 con el request validado aplicado")
     void actualizar_shouldReturn200_whenRequestIsValid() throws Exception {
-        when(consultorioService.actualizar(eq(ID), any(ConsultorioRequest.class)))
+        when(consultorioService.actualizar(eq(ID), eq(ORG_ID), any(ConsultorioRequest.class)))
                 .thenReturn(respuesta(ID, ORG_ID, "Consultorio Renombrado", "Calle Nueva 5", null, true));
 
         perform(put("/api/v1/consultorios/{id}", ID)
@@ -182,7 +187,7 @@ class ConsultorioControllerTest {
                 .andExpect(jsonPath("$.id").value(ID.toString()))
                 .andExpect(jsonPath("$.nombre").value("Consultorio Renombrado"))
                 .andExpect(jsonPath("$.direccion").value("Calle Nueva 5"));
-        verify(consultorioService).actualizar(eq(ID), any(ConsultorioRequest.class));
+        verify(consultorioService).actualizar(eq(ID), eq(ORG_ID), any(ConsultorioRequest.class));
     }
 
     @Test
@@ -196,13 +201,13 @@ class ConsultorioControllerTest {
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
-        verify(consultorioService, times(2)).desactivar(ID);
+        verify(consultorioService, times(2)).desactivar(ID, ORG_ID);
     }
 
     @Test
     @DisplayName("GET /{id} inexistente devuelve 404 con ErrorResponse")
     void buscarPorId_shouldReturn404WithErrorResponse_whenMissing() throws Exception {
-        when(consultorioService.buscarPorId(ID))
+        when(consultorioService.buscarPorId(ID, ORG_ID))
                 .thenThrow(new ResourceNotFoundException("Consultorio", ID));
 
         perform(get("/api/v1/consultorios/{id}", ID))
@@ -216,7 +221,7 @@ class ConsultorioControllerTest {
     @Test
     @DisplayName("PUT /{id} inexistente devuelve 404 con ErrorResponse")
     void actualizar_shouldReturn404_whenMissing() throws Exception {
-        when(consultorioService.actualizar(eq(ID), any(ConsultorioRequest.class)))
+        when(consultorioService.actualizar(eq(ID), eq(ORG_ID), any(ConsultorioRequest.class)))
                 .thenThrow(new ResourceNotFoundException("Consultorio", ID));
 
         perform(put("/api/v1/consultorios/{id}", ID)
@@ -234,7 +239,7 @@ class ConsultorioControllerTest {
     @DisplayName("DELETE /{id} inexistente devuelve 404 con ErrorResponse")
     void desactivar_shouldReturn404_whenMissing() throws Exception {
         doThrow(new ResourceNotFoundException("Consultorio", ID))
-                .when(consultorioService).desactivar(ID);
+                .when(consultorioService).desactivar(ID, ORG_ID);
 
         perform(delete("/api/v1/consultorios/{id}", ID))
                 .andExpect(status().isNotFound())
@@ -313,6 +318,37 @@ class ConsultorioControllerTest {
         verifyNoInteractions(consultorioService);
     }
 
+    @Test
+    @DisplayName("Las rutas anidadas con el organizacionId de otro tenant responden 403 sin llamar al service")
+    void rutasAnidadas_shouldReturn403_whenThePathTenantDiffersFromTheClaim() throws Exception {
+        UUID organizacionAjena = UUID.randomUUID();
+
+        afirmarAccesoDenegado(perform(get("/api/v1/organizaciones/{organizacionId}/consultorios",
+                        organizacionAjena)),
+                "/api/v1/organizaciones/" + organizacionAjena + "/consultorios");
+        afirmarAccesoDenegado(perform(post("/api/v1/organizaciones/{organizacionId}/consultorios",
+                        organizacionAjena)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio Ajeno"}
+                                """)),
+                "/api/v1/organizaciones/" + organizacionAjena + "/consultorios");
+
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("Las rutas planas por id entregan al service el tenant del claim, no el del path")
+    void rutasPorId_shouldPassTheClaimTenantToTheService() throws Exception {
+        when(consultorioService.buscarPorId(ID, ORG_ID))
+                .thenReturn(respuesta(ID, ORG_ID, "Consultorio Norte", null, null, true));
+
+        perform(get("/api/v1/consultorios/{id}", ID))
+                .andExpect(status().isOk());
+
+        verify(consultorioService).buscarPorId(ID, ORG_ID);
+    }
+
     private static ConsultorioResponse respuesta(UUID id, UUID organizacionId, String nombre,
             String direccion, String telefono, boolean activo) {
         return new ConsultorioResponse(id, organizacionId, nombre, direccion, telefono, activo, CREADO_EN);
@@ -331,6 +367,25 @@ class ConsultorioControllerTest {
         registro.add("auth.public.key", () -> ClaveRsaDePrueba.CLAVE_PUBLICA_BASE64);
         registro.add("auth.issuer", () -> ClaveRsaDePrueba.EMISOR);
         registro.add("auth.audience", () -> ClaveRsaDePrueba.AUDIENCIA);
+    }
+
+    /**
+     * Afirma el contrato del {@code 403} que produce una discrepancia entre el tenant del
+     * path y el del claim.
+     *
+     * @param resultado resultado de la petición
+     * @param ruta      ruta esperada en el campo {@code ruta}
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    private static void afirmarAccesoDenegado(ResultActions resultado, String ruta) throws Exception {
+        resultado
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.codigo").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.mensaje").value(
+                        com.intoglobe.clinicas.security.SecurityErrorResponder.MENSAJE_ACCESO_DENEGADO))
+                .andExpect(jsonPath("$.ruta").value(ruta));
     }
 
     /**

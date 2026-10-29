@@ -300,6 +300,33 @@ class ConsultorioRepositoryTest {
     }
 
     @Test
+    @DisplayName("buscarPorIdYOrganizacion solo devuelve el consultorio de la organización pedida")
+    void buscarPorIdYOrganizacion_shouldReturnOnlyTheScopedConsultorio() {
+        var propia = persistirOrganizacion("Clínica Propia");
+        var ajena = persistirOrganizacion("Clínica Ajena");
+        var consultorioPropio = consultorioRepository
+                .saveAndFlush(new Consultorio(propia, "Consultorio Propio", DIRECCION, TELEFONO));
+        var consultorioAjeno = consultorioRepository
+                .saveAndFlush(new Consultorio(ajena, "Consultorio Ajeno", DIRECCION, TELEFONO));
+        entityManager.clear();
+
+        var encontrado = consultorioRepository
+                .buscarPorIdYOrganizacion(consultorioPropio.getId(), propia.getId());
+
+        assertThat(encontrado)
+                .as("el consultorio de la propia organización debe encontrarse")
+                .isPresent();
+        assertThat(encontrado.orElseThrow().getId()).isEqualTo(consultorioPropio.getId());
+        assertThat(consultorioRepository
+                .buscarPorIdYOrganizacion(consultorioAjeno.getId(), propia.getId()))
+                .as("un consultorio de otra organización no puede encontrarse desde este tenant (IDOR)")
+                .isEmpty();
+        assertThat(consultorioRepository
+                .buscarPorIdYOrganizacion(consultorioAjeno.getId(), ajena.getId()))
+                .isPresent();
+    }
+
+    @Test
     @DisplayName("leer el id de la organización proxy no debe inicializar la asociación LAZY")
     void getOrganizacionId_shouldNotInitializeTheLazyProxy() {
         var organizacion = persistirOrganizacion("Clínica Proxy Id");
