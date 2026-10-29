@@ -33,6 +33,13 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-h2console</artifactId>
+			<!--
+				La consola de H2 es una herramienta de prueba y desarrollo: con alcance test deja de
+				empaquetarse en el artefacto de producción (R-SEG-09). Además spring.h2.console.enabled
+				queda en false en la línea base versionada (application.yml), así que ni siquiera en las
+				pruebas se expone un endpoint de consola.
+			-->
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

@@ -1,0 +1,40 @@
+# =====================================================
+# Línea base versionada de configuración (R-SEG-09)
+# =====================================================
+# `application.properties` no se versiona (ADR-006): sus valores son locales, cada
+# desarrollador los ajusta a su entorno y ninguno de ellos es una decisión de seguridad.
+# Un default de seguridad que falta en la copia de alguien no protege nada, así que los
+# defaults seguros viven aquí, en un archivo versionado, y no en la configuración local.
+#
+# Este archivo se carga en TODOS los perfiles. Los archivos de perfil
+# (`application-<perfil>.properties`) lo sobrescriben, y un `application.properties` local
+# tiene precedencia sobre él para las claves que declare: sigue siendo el lugar de la
+# configuración de cada entorno, no el de los defaults.
+
+# =====================================================
+# Documentación de la API (springdoc) — apagada salvo en desarrollo
+# =====================================================
+# Con estos dos valores en false, el artefacto de producción no publica /v3/api-docs ni
+# /swagger-ui: las rutas no existen y por eso no hay nada que autenticar. El perfil `dev`
+# (application-dev.properties) es el único que las vuelve a encender.
+#
+# Las reglas permitAll() de documentación en SecurityConfig siguen vigentes a propósito:
+# son inertes mientras springdoc esté apagado, y así el único interruptor de la
+# documentación es este, no la cadena de filtros.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# =====================================================
+# Consola de H2 — apagada
+# =====================================================
+# El proyecto usa PostgreSQL en desarrollo y H2 solo en las pruebas. La consola no se
+# empaqueta (spring-boot-h2console tiene alcance test en el pom) y, aunque estuviera en el
+# classpath, esta bandera la mantiene apagada: una consola de base de datos abierta en un
+# entorno clínico es un acceso directo a los datos.
+spring:
+  h2:
+    console:
+      enabled: false
