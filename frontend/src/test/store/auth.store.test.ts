@@ -17,6 +17,19 @@ function makeToken(payload: Record<string, unknown>): string {
   return `${JWT_HEADER}.${toBase64Url(JSON.stringify(payload))}.${JWT_SIGNATURE}`;
 }
 
+// Igual que `toBase64Url`, pero codificando el JSON como UTF-8 antes de base64:
+// `btoa` rechaza cualquier carácter fuera de Latin-1, y las claims pueden llevar acentos.
+function makeUtf8Token(payload: Record<string, unknown>): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+
+  return `${JWT_HEADER}.${btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')}.${JWT_SIGNATURE}`;
+}
+
 const CLAIMS = {
   sub: 'usr-0001',
   email: 'medico@clinica.mx',
@@ -49,6 +62,13 @@ describe('auth.store · decodificación del token', () => {
       medicoId: 'med-0001',
     });
     expect(useAuthStore.getState().accessToken).toBe(makeToken(CLAIMS));
+  });
+
+  it('decodifica claims en UTF-8 sin perder los caracteres acentuados', () => {
+    useAuthStore.getState().login(makeUtf8Token({ ...CLAIMS, email: 'jósé@clínica.mx' }));
+
+    expect(useAuthStore.getState().user?.email).toBe('jósé@clínica.mx');
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
   });
 
   it('no lanza y deja el usuario en null cuando el token está mal formado', () => {
