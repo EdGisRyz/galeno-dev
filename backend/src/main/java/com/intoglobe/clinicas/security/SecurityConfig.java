@@ -1,5 +1,6 @@
 package com.intoglobe.clinicas.security;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -11,9 +12,11 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.servlet.HandlerMapping;
 
 import com.intoglobe.clinicas.config.CorsConfig;
 
+import jakarta.servlet.DispatcherType;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -27,11 +30,38 @@ import tools.jackson.databind.json.JsonMapper;
  * <h2>Rutas públicas</h2>
  *
  * <p>Las únicas rutas abiertas son las de documentación de la API
- * ({@code /v3/api-docs/**}, {@code /swagger-ui/**} y {@code /swagger-ui.html}). Esas rutas
- * solo existen cuando springdoc está habilitado, y hoy lo está por defecto; dejarlas
- * públicas es aceptable mientras el plan sea deshabilitar springdoc en producción, que es
- * el trabajo de T5 (endurecimiento de configuración). Si T5 las apaga en producción, estas
- * reglas quedan inertes: no abren nada que no exista.</p>
+ * ({@code /v3/api-docs/**}, {@code /swagger-ui/**} y {@code /swagger-ui.html}) y el endpoint
+ * de error {@code /error}, que responde con el contrato {@code ErrorResponse} del proyecto y
+ * nunca con el cuerpo por defecto del framework.</p>
+ *
+ * <p><strong>La documentación se apaga por configuración, no aquí.</strong> Desde T5
+ * springdoc está deshabilitado en la línea base versionada
+ * ({@code springdoc.api-docs.enabled=false} y {@code springdoc.swagger-ui.enabled=false} en
+ * {@code application.yml}) y solo el perfil {@code dev} lo vuelve a encender (R-SEG-09). Las
+ * reglas {@code permitAll()} de documentación se conservan a propósito: mientras springdoc
+ * esté apagado <em>no abren nada que no exista</em> —la ruta responde {@code 404}—, y así el
+ * único interruptor de la documentación es el perfil, no esta cadena. Borrarlas no aportaría
+ * seguridad y agregaría una segunda cosa que recordar el día que alguien encienda la
+ * documentación en otro perfil.</p>
+ *
+ * <p>El {@code permitAll()} de {@code /error} no es una ruta de datos: el controlador de error
+ * publica el estado real de un reenvío del contenedor y, si nadie reenvió nada, un {@code 404};
+ * nunca incluye la excepción, el mensaje original ni la traza (R-SEG-10).</p>
+ *
+ * <h2>Fallback: deny-by-default</h2>
+ *
+ * <p>La cadena <strong>no</strong> termina en {@code anyRequest().authenticated()}. Termina
+ * en {@link DenyByDefaultAuthorizationManager}, que cierra toda ruta con controlador y sin
+ * regla explícita para <em>todos</em> los roles (R-SEG-09). Solo las rutas de la matriz y las
+ * dos rutas públicas de arriba están declaradas; lo demás está cerrado por omisión, no
+ * abierto por omisión. El manager también resuelve la otra mitad del contrato: una ruta
+ * <em>inexistente</em> responde {@code 401} sin token y el {@code 404} del framework con
+ * token, nunca {@code 403}.</p>
+ *
+ * <p>Ese {@code 404} depende de que el despacho de {@code ERROR} esté permitido: el
+ * contenedor reenvía el {@code 404} a {@code /error} y ese reenvío vuelve a pasar por esta
+ * cadena, con lo que un {@code denyAll} lo convertiría en {@code 403}. Por eso la primera
+ * regla es {@code dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()}.</p>
  *
  * <h2>Matriz de autorización por rol (R-SEG-05, D4)</h2>
  *
@@ -105,8 +135,10 @@ import tools.jackson.databind.json.JsonMapper;
 public class SecurityConfig {
 
     /**
-     * Rutas de documentación abiertas. Ver el Javadoc de la clase: existen solo si
-     * springdoc está habilitado y desactivarlo en producción es de T5.
+     * Rutas de documentación abiertas. Desde T5 springdoc está apagado por defecto y solo el
+     * perfil {@code dev} lo enciende, así que estas reglas son inertes en el resto de los
+     * perfiles: la ruta responde {@code 404} y no hay nada que abrir. Ver el Javadoc de la
+     * clase.
      */
     private static final String[] RUTAS_PUBLICAS = {
             "/v3/api-docs/**",
@@ -123,6 +155,9 @@ public class SecurityConfig {
     /** Ruta base de los médicos pedidos por id. */
     private static final String RUTA_MEDICOS = "/api/v1/medicos";
 
+    /** Endpoint de error del contenedor, servido por {@code RestErrorController}. */
+    private static final String RUTA_ERROR = "/error";
+
     /** Rol que administra los datos de su propia organización. */
     private static final String ROL_ADMIN = "ADMIN";
 
@@ -130,21 +165,24 @@ public class SecurityConfig {
     private static final String ROL_MEDICO = "MEDICO";
 
     /**
-     * Define la única cadena de filtros de la aplicación: documentación pública, la matriz
-     * de autorización por rol, todo lo demás autenticado, CORS con credenciales y errores de
-     * seguridad dentro del contrato {@code ErrorResponse}.
+     * Define la única cadena de filtros de la aplicación: documentación y error públicos, la
+     * matriz de autorización por rol, deny-by-default para el resto, CORS con credenciales y
+     * errores de seguridad dentro del contrato {@code ErrorResponse}.
      *
      * <p>El orden de las reglas sigue la matriz de §5.3: primero las rutas anidadas —son las
      * más específicas— y después las de ítem. Las reglas de {@code ADMIN} cubren tanto lo
      * exclusivo del rol como lo compartido con {@code MEDICO}; la lectura compartida se
-     * declara antes para que {@code MEDICO} no caiga en la regla de {@code ADMIN}. El resto
-     * de las rutas sigue exigiendo token aunque no estén en la matriz: una ruta inexistente
-     * con token válido responde {@code 404} del framework, no {@code 403}.</p>
+     * declara antes para que {@code MEDICO} no caiga en la regla de {@code ADMIN}. Lo que no
+     * está declarado no queda «autenticado»: queda cerrado por
+     * {@link DenyByDefaultAuthorizationManager}, que además deja pasar el {@code 404} de una
+     * ruta inexistente en lugar de disfrazarlo de {@code 403}.</p>
      *
      * @param http                  configuración de seguridad web de Spring Security
      * @param jwtAuthenticationFilter filtro que valida el token Bearer RS256
      * @param entryPoint            respuesta {@code 401} con el contrato de error
      * @param accessDeniedHandler   respuesta {@code 403} con el contrato de error
+     * @param mapeosDeHandler       mapeos de MVC con los que el fallback decide si la ruta
+     *                              tiene controlador (se resuelven de forma perezosa)
      * @return la cadena de filtros cerrada
      * @throws Exception si Spring Security no puede construir la cadena
      */
@@ -153,12 +191,19 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtAuthenticationFilter jwtAuthenticationFilter,
             RestAuthenticationEntryPoint entryPoint,
-            RestAccessDeniedHandler accessDeniedHandler) throws Exception {
+            RestAccessDeniedHandler accessDeniedHandler,
+            ObjectProvider<HandlerMapping> mapeosDeHandler) throws Exception {
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sesion -> sesion.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(autorizacion -> autorizacion
+                        // El reenvío de error entra otra vez en la cadena: sin esta regla, un
+                        // 404 del framework se convertiría en 403.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        // /error se puede pedir directamente: responde el contrato
+                        // ErrorResponse del proyecto (404 si no hay error que representar).
+                        .requestMatchers(RUTA_ERROR).permitAll()
                         .requestMatchers(RUTAS_PUBLICAS).permitAll()
                         // Lecturas compartidas por ADMIN y MEDICO de su propio tenant.
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*/consultorios")
@@ -181,15 +226,19 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, RUTA_MEDICOS + "/*").hasRole(ROL_ADMIN)
                         // Organizaciones: el alta está bloqueada para los tres roles
                         // (decisión de producto del 2026-10-29: la organización creada
-                        // quedaría inalcanzable por el aislamiento por tenant). denyAll() y
-                        // no la ausencia de regla: sin esta línea, anyRequest() dejaría pasar
-                        // a cualquier rol autenticado. El resto, solo ADMIN.
+                        // quedaría inalcanzable por el aislamiento por tenant). Se declara con
+                        // denyAll() y no se deja a la ausencia de regla: la celda queda
+                        // auditada aquí, con nombre propio, y no depende de que el fallback
+                        // siga negando todo. El resto, solo ADMIN.
                         .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES).denyAll()
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES).hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.PUT, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
-                        .anyRequest().authenticated())
+                        // Fallback: deny-by-default (R-SEG-09). Toda ruta con controlador que no
+                        // esté declarada arriba queda cerrada para los tres roles; una ruta
+                        // inexistente conserva el 401/404 normal del framework.
+                        .anyRequest().access(new DenyByDefaultAuthorizationManager(mapeosDeHandler)))
                 .exceptionHandling(excepciones -> excepciones
                         .authenticationEntryPoint(entryPoint)
                         .accessDeniedHandler(accessDeniedHandler))

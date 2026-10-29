@@ -10,10 +10,14 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -162,8 +166,14 @@ class ContratoDeErrorDeSeguridadTest {
     }
 
     /**
-     * Sondas que lanzan las excepciones de autorización dentro de un controlador: es el
-     * punto exacto donde T4 aplicará {@code @PreAuthorize}.
+     * Sondas que lanzan las excepciones de autorización dentro de un controlador.
+     *
+     * <p>Desde T5 la cadena de producción es deny-by-default: una ruta con controlador y sin
+     * regla responde {@code 403} desde la cadena y el controlador nunca se ejecutaría, con lo
+     * que esta prueba dejaría de probar el mapeo de {@code GlobalExceptionHandler} y pasaría
+     * por el motivo equivocado. La sonda declara su ruta en una cadena propia -con el filtro
+     * JWT y los manejadores de error de producción- para que la excepción siga naciendo dentro
+     * del controlador, que es lo que este archivo verifica.</p>
      */
     @TestConfiguration
     static class ConfiguracionSonda {
@@ -171,6 +181,13 @@ class ContratoDeErrorDeSeguridadTest {
         @Bean
         ControladorSonda controladorSonda() {
             return new ControladorSonda();
+        }
+
+        @Bean
+        @Order(Ordered.HIGHEST_PRECEDENCE)
+        SecurityFilterChain cadenaDeSonda(HttpSecurity http, JwtAuthenticationFilter filtroJwt,
+                RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler accesoDenegado) throws Exception {
+            return CadenaDeSonda.crear(http, "/api/v1/sonda/**", filtroJwt, entryPoint, accesoDenegado);
         }
     }
 
