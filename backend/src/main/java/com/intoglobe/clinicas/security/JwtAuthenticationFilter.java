@@ -1,9 +1,7 @@
 package com.intoglobe.clinicas.security;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.security.interfaces.RSAPublicKey;
-import java.time.OffsetDateTime;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -11,7 +9,6 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
@@ -40,12 +37,15 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>Reglas de comportamiento:</p>
  * <ul>
  *   <li>Sin cabecera {@code Authorization} la cadena continúa y no se autentica a nadie:
- *       ese es el caso de las rebanadas MVC que no envían credenciales y el de los
- *       endpoints que T3 abrirá explícitamente.</li>
+ *       quien decide es la cadena de filtros, que responde {@code 401} con
+ *       {@link RestAuthenticationEntryPoint} salvo en las rutas públicas de documentación.
+ *       El filtro no responde por su cuenta en ese caso para no adelantarse a la
+ *       autorización.</li>
  *   <li>Con cabecera pero sin el formato {@code Bearer <token>}, o con un token cuya
  *       firma no verifica contra la clave pública, expirado, mal formado o con un
  *       algoritmo distinto de RS256, la respuesta es {@code 401} con el contrato de error
- *       único de la API ({@link ErrorResponse}). Un token HS256 firmado con los bytes de
+ *       único de la API ({@link ErrorResponse}), construido con
+ *       {@link SecurityErrorResponder} igual que el {@code 401} del entry point. Un token HS256 firmado con los bytes de
  *       la clave pública se rechaza igual: la clave es RSA y el algoritmo se comprueba de
  *       forma explícita. Un token RS384, RS512 o PS256 firmado con la <em>misma</em> clave
  *       privada también se rechaza: jjwt verifica esas firmas correctamente y lo que las
@@ -78,13 +78,6 @@ import tools.jackson.databind.json.JsonMapper;
  * respuesta del emisor real de tokens.</p>
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
-
-    /** Mensaje del 401 cuando la cabecera falta en formato {@code Bearer <token>}. */
-    static final String MENSAJE_CREDENCIALES_BEARER =
-            "Se requiere un token Bearer RS256 en la cabecera Authorization";
-
-    /** Mensaje del 401 cuando el token no verifica o no cumple el contrato de claims. */
-    static final String MENSAJE_TOKEN_INVALIDO = "El token no es válido o está expirado";
 
     private static final Logger REGISTRO = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
@@ -142,13 +135,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String token = extraerToken(cabecera);
             if (token == null) {
-                responderNoAutorizado(peticion, respuesta, MENSAJE_CREDENCIALES_BEARER);
+                responderNoAutorizado(peticion, respuesta, SecurityErrorResponder.MENSAJE_CREDENCIALES_BEARER);
                 return;
             }
             if (clavePublica == null) {
                 REGISTRO.warn("Clave pública del AuthService no disponible; se rechaza la petición a {} {}",
                         peticion.getMethod(), peticion.getRequestURI());
-                responderNoAutorizado(peticion, respuesta, MENSAJE_TOKEN_INVALIDO);
+                responderNoAutorizado(peticion, respuesta, SecurityErrorResponder.MENSAJE_TOKEN_INVALIDO);
                 return;
             }
 
@@ -158,7 +151,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             } catch (JwtException | IllegalArgumentException excepcion) {
                 REGISTRO.warn("Token rechazado en {} {}: {}", peticion.getMethod(), peticion.getRequestURI(),
                         excepcion.getClass().getSimpleName());
-                responderNoAutorizado(peticion, respuesta, MENSAJE_TOKEN_INVALIDO);
+                responderNoAutorizado(peticion, respuesta, SecurityErrorResponder.MENSAJE_TOKEN_INVALIDO);
                 return;
             }
 
@@ -259,15 +252,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private void responderNoAutorizado(
             HttpServletRequest peticion, HttpServletResponse respuesta, String mensaje) throws IOException {
-        ErrorResponse cuerpo = new ErrorResponse(
-                OffsetDateTime.now(),
-                HttpStatus.UNAUTHORIZED.value(),
-                HttpStatus.UNAUTHORIZED.getReasonPhrase(),
-                mensaje,
-                peticion.getRequestURI());
-        respuesta.setStatus(HttpStatus.UNAUTHORIZED.value());
-        respuesta.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        respuesta.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        respuesta.getOutputStream().write(jsonMapper.writeValueAsBytes(cuerpo));
+        SecurityErrorResponder.escribir(
+                peticion, respuesta, HttpStatus.UNAUTHORIZED, mensaje, jsonMapper);
     }
 }

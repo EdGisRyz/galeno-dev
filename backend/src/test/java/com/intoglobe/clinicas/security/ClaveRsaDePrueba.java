@@ -32,10 +32,10 @@ import tools.jackson.databind.json.JsonMapper;
  * expone ya codificada en Base64 DER (SPKI), que es exactamente el formato que
  * consume {@code auth.public.key}.</p>
  */
-final class ClaveRsaDePrueba {
+public final class ClaveRsaDePrueba {
 
-    static final String EMISOR = "https://auth.intoglobe.test";
-    static final String AUDIENCIA = "galeno-api";
+    public static final String EMISOR = "https://auth.intoglobe.test";
+    public static final String AUDIENCIA = "galeno-api";
     static final String ID_USUARIO = "9f0d2c4a-1b2e-4c7d-9a11-5b7f3e2d1a01";
     static final String EMAIL = "ana.torres@clinicasanrafael.test";
     static final String TENANT_ID = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90";
@@ -48,7 +48,7 @@ final class ClaveRsaDePrueba {
     static final KeyPair OTRO_PAR = generarPar();
 
     /** Clave pública en Base64 DER (SPKI) en una sola línea: formato de {@code auth.public.key}. */
-    static final String CLAVE_PUBLICA_BASE64 = Base64.getEncoder().encodeToString(PAR.getPublic().getEncoded());
+    public static final String CLAVE_PUBLICA_BASE64 = Base64.getEncoder().encodeToString(PAR.getPublic().getEncoded());
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
@@ -72,7 +72,7 @@ final class ClaveRsaDePrueba {
      *
      * @return constructor fluido de token
      */
-    static Token token() {
+    public static Token token() {
         return new Token();
     }
 
@@ -152,7 +152,7 @@ final class ClaveRsaDePrueba {
     /**
      * Constructor fluido de tokens firmados para las pruebas.
      */
-    static final class Token {
+    public static final class Token {
 
         private String identificador = ID_USUARIO;
         private String correo = EMAIL;
@@ -244,7 +244,7 @@ final class ClaveRsaDePrueba {
             return this;
         }
 
-        String compactar() {
+        public String compactar() {
             JwtBuilder constructor = Jwts.builder()
                     .issuedAt(Date.from(Instant.now().minus(Duration.ofMinutes(1))));
             if (!sinExpiracion) {

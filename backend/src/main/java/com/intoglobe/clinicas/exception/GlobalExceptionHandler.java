@@ -4,15 +4,20 @@ import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.intoglobe.clinicas.dto.response.ErrorResponse;
+import com.intoglobe.clinicas.security.SecurityErrorResponder;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -23,9 +28,19 @@ import jakarta.servlet.http.HttpServletRequest;
  * Los mensajes son resúmenes de negocio en español y nunca incluyen stacktraces
  * ni detalles internos del parser de JSON, para no filtrar información de
  * implementación al cliente.</p>
+ *
+ * <p>También traduce las excepciones de autorización de Spring Security
+ * ({@link AccessDeniedException} y {@link AuthorizationDeniedException}) a {@code 403} con
+ * este mismo cuerpo (R-SEG-05, ADR-013). Son las que lanza una denegación producida
+ * <em>dentro</em> de un controlador, que es el caso de {@code @PreAuthorize} en T4. Sin este
+ * mapeo Spring respondería con su formato por defecto y rompería el contrato único de
+ * error, mientras que la denegación producida en la cadena de filtros la responde
+ * {@code RestAccessDeniedHandler} con el mismo cuerpo.</p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger REGISTRO = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private static final Map<String, String> MENSAJES_POR_CODIGO = Map.of(
             "NotBlank", "no puede estar vacío",
@@ -115,6 +130,29 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException excepcion, HttpServletRequest peticion) {
         return construir(HttpStatus.BAD_REQUEST,
                 "El parámetro '" + excepcion.getName() + "' tiene un formato inválido", peticion);
+    }
+
+    /**
+     * Responde 403 cuando el usuario está autenticado pero no autorizado.
+     *
+     * <p>Cubre tanto {@link AccessDeniedException} como su subtipo
+     * {@link AuthorizationDeniedException}, que es el que envuelve una decisión negativa de
+     * {@code @PreAuthorize}. El mensaje es una constante compartida con
+     * {@code RestAccessDeniedHandler} para que el 403 de la cadena de filtros y el del
+     * controlador sean indistinguibles para el cliente, y no reexpone el detalle de la
+     * regla que falló.</p>
+     *
+     * @param excepcion excepción de autorización (no se expone su mensaje)
+     * @param peticion  petición que originó el error
+     * @return respuesta 403 con {@link ErrorResponse}
+     */
+    @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
+    public ResponseEntity<ErrorResponse> manejarAccesoDenegado(
+            AccessDeniedException excepcion, HttpServletRequest peticion) {
+        // R-SEG-10: se registra el evento con método y ruta, nunca el token ni sus claims.
+        REGISTRO.warn("Acceso denegado en {} {}: {}",
+                peticion.getMethod(), peticion.getRequestURI(), excepcion.getClass().getSimpleName());
+        return construir(HttpStatus.FORBIDDEN, SecurityErrorResponder.MENSAJE_ACCESO_DENEGADO, peticion);
     }
 
     /**

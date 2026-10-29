@@ -9,15 +9,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.intoglobe.clinicas.dto.request.MedicoRequest;
 import com.intoglobe.clinicas.dto.response.MedicoResponse;
 import com.intoglobe.clinicas.exception.CambioDeConsultorioNoPermitidoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
+import com.intoglobe.clinicas.security.ClaveRsaDePrueba;
 import com.intoglobe.clinicas.security.SecurityConfig;
 import com.intoglobe.clinicas.service.MedicoService;
 
@@ -40,10 +46,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Pruebas MVC del contrato HTTP de {@link MedicoController}.
  *
  * <p>Rebanada web pura: no hay base de datos y el service se simula con
- * {@code @MockitoBean}. Se importa explícitamente {@link SecurityConfig} para
- * comprobar que la configuración abierta de la fase 0 deja pasar las peticiones sin
- * desactivar filtros ni omitir CSRF, igual que en los módulos 00 y 02. La forma de la
- * ruta es parte del contrato: colección anidada bajo la organización e ítem plano.</p>
+ * {@code @MockitoBean}. Se importa explícitamente {@link SecurityConfig} para ejercer el
+ * contrato a través de la cadena de filtros real: desde T3 (R-SEG-03) todos los endpoints
+ * exigen un token RS256 válido. Cada petición se autentica con un token Bearer de verdad,
+ * firmado con el par RSA que {@link ClaveRsaDePrueba} genera en memoria y publicado a la
+ * cadena con {@link DynamicPropertySource}: no se usan post-procesadores de seguridad ni
+ * usuarios simulados, así que el filtro JWT, el entry point y el contrato de error siguen
+ * siendo los reales.</p>
  *
  * <p>Los errores 404 y el 400 de consultorio inmutable los produce el service y los
  * traduce el {@code GlobalExceptionHandler}: estos casos fijan ese acuerdo
@@ -79,6 +88,7 @@ class MedicoControllerTest {
     private static final String MENSAJE_ORG_ID_INVALIDO =
             "El parámetro 'organizacionId' tiene un formato inválido";
 
+    private static final String TOKEN = ClaveRsaDePrueba.token().compactar();
     @Autowired
     private MockMvc mockMvc;
 
@@ -92,7 +102,7 @@ class MedicoControllerTest {
                 .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dra. Ana Torres", "Cardiología",
                         "12345678", "+52 55 5555 9876", "500.00", true));
 
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres","especialidad":"Cardiología","cedula":"12345678","telefono":"+52 55 5555 9876","tarifaBase":"500.00"}
@@ -116,7 +126,7 @@ class MedicoControllerTest {
                 .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dr. Luis Prado", "Dermatología",
                         null, null, null, true));
 
-        mockMvc.perform(get("/api/v1/medicos/{id}", ID))
+        perform(get("/api/v1/medicos/{id}", ID))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").value(ID.toString()))
@@ -137,7 +147,7 @@ class MedicoControllerTest {
                 respuesta(UUID.randomUUID(), ORG_ID, CONSULTORIO_ID, "Dr. Bruno Salas", null,
                         null, null, null, true)));
 
-        mockMvc.perform(get("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID))
+        perform(get("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(2))
@@ -154,7 +164,7 @@ class MedicoControllerTest {
         when(medicoService.listarPorOrganizacion(ORG_ID))
                 .thenThrow(new ResourceNotFoundException("Organizacion", ORG_ID));
 
-        mockMvc.perform(get("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID))
+        perform(get("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.codigo").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -168,7 +178,7 @@ class MedicoControllerTest {
         when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
                 .thenThrow(new ResourceNotFoundException("Organizacion", ORG_ID));
 
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres"}
@@ -186,7 +196,7 @@ class MedicoControllerTest {
         when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
                 .thenThrow(new ResourceNotFoundException("Consultorio", CONSULTORIO_ID));
 
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres"}
@@ -205,7 +215,7 @@ class MedicoControllerTest {
                 .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dra. Ana Torres Ruiz", "Cardiología",
                         "12345678", null, "650.50", true));
 
-        mockMvc.perform(put("/api/v1/medicos/{id}", ID)
+        perform(put("/api/v1/medicos/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres Ruiz","especialidad":"Cardiología","tarifaBase":"650.50"}
@@ -224,7 +234,7 @@ class MedicoControllerTest {
         when(medicoService.actualizar(eq(ID), any(MedicoRequest.class)))
                 .thenThrow(new CambioDeConsultorioNoPermitidoException(CONSULTORIO_ID, OTRO_CONSULTORIO_ID));
 
-        mockMvc.perform(put("/api/v1/medicos/{id}", ID)
+        perform(put("/api/v1/medicos/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres"}
@@ -240,7 +250,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("PUT /{id} con nombre en blanco devuelve 400 (@Valid también en el PUT)")
     void actualizar_shouldReturn400_whenNombreIsBlank() throws Exception {
-        mockMvc.perform(put("/api/v1/medicos/{id}", ID)
+        perform(put("/api/v1/medicos/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"   "}
@@ -256,7 +266,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("DELETE /{id} devuelve 204 sin cuerpo")
     void desactivar_shouldReturn204WithoutBody() throws Exception {
-        mockMvc.perform(delete("/api/v1/medicos/{id}", ID))
+        perform(delete("/api/v1/medicos/{id}", ID))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
         verify(medicoService).desactivar(ID);
@@ -268,7 +278,7 @@ class MedicoControllerTest {
         when(medicoService.buscarPorId(ID))
                 .thenThrow(new ResourceNotFoundException("Medico", ID));
 
-        mockMvc.perform(get("/api/v1/medicos/{id}", ID))
+        perform(get("/api/v1/medicos/{id}", ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.codigo").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -282,7 +292,7 @@ class MedicoControllerTest {
         when(medicoService.actualizar(eq(ID), any(MedicoRequest.class)))
                 .thenThrow(new ResourceNotFoundException("Medico", ID));
 
-        mockMvc.perform(put("/api/v1/medicos/{id}", ID)
+        perform(put("/api/v1/medicos/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres"}
@@ -300,7 +310,7 @@ class MedicoControllerTest {
         doThrow(new ResourceNotFoundException("Medico", ID))
                 .when(medicoService).desactivar(ID);
 
-        mockMvc.perform(delete("/api/v1/medicos/{id}", ID))
+        perform(delete("/api/v1/medicos/{id}", ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.codigo").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -311,7 +321,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("POST con nombre en blanco devuelve 400 con mensaje de negocio en español")
     void crear_shouldReturn400_whenNombreIsBlank() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"   "}
@@ -327,7 +337,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("POST con tarifaBase negativa devuelve 400 (@DecimalMin)")
     void crear_shouldReturn400_whenTarifaBaseIsNegative() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres","tarifaBase":"-10.00"}
@@ -343,7 +353,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("POST con tarifaBase de 3 decimales devuelve 400 (@Digits)")
     void crear_shouldReturn400_whenTarifaBaseHasThreeDecimals() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"consultorioId":"%s","nombre":"Dra. Ana Torres","tarifaBase":"500.123"}
@@ -359,7 +369,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("POST con JSON mal formado devuelve 400 sin detalles internos del parser")
     void crear_shouldReturn400_whenJsonIsMalformed() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Dra. Ana Torres\","))
                 .andExpect(status().isBadRequest())
@@ -373,7 +383,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("GET /{id} con UUID de path inválido devuelve 400 con ErrorResponse")
     void buscarPorId_shouldReturn400_whenUuidIsInvalid() throws Exception {
-        mockMvc.perform(get("/api/v1/medicos/{id}", "no-es-un-uuid"))
+        perform(get("/api/v1/medicos/{id}", "no-es-un-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
@@ -385,7 +395,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("GET anidado con organizacionId inválido devuelve 400 con ErrorResponse")
     void listarPorOrganizacion_shouldReturn400_whenOrganizacionIdIsInvalid() throws Exception {
-        mockMvc.perform(get("/api/v1/organizaciones/{organizacionId}/medicos", "no-es-un-uuid"))
+        perform(get("/api/v1/organizaciones/{organizacionId}/medicos", "no-es-un-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
@@ -398,5 +408,31 @@ class MedicoControllerTest {
             String especialidad, String cedula, String telefono, String tarifaBase, boolean activo) {
         return new MedicoResponse(id, organizacionId, consultorioId, nombre, especialidad, cedula,
                 telefono, tarifaBase == null ? null : new BigDecimal(tarifaBase), activo);
+    }
+
+    /**
+     * Publica la clave pública de prueba y los claims esperados para que el filtro JWT
+     * acepte el token de {@link #TOKEN}. Funciona en rebanadas web porque
+     * {@code @DynamicPropertySource} es parte del framework de pruebas de Spring, no del
+     * arranque completo.
+     *
+     * @param registro registro de propiedades dinámicas del contexto de prueba
+     */
+    @DynamicPropertySource
+    static void inyectarClavePublicaDePrueba(DynamicPropertyRegistry registro) {
+        registro.add("auth.public.key", () -> ClaveRsaDePrueba.CLAVE_PUBLICA_BASE64);
+        registro.add("auth.issuer", () -> ClaveRsaDePrueba.EMISOR);
+        registro.add("auth.audience", () -> ClaveRsaDePrueba.AUDIENCIA);
+    }
+
+    /**
+     * Ejecuta la petición con la cabecera {@code Authorization} del token de prueba.
+     *
+     * @param peticion petición a ejecutar
+     * @return resultado de la petición para encadenar aserciones
+     * @throws Exception si MockMvc no puede ejecutarla
+     */
+    private ResultActions perform(MockHttpServletRequestBuilder peticion) throws Exception {
+        return mockMvc.perform(peticion.header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN));
     }
 }

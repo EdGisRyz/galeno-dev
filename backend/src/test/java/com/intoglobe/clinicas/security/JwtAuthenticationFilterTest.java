@@ -6,8 +6,11 @@ import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
@@ -47,6 +50,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(JwtAuthenticationFilterTest.ConfiguracionSonda.class)
+@ExtendWith(OutputCaptureExtension.class)
 class JwtAuthenticationFilterTest {
 
     private static final String RUTA_SONDA = "/api/v1/sonda/autenticacion";
@@ -206,6 +210,21 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    @DisplayName("El registro del rechazo no contiene el token recibido (R-SEG-10)")
+    void elRegistroDelRechazoNoContieneElToken(CapturedOutput salida) throws Exception {
+        // El token es deliberadamente distintivo para que la aserción no pueda pasar por
+        // casualidad, y está mal formado (no es un JWS de tres segmentos).
+        String tokenMalformado = "token-malformado-que-no-debe-llegar-al-log-8f2c41d7";
+
+        esperarNoAutorizado(sonda("Bearer " + tokenMalformado), MENSAJE_TOKEN_INVALIDO);
+
+        assertThat(salida.getAll())
+                .as("un token nunca puede aparecer en el log, ni entero ni en fragmentos largos (R-SEG-10)")
+                .doesNotContain(tokenMalformado)
+                .doesNotContain(tokenMalformado.substring(0, 24));
+    }
+
+    @Test
     @DisplayName("El 401 no reexpone el token recibido en el cuerpo de la respuesta")
     void elCuerpoDelNoAutorizadoNoRepiteElToken() throws Exception {
         String token = ClaveRsaDePrueba.token().firmadoConOtraClavePrivada().compactar();
@@ -279,12 +298,12 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("Sin cabecera Authorization la cadena continúa y no se autentica a nadie")
-    void sinCabeceraAuthorizationLaCadenaContinuaSinAutenticacion() throws Exception {
-        sonda(null)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.autenticado").value(false))
-                .andExpect(jsonPath("$.anonimo").value(true));
+    @DisplayName("Sin cabecera Authorization el filtro no autentica a nadie: la cadena responde 401")
+    void sinCabeceraAuthorizationElFiltroNoAutentica() throws Exception {
+        // El filtro deja pasar la petición sin principal; quien responde es el
+        // AuthenticationEntryPoint de la cadena cerrada (R-SEG-03), con el mismo contrato
+        // de error que usa el filtro para un token inválido.
+        esperarNoAutorizado(sonda(null), SecurityErrorResponder.MENSAJE_CREDENCIALES_BEARER);
     }
 
     private ResultActions sonda(String cabecera) throws Exception {
