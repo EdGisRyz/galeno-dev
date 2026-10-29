@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import type { AppointmentStatus, PaymentStatus } from '@/types/models';
+import type { EstadoCita } from '@/features/citas/citas.types';
+import type { EstadoPago } from '@/features/pagos/pagos.types';
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?:
@@ -11,8 +12,8 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
     | 'warning'
     | 'danger'
     | 'outline'
-    | AppointmentStatus
-    | PaymentStatus;
+    | EstadoCita
+    | EstadoPago;
   showDot?: boolean;
 }
 

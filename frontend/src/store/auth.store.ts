@@ -2,18 +2,7 @@
 // Gestiona el token JWT RS256, los datos del usuario, el rol y el timeout de inactividad (HIPAA).
 
 import { create } from 'zustand';
-import type { UserRole } from '@/types/models';
-
-export interface AuthUser {
-  id: string;
-  email: string;
-  role: UserRole;
-  tenantId: string;
-  medicoId?: string | null;
-  nombre?: string;
-  cedula?: string;
-  especialidad?: string;
-}
+import type { AuthUser, UserRole } from '@/features/auth/auth.types';
 
 interface AuthState {
   accessToken: string | null;

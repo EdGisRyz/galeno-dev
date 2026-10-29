@@ -11,7 +11,9 @@ import {
   mockDiagnoses,
   mockPrescriptions,
 } from './mockData';
-import type { Appointment, AppointmentStatus, Patient, SoapNote } from '@/types/models';
+import type { Cita, EstadoCita } from '@/features/citas/citas.types';
+import type { Paciente } from '@/features/pacientes/pacientes.types';
+import type { SoapNote } from '@/types/futuro.types';
 
 /**
  * Registra interceptores de Mock en la instancia de Axios si VITE_USE_MOCKS=true.
@@ -86,7 +88,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
 
     if (url.includes('/pacientes') && method === 'post') {
       await delay();
-      const newPatient: Patient = {
+      const newPatient: Paciente = {
         id: `pac-${Date.now()}`,
         organizacion_id: 'org-001',
         activo: true,
@@ -153,7 +155,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       const medico = mockDoctors.find((m) => m.id === body.medico_id) || mockDoctors[0];
       const consultorio = mockClinicRooms.find((c) => c.id === body.consultorio_id) || mockClinicRooms[0];
 
-      const newApt: Appointment = {
+      const newApt: Cita = {
         id: `apt-${Date.now()}`,
         organizacion_id: 'org-001',
         paciente_id: body.paciente_id,
@@ -186,7 +188,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       const match = url.match(/\/citas\/([^/]+)\/estado/);
       const id = match ? match[1] : '';
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-      const newStatus = body.estado as AppointmentStatus;
+      const newStatus = body.estado as EstadoCita;
 
       appointments = appointments.map((apt) =>
         apt.id === id

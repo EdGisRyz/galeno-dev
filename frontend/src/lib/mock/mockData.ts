@@ -1,19 +1,14 @@
-import type {
-  Organization,
-  Doctor,
-  ClinicRoom,
-  DoctorSchedule,
-  Patient,
-  PatientIdentification,
-  Appointment,
-  Payment,
-  SoapNote,
-  Diagnosis,
-  Prescription,
-  User,
-} from '@/types/models';
+import type { Usuario } from '@/features/auth/auth.types';
+import type { Cita } from '@/features/citas/citas.types';
+import type { Consultorio } from '@/features/consultorios/consultorios.types';
+import type { Diagnostico } from '@/features/expediente/expediente.types';
+import type { HorarioMedico, Medico } from '@/features/medicos/medicos.types';
+import type { Organizacion } from '@/features/organizaciones/organizaciones.types';
+import type { Paciente } from '@/features/pacientes/pacientes.types';
+import type { Pago } from '@/features/pagos/pagos.types';
+import type { PatientIdentification, Prescription, SoapNote } from '@/types/futuro.types';
 
-export const mockOrganization: Organization = {
+export const mockOrganization: Organizacion = {
   id: 'org-001',
   nombre: 'Clínica Médica San Rafael',
   plan: 'CLINICA',
@@ -21,7 +16,7 @@ export const mockOrganization: Organization = {
   created_at: new Date('2026-01-01').toISOString(),
 };
 
-export const mockUsers: User[] = [
+export const mockUsers: Usuario[] = [
   {
     id: 'usr-admin-1',
     organizacion_id: 'org-001',
@@ -50,7 +45,7 @@ export const mockUsers: User[] = [
   },
 ];
 
-export const mockClinicRooms: ClinicRoom[] = [
+export const mockClinicRooms: Consultorio[] = [
   {
     id: 'room-101',
     organizacion_id: 'org-001',
@@ -71,7 +66,7 @@ export const mockClinicRooms: ClinicRoom[] = [
   },
 ];
 
-export const mockDoctors: Doctor[] = [
+export const mockDoctors: Medico[] = [
   {
     id: 'med-001',
     organizacion_id: 'org-001',
@@ -98,7 +93,7 @@ export const mockDoctors: Doctor[] = [
   },
 ];
 
-export const mockDoctorSchedules: DoctorSchedule[] = [
+export const mockDoctorSchedules: HorarioMedico[] = [
   // Dra. Elena (Lunes a Viernes 09:00 a 14:00)
   ...[1, 2, 3, 4, 5].map((dia) => ({
     id: `sch-elena-${dia}`,
@@ -119,7 +114,7 @@ export const mockDoctorSchedules: DoctorSchedule[] = [
   })),
 ];
 
-export const mockPatients: (Patient & { ficha?: PatientIdentification })[] = [
+export const mockPatients: (Paciente & { ficha?: PatientIdentification })[] = [
   {
     id: 'pac-001',
     organizacion_id: 'org-001',
@@ -185,7 +180,7 @@ export const mockPatients: (Patient & { ficha?: PatientIdentification })[] = [
   },
 ];
 
-export const mockAppointments: Appointment[] = [
+export const mockAppointments: Cita[] = [
   {
     id: 'apt-001',
     organizacion_id: 'org-001',
@@ -233,7 +228,7 @@ export const mockAppointments: Appointment[] = [
   },
 ];
 
-export const mockPayments: Payment[] = [
+export const mockPayments: Pago[] = [
   {
     id: 'pay-001',
     organizacion_id: 'org-001',
@@ -301,7 +296,7 @@ export const mockCie10Catalog = [
   { codigo: 'Z00.0', descripcion: 'Examen médico general' },
 ];
 
-export const mockDiagnoses: Diagnosis[] = [
+export const mockDiagnoses: Diagnostico[] = [
   {
     id: 'diag-001',
     paciente_id: 'pac-001',
