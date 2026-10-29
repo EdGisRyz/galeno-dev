@@ -284,14 +284,20 @@ posible acceder a datos de otra clínica con solo conocer un UUID.
 
 **Decisión:**
 - El `tenantId` del token es la autoridad. El `{organizacionId}` de la ruta solo se acepta si
-  coincide con el claim, salvo para `ADMIN`.
+  coincide con el claim, **sin excepción de rol**.
 - **`403`** cuando el path no coincide con el claim; **`404`** cuando se pide por identificador un
   recurso de otra organización, para no revelar que existe.
+
+> **Corrección (29-oct-2026, antes del merge):** la redacción original de este ADR decía "salvo
+> para `ADMIN`". Eso contradecía la matriz de abajo, que limita a `ADMIN` a *su* organización, y
+> contradecía el criterio de salida de la feature: un token de la organización A no puede leer ni
+> mutar recursos de B, con ningún rol. No existe un rol de plataforma que justifique la excepción;
+> la única operación sin tenant en la ruta es el alta de organización, tratada aparte.
 - Matriz aplicada a los endpoints actuales:
 
 | Acción | ADMIN | MEDICO | PACIENTE |
 |---|---|---|---|
-| Crear organización | sí (ver riesgo) | 403 | 403 |
+| Crear organización | 403 | 403 | 403 |
 | Leer y modificar su organización | solo la suya | 403 | 403 |
 | Crear, modificar y desactivar consultorios y médicos | su organización | 403 | 403 |
 | Leer consultorios y médicos | su organización | su organización | 403 |
@@ -305,9 +311,11 @@ posible acceder a datos de otra clínica con solo conocer un UUID.
 **Consecuencias:**
 - (+) Un usuario de una organización no puede leer ni mutar datos de otra.
 - (+) El `404` por identificador no confirma la existencia de recursos ajenos.
-- (-) Un `ADMIN` puede crear organizaciones nuevas. No puede tocar datos de otra organización, así
-  que no es escalada entre tenants, pero sí expansión de tenancy, y se acepta mientras no exista
-  un flujo de alta dedicado.
+- (-) **El alta de organizaciones queda bloqueada (`403` para todos)** hasta que exista un flujo de
+  alta propio (Sprint 2). Se decidió el 29-oct-2026 al comprobar que, con el aislamiento por tenant
+  aplicado, una organización recién creada queda inalcanzable para todos los roles: el creador
+  recibe `201` y un `Location` que después da `403` en lectura, en alta de hijos y en baja, con la
+  fila activa para siempre. En desarrollo la clínica se siembra por SQL.
 - (-) La distinción `403`/`404` obliga a que el manejador de errores conozca las excepciones de
   autorización; si no, el `403` sale con el formato por defecto del framework y rompe el contrato
   de error único.
