@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { authService } from '@/features/auth/auth.service';
 import { useAuthStore } from '@/store/auth.store';
 
 /**
- * Contratos del store que R-SEG-07 exige y que T6a cierra.
+ * Contratos del store que R-SEG-07 exige y que T6a cerró.
  *
  * 1. Decodificación base64url: `atob` rechaza el alfabeto url-safe ('-', '_'), así que
  *    `decodeJwtPayload` debe traducirlo antes de decodificar; y las claims en UTF-8
@@ -13,7 +14,21 @@ import { useAuthStore } from '@/store/auth.store';
  * Los casos 1 y 2 se escribieron como `it.fails` cuando el comportamiento todavía no
  * existía. T6a los implementó, así que ahora son `it` normales: si vuelven a fallar, es
  * que el contrato se rompió. No se borran: son el criterio de aceptación.
+ *
+ * Adaptado en T6b (ADR-011): `login` ya no recibe el token desde la vista — lo obtiene del
+ * emisor y lo guarda solo en memoria. Los dos contratos se comprueban igual, con el servicio
+ * mockeado en su frontera.
  */
+
+vi.mock('@/features/auth/auth.service', () => ({
+  authService: {
+    login: vi.fn(),
+    refresh: vi.fn(),
+    logout: vi.fn(),
+  },
+}));
+
+const servicio = vi.mocked(authService);
 
 const JWT_HEADER = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9';
 const JWT_SIGNATURE = 'firma-simulada-rs256';
@@ -43,19 +58,27 @@ function makeToken(encodedPayload: string): string {
 
 const URL_SAFE_TOKEN = makeToken(toBase64Url(JSON.stringify(URL_SAFE_CLAIMS)));
 
+async function iniciarSesionCon(accessToken: string) {
+  servicio.login.mockResolvedValue({ accessToken });
+  return useAuthStore.getState().login(URL_SAFE_CLAIMS.email, 'secreta');
+}
+
 beforeEach(() => {
   localStorage.clear();
+  servicio.login.mockReset();
   useAuthStore.setState({
     accessToken: null,
     user: null,
     isAuthenticated: false,
-    lastActivity: Date.now(),
+    inicializando: false,
+    tenantSlug: '',
     showInactivityWarning: false,
+    lastActivity: Date.now(),
   });
 });
 
 describe('auth.store · alfabeto base64url (T6a)', () => {
-  it('decodifica un payload base64url con "-" que `atob` rechaza por sí solo', () => {
+  it('decodifica un payload base64url con "-" que `atob` rechaza por sí solo', async () => {
     const encoded = toBase64Url(JSON.stringify(URL_SAFE_CLAIMS));
 
     // El fixture realmente usa el alfabeto url-safe y `atob` realmente lo rechaza:
@@ -63,7 +86,7 @@ describe('auth.store · alfabeto base64url (T6a)', () => {
     expect(encoded).toContain('-');
     expect(() => atob(encoded)).toThrow();
 
-    useAuthStore.getState().login(makeToken(encoded));
+    await iniciarSesionCon(makeToken(encoded));
 
     expect(useAuthStore.getState().user).toMatchObject({
       id: 'usr-0002',
@@ -75,8 +98,8 @@ describe('auth.store · alfabeto base64url (T6a)', () => {
     expect(useAuthStore.getState().accessToken).toBe(makeToken(encoded));
   });
 
-  it('un payload base64url url-safe debe decodificar id, role y tenantId', () => {
-    useAuthStore.getState().login(URL_SAFE_TOKEN);
+  it('un payload base64url url-safe debe decodificar id, role y tenantId', async () => {
+    await iniciarSesionCon(URL_SAFE_TOKEN);
 
     expect(useAuthStore.getState().user).toMatchObject({
       id: 'usr-0002',
@@ -87,13 +110,12 @@ describe('auth.store · alfabeto base64url (T6a)', () => {
 });
 
 describe('auth.store · fail-open del login (T6a)', () => {
-  it('un token que no se puede decodificar no debe dejar la sesión autenticada', () => {
-    useAuthStore.getState().login('no-es-un-jwt');
+  it('un token que no se puede decodificar no debe dejar la sesión autenticada', async () => {
+    await expect(iniciarSesionCon('no-es-un-jwt')).rejects.toThrow();
 
     expect(useAuthStore.getState().user).toBeNull();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().accessToken).toBeNull();
-    expect(localStorage.getItem('access_token')).toBeNull();
-    expect(localStorage.getItem('auth_user')).toBeNull();
+    expect(Object.keys(localStorage)).toEqual([]);
   });
 });

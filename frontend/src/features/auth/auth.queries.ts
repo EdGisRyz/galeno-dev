@@ -1,8 +1,8 @@
-// Hooks TanStack Query del dominio Auth
-// Completar esto cuando este la V1.sql
+// Hooks TanStack Query del dominio Auth.
+// La sesión la abre el store (token en memoria + usuario decodificado del token), así que el hook
+// no vuelve a llamar al servicio: solo delega en `login`.
 
 import { useMutation } from '@tanstack/react-query';
-import { authService } from './auth.service';
 import type { LoginRequest } from './auth.types';
 import { useAuthStore } from '../../store/auth.store';
 
@@ -10,10 +10,7 @@ export const useLogin = () => {
   const login = useAuthStore((state) => state.login);
 
   return useMutation({
-    mutationFn: (payload: LoginRequest) => authService.login(payload),
-    onSuccess: (data) => {
-      login(data.accessToken);
-    },
+    mutationFn: ({ email, password }: LoginRequest) => login(email, password),
   });
 };
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/lib/axios';
+import { resumenDeErrorHttp } from '@/lib/apiError';
 import {
   Button,
   Input,
@@ -75,7 +76,7 @@ export function AgendaPage() {
         if (roomRes.data.length > 0) setNewRoomId(roomRes.data[0].id);
       })
       .catch((err) => {
-        console.error('Error al cargar agenda médica:', err);
+        console.error('Error al cargar agenda médica:', resumenDeErrorHttp(err));
       })
       .finally(() => {
         setIsLoading(false);
@@ -102,7 +103,7 @@ export function AgendaPage() {
       setAlertNotice(`Cita actualizada exitosamente a estado: ${newStatus}`);
       setTimeout(() => setAlertNotice(null), 3500);
     } catch (err) {
-      console.error('Error al actualizar cita:', err);
+      console.error('Error al actualizar cita:', resumenDeErrorHttp(err));
     }
   };
 
@@ -129,7 +130,7 @@ export function AgendaPage() {
       setAlertNotice('¡Nueva cita médica agendada correctamente!');
       setTimeout(() => setAlertNotice(null), 3500);
     } catch (err) {
-      console.error('Error al crear cita:', err);
+      console.error('Error al crear cita:', resumenDeErrorHttp(err));
     } finally {
       setIsSubmitting(false);
     }

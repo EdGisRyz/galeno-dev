@@ -29,13 +29,27 @@ export function useInactivityTimeout() {
     window.addEventListener('click', handleUserInteraction, { passive: true });
     window.addEventListener('touchstart', handleUserInteraction, { passive: true });
 
+    // Cierre por inactividad. El descarte del refresco (R-SEG-08) exige que el emisor reciba el
+    // POST /auth/logout ANTES de navegar: si se navega primero, el navegador aborta la petición y
+    // la cookie `httpOnly` sobrevive, con lo que el arranque volvería a autenticar la sesión y el
+    // cierre por inactividad sería cosmético.
+    const cerrarSesionYVolverAlLogin = async () => {
+      try {
+        // El store limpia la memoria de forma síncrona: la UI deja de estar autenticada en el
+        // instante, aunque la respuesta del emisor tarde varios cientos de milisegundos.
+        await logout();
+      } catch {
+        // Un cierre fallido nunca puede dejar al usuario atrapado en una UI autenticada.
+      }
+      window.location.href = '/login?reason=session_expired';
+    };
+
     // Intervalo de comprobación cada 15 segundos
     const interval = setInterval(() => {
       const elapsed = Date.now() - useAuthStore.getState().lastActivity;
 
       if (elapsed >= TIMEOUT_MS) {
-        logout();
-        window.location.href = '/login?reason=session_expired';
+        void cerrarSesionYVolverAlLogin();
       } else if (elapsed >= WARNING_MS) {
         setShowInactivityWarning(true);
       }

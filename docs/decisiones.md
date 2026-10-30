@@ -83,6 +83,14 @@ el namespace de la empresa empleadora.
 - `GET /api/v1/pacientes/{id}/citas`
 - `POST /api/v1/citas/{id}/cancelar`
 
+> **Aclaración (29-oct-2026) — quién sirve `/api/v1/auth/*`:** esa ruta pertenece al
+> **AuthService**, no al backend. R8.2 fija que el backend solo valida tokens y nunca los emite, así
+> que esta convención define la **forma** de la ruta de autenticación, no el servicio que la
+> expone. Consecuencia para el frontend: el login, el refresco y el cierre de sesión usan
+> `VITE_AUTH_URL` (el origen del emisor), separada de `VITE_API_URL`, y el navegador le habla
+> directamente con credenciales. Si el AuthService real resulta ser backend-a-backend, se agrega un
+> proxy en el backend y **solo cambia esa variable**.
+
 **Consecuencias:**
 - (+) Permite coexistencia con v2+ sin romper clientes
 - (+) Convención REST estándar

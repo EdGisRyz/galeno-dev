@@ -7,8 +7,14 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, inicializando } = useAuthStore();
   const location = useLocation();
+
+  // Espera al refresco silencioso de arranque (ADR-011): mientras está en vuelo no se decide
+  // nada, para no mostrar el login como si la sesión fuera anónima cuando solo está recargando.
+  if (inicializando) {
+    return null;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
@@ -20,4 +26,3 @@ export function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
 
   return <Outlet />;
 }
-
