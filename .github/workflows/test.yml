@@ -3,8 +3,10 @@ name: Tests CI
 on:
   push:
     branches: [main, develop]
+  # Sin filtro de rama base a propósito: cualquier PR se prueba, incluidos los
+  # encadenados, cuya base es la rama del PR anterior y no `develop`. Con el
+  # filtro `[main, develop]` un PR apilado no ejecuta nada.
   pull_request:
-    branches: [main, develop]   # features → develop
 
 # Mínimo privilegio: ningún job necesita escribir en el repositorio.
 permissions:
