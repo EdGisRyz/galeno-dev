@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main, develop]   # features → develop
 
+# Mínimo privilegio: ningún job necesita escribir en el repositorio.
+permissions:
+  contents: read
+
+# Un push nuevo sobre la misma rama/PR cancela la corrida anterior: no tiene
+# sentido gastar minutos en una versión que ya quedó obsoleta.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-java:
     name: Tests Spring Boot (Java 21)
@@ -21,6 +31,11 @@ jobs:
           distribution: "temurin"
           cache: "maven"              # cachea dependencias entre runs: CI más rápido
 
+      # R-SEG-11: falla rápido, antes de compilar, si la cadena de filtros abre
+      # una ruta con permitAll() sin declararla en una constante revisada.
+      - name: Compuerta de seguridad (permitAll)
+        run: sh scripts/verificar-seguridad.sh
+
       - name: Run tests
         working-directory: backend
         run: |
@@ -28,7 +43,7 @@ jobs:
           ./mvnw clean test -B
 
   test-frontend:
-    name: Build Frontend (pnpm)
+    name: Lint, tests y build (pnpm)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -45,8 +60,40 @@ jobs:
           node-version: "22"
           cache: "pnpm"
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: Install + typecheck + build
+      - name: Install
         working-directory: frontend
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
+        run: pnpm install --frozen-lockfile
+
+      # Falla rápido con lo barato: el lint tarda segundos.
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
+
+      # El suite usa pool 'threads' y no necesita variables de entorno.
+      - name: Tests
+        working-directory: frontend
+        run: pnpm test
+
+      # El build incluye el typecheck (`tsc -b`): va último porque es el más caro.
+      - name: Build (typecheck + bundle)
+        working-directory: frontend
+        run: pnpm run build
+
+  # Solo en pull_request: compara las dependencias del PR contra la base y
+  # bloquea severidades altas. No corre en push porque ahí no hay diff de
+  # dependencias que revisar (y en push ya está el lockfile commiteado).
+  dependency-review:
+    name: Revisión de dependencias (PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Revisar cambios de dependencias
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
