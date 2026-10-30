@@ -10,16 +10,22 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 import com.intoglobe.clinicas.dto.request.OrganizacionRequest;
 import com.intoglobe.clinicas.dto.response.OrganizacionResponse;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.model.PlanTipo;
+import com.intoglobe.clinicas.security.ClaveRsaDePrueba;
 import com.intoglobe.clinicas.security.SecurityConfig;
 import com.intoglobe.clinicas.service.OrganizacionService;
 
@@ -44,10 +50,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Pruebas MVC del contrato HTTP de {@link OrganizacionController}.
  *
- * <p>Rebanada web pura: no hay base de datos. El service se simula con
- * {@code @MockitoBean} y se importa explícitamente {@link SecurityConfig} para
- * verificar que la configuración abierta de la fase 0 realmente deja pasar las
- * peticiones, sin desactivar filtros, sin usuario simulado y sin omitir CSRF.</p>
+ * <p>Rebanada web pura: no hay base de datos y el service se simula con
+ * {@code @MockitoBean}. Se importa explícitamente {@link SecurityConfig} para ejercer el
+ * contrato a través de la cadena de filtros real: desde T3 (R-SEG-03) todos los endpoints
+ * exigen un token RS256 válido. Cada petición se autentica con un token Bearer de verdad,
+ * firmado con el par RSA que {@link ClaveRsaDePrueba} genera en memoria y publicado a la
+ * cadena con {@link DynamicPropertySource}: no se usan post-procesadores de seguridad ni
+ * usuarios simulados, así que el filtro JWT, el entry point y el contrato de error siguen
+ * siendo los reales.</p>
  */
 @WebMvcTest(OrganizacionController.class)
 @ActiveProfiles("test")
@@ -65,6 +75,7 @@ class OrganizacionControllerTest {
     private static final String MENSAJE_ID_INVALIDO =
             "El parámetro 'id' tiene un formato inválido";
 
+    private static final String TOKEN = ClaveRsaDePrueba.token().compactar();
     @Autowired
     private MockMvc mockMvc;
 
@@ -77,7 +88,7 @@ class OrganizacionControllerTest {
         when(organizacionService.crear(any(OrganizacionRequest.class)))
                 .thenReturn(respuesta(ID, "Clínica San Rafael", PlanTipo.CLINICA, "sub-rafael", TRIAL_HASTA, true));
 
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica San Rafael","plan":"CLINICA","subscriptionId":"sub-rafael","trialHasta":"2026-12-31T23:59:59-05:00"}
@@ -99,7 +110,7 @@ class OrganizacionControllerTest {
         when(organizacionService.crear(any(OrganizacionRequest.class)))
                 .thenReturn(respuesta(ID, "Clínica Límite", PlanTipo.SOLO, subscriptionId, null, true));
 
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Límite","plan":"SOLO","subscriptionId":"%s"}
@@ -115,7 +126,7 @@ class OrganizacionControllerTest {
                 .thenReturn(respuesta(ID, "Consultorio Solo", PlanTipo.SOLO, null, null, true));
         var captor = org.mockito.ArgumentCaptor.forClass(OrganizacionRequest.class);
 
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Consultorio Solo","plan":"SOLO"}
@@ -135,10 +146,10 @@ class OrganizacionControllerTest {
     void rutas_shouldExposeOnlyTheVersionedV1Path() throws Exception {
         when(organizacionService.listarActivas()).thenReturn(java.util.List.of());
 
-        mockMvc.perform(get("/api/organizaciones"))
+        perform(get("/api/organizaciones"))
                 .andExpect(status().isNotFound());
 
-        mockMvc.perform(get("/api/v1/organizaciones"))
+        perform(get("/api/v1/organizaciones"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
@@ -149,7 +160,7 @@ class OrganizacionControllerTest {
         when(organizacionService.buscarPorId(ID))
                 .thenReturn(respuesta(ID, "Clínica Norte", PlanTipo.ENTERPRISE, "sub-norte", TRIAL_HASTA, true));
 
-        mockMvc.perform(get("/api/v1/organizaciones/{id}", ID))
+        perform(get("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(ID.toString()))
                 .andExpect(jsonPath("$.nombre").value("Clínica Norte"))
@@ -165,7 +176,7 @@ class OrganizacionControllerTest {
                 respuesta(UUID.randomUUID(), "Alfa Salud", PlanTipo.SOLO, null, null, true),
                 respuesta(UUID.randomUUID(), "Beta Médica", PlanTipo.CLINICA, "sub-beta", TRIAL_HASTA, true)));
 
-        mockMvc.perform(get("/api/v1/organizaciones"))
+        perform(get("/api/v1/organizaciones"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(2))
@@ -180,7 +191,7 @@ class OrganizacionControllerTest {
         when(organizacionService.actualizar(any(UUID.class), any(OrganizacionRequest.class)))
                 .thenReturn(respuesta(ID, "Clínica Renombrada", PlanTipo.ENTERPRISE, null, null, true));
 
-        mockMvc.perform(put("/api/v1/organizaciones/{id}", ID)
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Renombrada","plan":"ENTERPRISE"}
@@ -196,14 +207,14 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("DELETE /{id} devuelve 204 sin cuerpo y es idempotente al repetirse")
     void desactivar_shouldReturn204WithoutBody_andRemain204_whenRepeated() throws Exception {
-        mockMvc.perform(delete("/api/v1/organizaciones/{id}", ID))
+        perform(delete("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
         when(organizacionService.buscarPorId(ID))
                 .thenReturn(respuesta(ID, "Clínica Baja", PlanTipo.SOLO, null, null, false));
 
-        mockMvc.perform(delete("/api/v1/organizaciones/{id}", ID))
+        perform(delete("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
@@ -216,7 +227,7 @@ class OrganizacionControllerTest {
         doThrow(new ResourceNotFoundException("Organizacion", ID))
                 .when(organizacionService).buscarPorId(ID);
 
-        mockMvc.perform(get("/api/v1/organizaciones/{id}", ID))
+        perform(get("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.codigo").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -231,7 +242,7 @@ class OrganizacionControllerTest {
         doThrow(new ResourceNotFoundException("Organizacion", ID))
                 .when(organizacionService).actualizar(any(UUID.class), any(OrganizacionRequest.class));
 
-        mockMvc.perform(put("/api/v1/organizaciones/{id}", ID)
+        perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Fantasma","plan":"SOLO"}
@@ -248,7 +259,7 @@ class OrganizacionControllerTest {
         doThrow(new ResourceNotFoundException("Organizacion", ID))
                 .when(organizacionService).desactivar(ID);
 
-        mockMvc.perform(delete("/api/v1/organizaciones/{id}", ID))
+        perform(delete("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.codigo").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -259,7 +270,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con nombre en blanco devuelve 400 con mensaje de negocio en español")
     void crear_shouldReturn400_whenNombreIsBlank() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"   ","plan":"CLINICA"}
@@ -275,7 +286,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con nombre de más de 120 caracteres devuelve 400")
     void crear_shouldReturn400_whenNombreIsTooLong() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"%s","plan":"SOLO"}
@@ -289,7 +300,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con subscriptionId de más de 100 caracteres devuelve 400")
     void crear_shouldReturn400_whenSubscriptionIdIsTooLong() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Límite","plan":"SOLO","subscriptionId":"%s"}
@@ -303,7 +314,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con plan nulo devuelve 400")
     void crear_shouldReturn400_whenPlanIsNull() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Sin Plan"}
@@ -317,7 +328,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con JSON mal formado devuelve 400 sin detalles internos del parser")
     void crear_shouldReturn400_whenJsonIsMalformed() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Clínica Rota\",\"plan\":"))
                 .andExpect(status().isBadRequest())
@@ -330,7 +341,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con enum de plan inválido devuelve 400 sin detalles internos")
     void crear_shouldReturn400_whenPlanEnumIsInvalid() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Premium","plan":"PREMIUM"}
@@ -344,7 +355,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("POST con fecha inválida devuelve 400 sin detalles internos")
     void crear_shouldReturn400_whenTrialHastaIsInvalid() throws Exception {
-        mockMvc.perform(post("/api/v1/organizaciones")
+        perform(post("/api/v1/organizaciones")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Fecha","plan":"CLINICA","trialHasta":"31-12-2026"}
@@ -358,7 +369,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("GET /{id} con UUID de path inválido devuelve 400 con ErrorResponse")
     void buscarPorId_shouldReturn400_whenUuidIsInvalid() throws Exception {
-        mockMvc.perform(get("/api/v1/organizaciones/{id}", "no-es-un-uuid"))
+        perform(get("/api/v1/organizaciones/{id}", "no-es-un-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
@@ -370,7 +381,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("PUT /{id} con UUID de path inválido devuelve 400 con ErrorResponse")
     void actualizar_shouldReturn400_whenUuidIsInvalid() throws Exception {
-        mockMvc.perform(put("/api/v1/organizaciones/{id}", "no-es-un-uuid")
+        perform(put("/api/v1/organizaciones/{id}", "no-es-un-uuid")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nombre":"Clínica Inválida","plan":"SOLO"}
@@ -418,5 +429,31 @@ class OrganizacionControllerTest {
     private static OrganizacionResponse respuesta(UUID id, String nombre, PlanTipo plan,
             String subscriptionId, OffsetDateTime trialHasta, boolean activo) {
         return new OrganizacionResponse(id, nombre, plan, subscriptionId, trialHasta, activo, CREADA_EN);
+    }
+
+    /**
+     * Publica la clave pública de prueba y los claims esperados para que el filtro JWT
+     * acepte el token de {@link #TOKEN}. Funciona en rebanadas web porque
+     * {@code @DynamicPropertySource} es parte del framework de pruebas de Spring, no del
+     * arranque completo.
+     *
+     * @param registro registro de propiedades dinámicas del contexto de prueba
+     */
+    @DynamicPropertySource
+    static void inyectarClavePublicaDePrueba(DynamicPropertyRegistry registro) {
+        registro.add("auth.public.key", () -> ClaveRsaDePrueba.CLAVE_PUBLICA_BASE64);
+        registro.add("auth.issuer", () -> ClaveRsaDePrueba.EMISOR);
+        registro.add("auth.audience", () -> ClaveRsaDePrueba.AUDIENCIA);
+    }
+
+    /**
+     * Ejecuta la petición con la cabecera {@code Authorization} del token de prueba.
+     *
+     * @param peticion petición a ejecutar
+     * @return resultado de la petición para encadenar aserciones
+     * @throws Exception si MockMvc no puede ejecutarla
+     */
+    private ResultActions perform(MockHttpServletRequestBuilder peticion) throws Exception {
+        return mockMvc.perform(peticion.header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN));
     }
 }
