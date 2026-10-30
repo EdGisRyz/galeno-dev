@@ -1,5 +1,23 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { authService } from '@/features/auth/auth.service';
 import { useAuthStore } from '@/store/auth.store';
+import { expVigente } from '../helpers/jwt';
+
+/**
+ * Adaptado en T6b (ADR-011): `login` ya no recibe un token — lo pide al emisor y lo guarda solo
+ * en memoria. Los casos son los mismos (decodificación base64url/UTF-8 y limpieza al cerrar
+ * sesión); lo único que cambió es la frontera: el servicio está mockeado para no tocar la red.
+ */
+
+vi.mock('@/features/auth/auth.service', () => ({
+  authService: {
+    login: vi.fn(),
+    refresh: vi.fn(),
+    logout: vi.fn(),
+  },
+}));
+
+const servicio = vi.mocked(authService);
 
 const JWT_HEADER = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9';
 const JWT_SIGNATURE = 'firma-simulada-rs256';
@@ -36,23 +54,34 @@ const CLAIMS = {
   role: 'MEDICO',
   tenantId: 'org-001',
   medicoId: 'med-0001',
-  exp: 1793000000,
+  exp: expVigente(),
 };
+
+/** Autentica con un token concreto, como haría el emisor al responder un login válido. */
+async function iniciarSesionCon(accessToken: string) {
+  servicio.login.mockResolvedValue({ accessToken });
+  return useAuthStore.getState().login(CLAIMS.email, 'secreta');
+}
 
 beforeEach(() => {
   localStorage.clear();
+  servicio.login.mockReset();
+  servicio.logout.mockReset();
+  servicio.logout.mockResolvedValue(undefined);
   useAuthStore.setState({
     accessToken: null,
     user: null,
     isAuthenticated: false,
-    lastActivity: Date.now(),
+    inicializando: false,
+    tenantSlug: '',
     showInactivityWarning: false,
+    lastActivity: Date.now(),
   });
 });
 
 describe('auth.store · decodificación del token', () => {
-  it('decodifica los claims documentados de una carga útil base64url válida', () => {
-    useAuthStore.getState().login(makeToken(CLAIMS));
+  it('decodifica los claims documentados de una carga útil base64url válida', async () => {
+    await iniciarSesionCon(makeToken(CLAIMS));
 
     expect(useAuthStore.getState().user).toEqual({
       id: 'usr-0001',
@@ -64,37 +93,37 @@ describe('auth.store · decodificación del token', () => {
     expect(useAuthStore.getState().accessToken).toBe(makeToken(CLAIMS));
   });
 
-  it('decodifica claims en UTF-8 sin perder los caracteres acentuados', () => {
-    useAuthStore.getState().login(makeUtf8Token({ ...CLAIMS, email: 'jósé@clínica.mx' }));
+  it('decodifica claims en UTF-8 sin perder los caracteres acentuados', async () => {
+    await iniciarSesionCon(makeUtf8Token({ ...CLAIMS, email: 'jósé@clínica.mx' }));
 
     expect(useAuthStore.getState().user?.email).toBe('jósé@clínica.mx');
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
   });
 
-  it('no lanza y deja el usuario en null cuando el token está mal formado', () => {
-    expect(() => useAuthStore.getState().login('no-es-un-jwt')).not.toThrow();
+  it('no lanza de forma inesperada y deja el usuario en null cuando el token está mal formado', async () => {
+    await expect(iniciarSesionCon('no-es-un-jwt')).rejects.toThrow();
     expect(useAuthStore.getState().user).toBeNull();
 
-    expect(() =>
-      useAuthStore.getState().login(`${JWT_HEADER}.no-es-base64!.${JWT_SIGNATURE}`),
-    ).not.toThrow();
+    await expect(
+      iniciarSesionCon(`${JWT_HEADER}.no-es-base64!.${JWT_SIGNATURE}`),
+    ).rejects.toThrow();
     expect(useAuthStore.getState().user).toBeNull();
   });
 });
 
 describe('auth.store · logout', () => {
-  it('limpia token, usuario, banderas y los artefactos de sesión en localStorage', () => {
-    useAuthStore.getState().login(makeToken(CLAIMS));
+  it('limpia token, usuario, banderas y no deja artefactos de sesión en localStorage', async () => {
+    await iniciarSesionCon(makeToken(CLAIMS));
     useAuthStore.getState().setShowInactivityWarning(true);
 
-    useAuthStore.getState().logout();
+    await useAuthStore.getState().logout();
 
     const state = useAuthStore.getState();
     expect(state.accessToken).toBeNull();
     expect(state.user).toBeNull();
     expect(state.isAuthenticated).toBe(false);
     expect(state.showInactivityWarning).toBe(false);
-    expect(localStorage.getItem('access_token')).toBeNull();
-    expect(localStorage.getItem('auth_user')).toBeNull();
+    // La sesión en memoria no escribe ninguna clave: ni al entrar ni al salir.
+    expect(Object.keys(localStorage)).toEqual([]);
   });
 });

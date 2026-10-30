@@ -28,6 +28,13 @@ export function debenUsarseMocks(): boolean {
 }
 
 /**
+ * Vigencia del token simulado, en segundos: 30 minutos (ADR-012).
+ * El store rechaza tokens vencidos, así que el mock no puede fabricar una vigencia mayor que la
+ * que decide el contrato.
+ */
+const VIGENCIA_TOKEN_SEGUNDOS = 30 * 60;
+
+/**
  * Registra interceptores de Mock en la instancia de Axios cuando `debenUsarseMocks()`.
  * Permite desarrollar y probar todos los flujos UI de forma 100% autónoma.
  */
@@ -55,14 +62,18 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       const data = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const user = mockUsers.find((u) => u.email === data.email) || mockUsers[0];
 
-      // Simulamos token JWT RS256 codificando la carga útil
+      // Simulamos token JWT RS256 codificando la carga útil.
+      // Vigencia alineada con ADR-012: **30 minutos**, los mismos que la ventana de inactividad.
+      // Un token de 8 h volvía decorativo el cierre por inactividad.
+      const iat = Math.floor(Date.now() / 1000);
       const fakePayload = {
         sub: user.id,
         email: user.email,
         role: user.rol,
         tenantId: user.organizacion_id,
         medicoId: user.medico_id,
-        exp: Math.floor(Date.now() / 1000) + 3600 * 8, // 8h
+        iat,
+        exp: iat + VIGENCIA_TOKEN_SEGUNDOS,
       };
 
       const fakeToken = `eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.${btoa(

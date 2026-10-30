@@ -3,7 +3,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { loginSchema, type LoginFormValues } from './auth.schema';
-import { authService } from './auth.service';
 import { useAuthStore } from '@/store/auth.store';
 import { Button, Input, Alert } from '@/components/ui';
 import { Mail, Lock, LogIn } from 'lucide-react';
@@ -30,18 +29,18 @@ export function LoginForm() {
     try {
       setIsLoading(true);
       setErrorMessage(null);
-      const data = await authService.login(values);
 
-      // Guardar sesión en store
-      const anyData = data as unknown as { accessToken: string; user?: unknown };
-      login(anyData.accessToken, anyData.user as never);
+      // El store autentica contra el emisor y deja la sesión **solo en memoria** (ADR-011).
+      await login(values.email, values.password);
 
       // Redirigir a la agenda principal
       navigate('/agenda', { replace: true });
     } catch (err: unknown) {
-      const errorObj = err as { response?: { data?: { message?: string } } };
+      // El `ErrorResponse` del backend y el emisor de desarrollo usan `mensaje`; leer `message`
+      // dejaba siempre el texto genérico y ocultaba el motivo real al usuario.
+      const errorObj = err as { response?: { data?: { mensaje?: string } } };
       setErrorMessage(
-        errorObj.response?.data?.message ||
+        errorObj.response?.data?.mensaje ||
           'Credenciales incorrectas o error de comunicación con el servicio de autenticación.'
       );
     } finally {

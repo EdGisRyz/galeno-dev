@@ -34,7 +34,27 @@ export interface LoginRequest {
   password: string;
 }
 
+/**
+ * Proyección de identidad que el emisor devuelve junto al token: son los claims del token
+ * (ADR-010), no la fila `usuario` del esquema. Se tipa para no mentir sobre la forma del
+ * contrato, pero la autoridad de la sesión son los claims del token que se decodifican en el
+ * store: si el cuerpo y el token no coincidieran, manda el token.
+ */
+export interface UsuarioSesion {
+  sub: string;
+  email: string;
+  role: UserRole;
+  tenantId: string;
+  medicoId?: string | null;
+}
+
+/** `POST /auth/login` del emisor: token de acceso más la proyección del usuario. */
 export interface LoginResponse {
   accessToken: string;
-  // Agregar más campos cuando se defina los datos con el backend
+  user?: UsuarioSesion;
+}
+
+/** `POST /auth/refresh` del emisor: token de acceso renovado (el refresco viaja en la cookie). */
+export interface RefreshResponse {
+  accessToken: string;
 }
