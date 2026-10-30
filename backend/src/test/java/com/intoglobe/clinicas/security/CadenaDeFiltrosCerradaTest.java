@@ -37,9 +37,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ({@code ErrorResponse}) y sin reto {@code WWW-Authenticate: Basic}, porque el mecanismo
  * de esta API es Bearer y ofrecer Basic invita a un cliente a probar otro esquema.</p>
  *
- * <p>Las únicas rutas públicas son las de documentación; se comprueba que no quedan
- * bloqueadas. Con un token válido la cadena deja pasar la petición, que es lo que
- * demuestran aquí y en las pruebas MVC de cada módulo.</p>
+ * <p>Las únicas rutas públicas son las de documentación, y desde T5 esas rutas solo existen
+ * con un perfil de desarrollo activo: aquí se comprueba que, sin él, responden {@code 404} y
+ * <em>no</em> {@code 401} ni {@code 403} —es decir, que siguen fuera de la autenticación y
+ * que lo que las cierra es su ausencia—. El estado habilitado se prueba en
+ * {@link DocumentacionHabilitadaEnDesarrolloTest}. Con un token válido la cadena deja pasar
+ * la petición, que es lo que demuestran aquí y en las pruebas MVC de cada módulo.</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -153,10 +156,17 @@ class CadenaDeFiltrosCerradaTest {
     }
 
     @Test
-    @DisplayName("La documentación de la API sigue siendo pública y no responde 401")
+    @DisplayName("Sin perfil de desarrollo la documentación no existe: responde 404, no 401 ni 403")
     void laDocumentacionSigueSiendoPublica() throws Exception {
+        // Premisa cambiada por T5: springdoc está apagado por defecto (R-SEG-09), así que las
+        // rutas de documentación no tienen controlador que las sirva. Que respondan 404 y no
+        // 401/403 es precisamente la prueba de que la regla permitAll() sigue en su sitio y
+        // de que cerrar la documentación no dependió de esconderla detrás de la autenticación.
         for (String ruta : List.of("/v3/api-docs", "/swagger-ui/index.html", "/swagger-ui.html")) {
             int estado = mockMvc.perform(get(ruta)).andReturn().getResponse().getStatus();
+            assertThat(estado)
+                    .as("la ruta de documentación %s no puede existir sin el perfil de desarrollo", ruta)
+                    .isEqualTo(404);
             assertThat(estado)
                     .as("la ruta de documentación %s no puede quedar detrás de la autenticación", ruta)
                     .isNotIn(401, 403);

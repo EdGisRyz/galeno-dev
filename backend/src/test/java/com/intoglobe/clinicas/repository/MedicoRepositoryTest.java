@@ -243,6 +243,32 @@ class MedicoRepositoryTest {
      * quien rechaza la fila.</p>
      */
     @Test
+    @DisplayName("buscarPorIdYOrganizacion solo devuelve el médico de la organización pedida")
+    void buscarPorIdYOrganizacion_shouldReturnOnlyTheScopedMedico() {
+        var propia = persistirOrganizacion("Clínica Propia");
+        var ajena = persistirOrganizacion("Clínica Ajena");
+        var consultorioPropio = persistirConsultorio(propia, "Consultorio Propio");
+        var consultorioAjeno = persistirConsultorio(ajena, "Consultorio Ajeno");
+        var medicoPropio = medicoRepository
+                .saveAndFlush(new Medico(propia, consultorioPropio, NOMBRE, null, null, null, null));
+        var medicoAjeno = medicoRepository
+                .saveAndFlush(new Medico(ajena, consultorioAjeno, "Dr. Ajeno", null, null, null, null));
+        entityManager.clear();
+
+        var encontrado = medicoRepository.buscarPorIdYOrganizacion(medicoPropio.getId(), propia.getId());
+
+        assertThat(encontrado)
+                .as("el médico de la propia organización debe encontrarse")
+                .isPresent();
+        assertThat(encontrado.orElseThrow().getId()).isEqualTo(medicoPropio.getId());
+        assertThat(medicoRepository.buscarPorIdYOrganizacion(medicoAjeno.getId(), propia.getId()))
+                .as("un médico de otra organización no puede encontrarse desde este tenant (IDOR)")
+                .isEmpty();
+        assertThat(medicoRepository.buscarPorIdYOrganizacion(medicoAjeno.getId(), ajena.getId()))
+                .isPresent();
+    }
+
+    @Test
     @DisplayName("un médico huérfano viola la FK de consultorio y el repositorio traduce el error")
     void save_shouldRejectMedicoWithInexistentConsultorio() {
         var organizacion = persistirOrganizacion("Clínica Huérfana");

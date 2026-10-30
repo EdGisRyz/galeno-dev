@@ -1,6 +1,7 @@
 package com.intoglobe.clinicas.repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -36,4 +37,23 @@ public interface MedicoRepository extends JpaRepository<Medico, UUID> {
      */
     @Query("SELECT m FROM Medico m WHERE m.organizacion.id = :orgId AND m.activo = true ORDER BY m.nombre")
     List<Medico> listarActivosPorOrganizacion(@Param("orgId") UUID organizacionId);
+
+    /**
+     * Recupera un médico solo si pertenece a la organización indicada.
+     *
+     * <p>Es la consulta de las tres operaciones por id ({@code GET}, {@code PUT} y
+     * {@code DELETE /medicos/{id}}): el filtro por organización viaja en el {@code WHERE},
+     * así que un médico de otro tenant no se carga nunca y la respuesta es el mismo
+     * {@code 404} que el de un identificador inexistente (R-SEG-04, D5.6). Es la consulta
+     * que cierra el IDOR que este módulo tenía abierto: antes se buscaba por id sin mirar la
+     * organización.</p>
+     *
+     * @param id             identificador del médico solicitado
+     * @param organizacionId organización dueña según el token de la petición
+     * @return el médico si existe <em>y</em> pertenece a esa organización; vacío en cualquier
+     *         otro caso
+     */
+    @Query("SELECT m FROM Medico m WHERE m.id = :id AND m.organizacion.id = :orgId")
+    Optional<Medico> buscarPorIdYOrganizacion(
+            @Param("id") UUID id, @Param("orgId") UUID organizacionId);
 }

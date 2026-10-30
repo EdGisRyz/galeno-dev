@@ -15,6 +15,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -74,6 +75,24 @@ public final class ClaveRsaDePrueba {
      */
     public static Token token() {
         return new Token();
+    }
+
+    /**
+     * Emite un token compacto del rol y el tenant indicados, con el resto de los claims del
+     * contrato vigentes.
+     *
+     * <p>Es el punto de entrada para las pruebas de autorización que viven fuera de este
+     * paquete (por ejemplo los tests MVC de {@code controller} o las pruebas de aislamiento
+     * entre tenants): el constructor fluido {@link Token} sigue siendo privado del paquete
+     * para que nadie fuera de {@code security} pueda fabricar un token con claims fuera del
+     * contrato por accidente.</p>
+     *
+     * @param rol      claim {@code role}: {@code ADMIN}, {@code MEDICO} o {@code PACIENTE}
+     * @param tenantId claim {@code tenantId}: organización dueña de la sesión
+     * @return el token compacto y firmado con la clave privada de prueba
+     */
+    public static String tokenPara(String rol, UUID tenantId) {
+        return token().conRol(rol).conInquilino(tenantId.toString()).compactar();
     }
 
     /**

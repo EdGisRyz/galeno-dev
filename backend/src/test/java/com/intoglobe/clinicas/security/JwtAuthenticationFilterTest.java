@@ -13,12 +13,16 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -327,6 +331,11 @@ class JwtAuthenticationFilterTest {
 
     /**
      * Sonda mínima que publica el estado del {@code SecurityContext} de la petición.
+     *
+     * <p>Desde T5 la cadena de producción es deny-by-default: una ruta con controlador y sin
+     * regla responde {@code 403}. La sonda declara su ruta en una cadena propia -con el
+     * filtro JWT y los manejadores de error reales- para seguir ejerciendo el filtro que
+     * esta clase prueba, en lugar de depender del fallback que T5 cerró.</p>
      */
     @TestConfiguration
     static class ConfiguracionSonda {
@@ -334,6 +343,13 @@ class JwtAuthenticationFilterTest {
         @Bean
         ControladorSonda controladorSonda() {
             return new ControladorSonda();
+        }
+
+        @Bean
+        @Order(Ordered.HIGHEST_PRECEDENCE)
+        SecurityFilterChain cadenaDeSonda(HttpSecurity http, JwtAuthenticationFilter filtroJwt,
+                RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler accesoDenegado) throws Exception {
+            return CadenaDeSonda.crear(http, RUTA_SONDA, filtroJwt, entryPoint, accesoDenegado);
         }
     }
 

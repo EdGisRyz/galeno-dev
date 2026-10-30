@@ -40,12 +40,21 @@ Thumbs.db
 out/
 
 # === Variables de entorno ===
-.env
-.env.local
-.env.*.local
+# Pueden contener secretos: solo se versionan las plantillas sin valores.
+.env*
+!.env.example
 
 # === Configuración de credenciales ===
 backend/src/main/resources/application.properties
+
+# === Material de clave (R-SEG-09, ADR-009) ===
+# La clave privada del emisor nunca entra al repositorio, al historial ni a un log. Estos
+# patrones son los que hacen innecesario guardar el par RSA fuera del árbol de trabajo:
+# sin ellos, un archivo *.pem o *.key en la raíz se ofrece para ser versionado.
+*.pem
+*.key
+*.p12
+*.jks
 
 # === Docker ===
 docker-compose.override.yml

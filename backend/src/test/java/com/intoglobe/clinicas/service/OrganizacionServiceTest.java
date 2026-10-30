@@ -3,7 +3,6 @@ package com.intoglobe.clinicas.service;
 import java.lang.reflect.Field;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -109,19 +108,30 @@ class OrganizacionServiceTest {
     }
 
     @Test
-    @DisplayName("listarActivas mapea todas las organizaciones activas")
-    void listarActivas_shouldMapAllActiveOrganizations() {
-        var primera = organizacionPersistida("Alfa Salud", PlanTipo.SOLO, null, null, true);
-        var segunda = organizacionPersistida("Beta Médica", PlanTipo.CLINICA, "sub-beta",
-                OffsetDateTime.parse("2026-02-01T08:00:00Z"), true);
-        when(organizacionRepository.listarActivas()).thenReturn(List.of(primera, segunda));
+    @DisplayName("listarActivas devuelve solo la organización del tenant pedido")
+    void listarActivas_shouldReturnOnlyTheTenantOrganization() {
+        var propia = organizacionPersistida("Alfa Salud", PlanTipo.SOLO, null, null, true);
+        when(organizacionRepository.buscarActivaPorId(propia.getId())).thenReturn(Optional.of(propia));
 
-        var respuestas = organizacionService.listarActivas();
+        var respuestas = organizacionService.listarActivas(propia.getId());
 
         assertThat(respuestas)
                 .extracting(OrganizacionResponse::nombre)
-                .containsExactly("Alfa Salud", "Beta Médica");
+                .containsExactly("Alfa Salud");
         assertThat(respuestas).allMatch(OrganizacionResponse::activo);
+        verify(organizacionRepository).buscarActivaPorId(propia.getId());
+    }
+
+    @Test
+    @DisplayName("listarActivas devuelve lista vacía cuando la organización del tenant no está activa")
+    void listarActivas_shouldReturnEmptyList_whenTheTenantOrganizationIsNotActive() {
+        var inactiva = organizacionPersistida("Clínica Baja", PlanTipo.SOLO, null, null, false);
+        when(organizacionRepository.buscarActivaPorId(inactiva.getId())).thenReturn(Optional.empty());
+
+        var respuestas = organizacionService.listarActivas(inactiva.getId());
+
+        assertThat(respuestas).isEmpty();
+        verify(organizacionRepository).buscarActivaPorId(inactiva.getId());
     }
 
     @Test

@@ -20,6 +20,14 @@ import com.intoglobe.clinicas.repository.OrganizacionRepository;
  * transacciones de solo lectura; las escrituras usan una transacción de lectura
  * y escritura. Cuando la organización no existe se lanza
  * {@link ResourceNotFoundException}, que el handler traduce a 404.</p>
+ *
+ * <p><strong>Aislamiento por tenant (R-SEG-04, R-SEG-06):</strong> el listado recibe el
+ * {@code tenantId} del token y devuelve solo esa organización. Las operaciones por id no
+ * necesitan un parámetro de tenant: en una organización el identificador del recurso
+ * <em>es</em> el del tenant, y quien garantiza que coincida con el claim antes de llamar
+ * aquí es {@code TenantAccessGuard}, que responde 403 ante cualquier discrepancia. Por eso
+ * el {@code id} que reciben {@link #buscarPorId(UUID)}, {@link #actualizar(UUID, OrganizacionRequest)}
+ * y {@link #desactivar(UUID)} es ya el del token, nunca el del path sin validar.</p>
  */
 @Service
 public class OrganizacionService {
@@ -56,13 +64,21 @@ public class OrganizacionService {
     }
 
     /**
-     * Lista las organizaciones activas ordenadas por nombre.
+     * Lista las organizaciones activas del tenant indicado.
      *
-     * @return organizaciones activas en su representación de salida
+     * <p>Resuelve R8.3(a): el endpoint {@code GET /api/v1/organizaciones} deja de enumerar
+     * la plataforma y devuelve <strong>solo la organización del token</strong>. El resultado
+     * es una lista de cero o un elemento para no romper el contrato de respuesta (un arreglo)
+     * ni obligar al cliente a distinguir dos formas. Cero elementos significa que la
+     * organización del token no existe o está inactiva: el endpoint lista lo vigente, y una
+     * sesión de una organización dada de baja no debe ver nada.</p>
+     *
+     * @param tenantId organización del token de la petición, nunca un valor del path
+     * @return la organización activa del tenant en su representación de salida, o lista vacía
      */
     @Transactional(readOnly = true)
-    public List<OrganizacionResponse> listarActivas() {
-        return organizacionRepository.listarActivas().stream()
+    public List<OrganizacionResponse> listarActivas(UUID tenantId) {
+        return organizacionRepository.buscarActivaPorId(tenantId).stream()
                 .map(OrganizacionMapper::aResponse)
                 .toList();
     }

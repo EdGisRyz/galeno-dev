@@ -77,7 +77,8 @@ class MedicoServiceTest {
         var consultorioId = UUID.randomUUID();
         var consultorio = consultorioConId(organizacion, consultorioId);
         when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
-        when(consultorioRepository.findById(consultorioId)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, organizacionId))
+                .thenReturn(Optional.of(consultorio));
         when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = requestCompleto(consultorioId);
 
@@ -106,7 +107,7 @@ class MedicoServiceTest {
                 .hasMessageContaining("Organizacion")
                 .hasMessageContaining(organizacionId.toString());
         verify(medicoRepository, never()).save(any(Medico.class));
-        verify(consultorioRepository, never()).findById(any(UUID.class));
+        verify(consultorioRepository, never()).buscarPorIdYOrganizacion(any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -116,7 +117,8 @@ class MedicoServiceTest {
         var organizacion = organizacionTransitoria();
         var consultorioId = UUID.randomUUID();
         when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
-        when(consultorioRepository.findById(consultorioId)).thenReturn(Optional.empty());
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, organizacionId))
+                .thenReturn(Optional.empty());
         var request = requestCompleto(consultorioId);
 
         assertThatThrownBy(() -> medicoService.crear(organizacionId, request))
@@ -127,16 +129,37 @@ class MedicoServiceTest {
     }
 
     @Test
-    @DisplayName("buscarPorId devuelve los nueve campos del médico cuando existe")
+    @DisplayName("crear resuelve el consultorio del cuerpo acotado por el tenant y no lo busca sin acotar")
+    void crear_shouldResolveTheBodyConsultorioWithinTheTenant() {
+        var organizacionId = UUID.randomUUID();
+        var consultorioId = UUID.randomUUID();
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacionTransitoria()));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, organizacionId))
+                .thenReturn(Optional.empty());
+        var request = requestCompleto(consultorioId);
+
+        // Un consultorio de otra organización es indistinguible de uno inexistente: el
+        // repositorio acotado no lo devuelve, el service responde 404 y no persiste nada.
+        assertThatThrownBy(() -> medicoService.crear(organizacionId, request))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Consultorio");
+        verify(consultorioRepository).buscarPorIdYOrganizacion(consultorioId, organizacionId);
+        verify(consultorioRepository, never()).findById(any(UUID.class));
+        verify(medicoRepository, never()).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("buscarPorId devuelve los nueve campos del médico cuando existe en el tenant")
     void buscarPorId_shouldReturnAllNineFields_whenMedicoExists() {
         var organizacionId = UUID.randomUUID();
         var consultorioId = UUID.randomUUID();
         var organizacion = organizacionConId(organizacionId);
         var consultorio = consultorioConId(organizacion, consultorioId);
         var medico = medicoPersistido(organizacion, consultorio);
-        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacionId))
+                .thenReturn(Optional.of(medico));
 
-        var respuesta = medicoService.buscarPorId(medico.getId());
+        var respuesta = medicoService.buscarPorId(medico.getId(), organizacionId);
 
         assertThat(respuesta.id()).isEqualTo(medico.getId());
         assertThat(respuesta.organizacionId()).isEqualTo(organizacionId);
@@ -153,12 +176,29 @@ class MedicoServiceTest {
     @DisplayName("buscarPorId lanza ResourceNotFoundException cuando el médico no existe")
     void buscarPorId_shouldThrowResourceNotFoundException_whenMedicoMissing() {
         var id = UUID.randomUUID();
-        when(medicoRepository.findById(id)).thenReturn(Optional.empty());
+        var tenantId = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> medicoService.buscarPorId(id))
+        assertThatThrownBy(() -> medicoService.buscarPorId(id, tenantId))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Medico")
                 .hasMessageContaining(id.toString());
+    }
+
+    @Test
+    @DisplayName("buscarPorId de un médico de otro tenant lanza ResourceNotFoundException (404, no 403)")
+    void buscarPorId_shouldThrowResourceNotFound_whenMedicoBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        // La consulta está acotada por organización: para un tenant ajeno el repositorio no
+        // devuelve la fila aunque exista, y el service responde 404 en vez de 403.
+        when(medicoRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> medicoService.buscarPorId(id, otroTenant))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Medico")
+                .hasMessageContaining(id.toString());
+        verify(medicoRepository).buscarPorIdYOrganizacion(id, otroTenant);
     }
 
     @Test
@@ -219,12 +259,13 @@ class MedicoServiceTest {
         var consultorio = consultorioConId(organizacion, consultorioId);
         var medico = medicoPersistido(organizacion, consultorio);
         var idOriginal = medico.getId();
-        when(medicoRepository.findById(idOriginal)).thenReturn(Optional.of(medico));
+        when(medicoRepository.buscarPorIdYOrganizacion(idOriginal, organizacionId))
+                .thenReturn(Optional.of(medico));
         when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = new MedicoRequest(consultorioId, "Dra. Ana Torres Ruiz", "Dermatología", "7654321",
                 "+52 55 9999 8888", new BigDecimal("750.50"));
 
-        var respuesta = medicoService.actualizar(idOriginal, request);
+        var respuesta = medicoService.actualizar(idOriginal, organizacionId, request);
 
         assertThat(respuesta.nombre()).isEqualTo("Dra. Ana Torres Ruiz");
         assertThat(respuesta.especialidad()).isEqualTo("Dermatología");
@@ -248,16 +289,18 @@ class MedicoServiceTest {
     @Test
     @DisplayName("actualizar lanza CambioDeConsultorioNoPermitidoException y no guarda cuando el consultorio difiere")
     void actualizar_shouldThrowCambioDeConsultorioNoPermitidoExceptionAndNotSave_whenConsultorioDiffers() {
-        var organizacion = organizacionTransitoria();
+        var organizacion = organizacionConId(UUID.randomUUID());
         var consultorioActualId = UUID.randomUUID();
         var consultorioActual = consultorioConId(organizacion, consultorioActualId);
         var medico = medicoPersistido(organizacion, consultorioActual);
-        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        var organizacionId = organizacion.getId();
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacionId))
+                .thenReturn(Optional.of(medico));
         var otroConsultorioId = UUID.randomUUID();
         var request = new MedicoRequest(otroConsultorioId, "Dra. Otra Persona", "Cardiología", "1234567",
                 "+52 55 1111 2222", new BigDecimal("500.00"));
 
-        assertThatThrownBy(() -> medicoService.actualizar(medico.getId(), request))
+        assertThatThrownBy(() -> medicoService.actualizar(medico.getId(), organizacionId, request))
                 .isInstanceOf(CambioDeConsultorioNoPermitidoException.class)
                 .hasMessageContaining("consultorio");
         verify(medicoRepository, never()).save(any(Medico.class));
@@ -272,11 +315,12 @@ class MedicoServiceTest {
         var consultorioId = UUID.randomUUID();
         var consultorio = consultorioConId(organizacion, consultorioId);
         var medico = medicoPersistido(organizacion, consultorio);
-        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacion.getId()))
+                .thenReturn(Optional.of(medico));
         when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = requestCompleto(consultorioId);
 
-        assertThatCode(() -> medicoService.actualizar(medico.getId(), request))
+        assertThatCode(() -> medicoService.actualizar(medico.getId(), organizacion.getId(), request))
                 .doesNotThrowAnyException();
 
         verify(medicoRepository).save(medico);
@@ -287,13 +331,27 @@ class MedicoServiceTest {
     @DisplayName("actualizar lanza ResourceNotFoundException cuando el médico no existe")
     void actualizar_shouldThrowResourceNotFoundException_whenMedicoMissing() {
         var id = UUID.randomUUID();
-        when(medicoRepository.findById(id)).thenReturn(Optional.empty());
+        var tenantId = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
         var request = requestCompleto(UUID.randomUUID());
 
-        assertThatThrownBy(() -> medicoService.actualizar(id, request))
+        assertThatThrownBy(() -> medicoService.actualizar(id, tenantId, request))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Medico")
                 .hasMessageContaining(id.toString());
+        verify(medicoRepository, never()).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("actualizar un médico de otro tenant no persiste nada (404, no 403)")
+    void actualizar_shouldNotSave_whenMedicoBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+        var request = requestCompleto(UUID.randomUUID());
+
+        assertThatThrownBy(() -> medicoService.actualizar(id, otroTenant, request))
+                .isInstanceOf(ResourceNotFoundException.class);
         verify(medicoRepository, never()).save(any(Medico.class));
     }
 
@@ -303,16 +361,18 @@ class MedicoServiceTest {
         var organizacion = organizacionTransitoria();
         var consultorio = consultorioTransitorio(organizacion);
         var medico = medicoPersistido(organizacion, consultorio);
-        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        var tenantId = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), tenantId))
+                .thenReturn(Optional.of(medico));
         when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
         assertThatCode(() -> {
-            medicoService.desactivar(medico.getId());
-            medicoService.desactivar(medico.getId());
+            medicoService.desactivar(medico.getId(), tenantId);
+            medicoService.desactivar(medico.getId(), tenantId);
         }).doesNotThrowAnyException();
 
         assertThat(medico.isActivo()).isFalse();
-        verify(medicoRepository, times(2)).findById(medico.getId());
+        verify(medicoRepository, times(2)).buscarPorIdYOrganizacion(medico.getId(), tenantId);
         verify(medicoRepository, times(2)).save(medico);
     }
 
@@ -320,12 +380,25 @@ class MedicoServiceTest {
     @DisplayName("desactivar lanza ResourceNotFoundException cuando el médico no existe")
     void desactivar_shouldThrowResourceNotFoundException_whenMedicoMissing() {
         var id = UUID.randomUUID();
-        when(medicoRepository.findById(id)).thenReturn(Optional.empty());
+        var tenantId = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> medicoService.desactivar(id))
+        assertThatThrownBy(() -> medicoService.desactivar(id, tenantId))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Medico")
                 .hasMessageContaining(id.toString());
+        verify(medicoRepository, never()).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("desactivar un médico de otro tenant no lo desactiva (404, no 403)")
+    void desactivar_shouldNotDeactivate_whenMedicoBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> medicoService.desactivar(id, otroTenant))
+                .isInstanceOf(ResourceNotFoundException.class);
         verify(medicoRepository, never()).save(any(Medico.class));
     }
 
@@ -336,11 +409,12 @@ class MedicoServiceTest {
         var consultorioId = UUID.randomUUID();
         var consultorio = consultorioConId(organizacion, consultorioId);
         var medico = medicoPersistido(organizacion, consultorio);
-        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacion.getId()))
+                .thenReturn(Optional.of(medico));
         when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = new MedicoRequest(consultorioId, "Dra. Ana Torres", null, null, null, null);
 
-        var respuesta = medicoService.actualizar(medico.getId(), request);
+        var respuesta = medicoService.actualizar(medico.getId(), organizacion.getId(), request);
 
         assertThat(respuesta.nombre()).isEqualTo("Dra. Ana Torres");
         assertThat(respuesta.especialidad()).isNull();

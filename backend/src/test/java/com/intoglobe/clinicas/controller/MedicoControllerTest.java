@@ -88,7 +88,12 @@ class MedicoControllerTest {
     private static final String MENSAJE_ORG_ID_INVALIDO =
             "El parámetro 'organizacionId' tiene un formato inválido";
 
-    private static final String TOKEN = ClaveRsaDePrueba.token().compactar();
+    /**
+     * Token {@code ADMIN} cuyo {@code tenantId} es exactamente el {@code organizacionId} que
+     * usan las rutas anidadas de estas pruebas: el path coincide con el claim y lo que se
+     * ejerce es el contrato del endpoint, no la guardia de tenant.
+     */
+    private static final String TOKEN = ClaveRsaDePrueba.tokenPara("ADMIN", ORG_ID);
     @Autowired
     private MockMvc mockMvc;
 
@@ -122,7 +127,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("GET /{id} devuelve 200 con el médico encontrado")
     void buscarPorId_shouldReturn200WithBody() throws Exception {
-        when(medicoService.buscarPorId(ID))
+        when(medicoService.buscarPorId(ID, ORG_ID))
                 .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dr. Luis Prado", "Dermatología",
                         null, null, null, true));
 
@@ -135,7 +140,7 @@ class MedicoControllerTest {
                 .andExpect(jsonPath("$.nombre").value("Dr. Luis Prado"))
                 .andExpect(jsonPath("$.especialidad").value("Dermatología"))
                 .andExpect(jsonPath("$.activo").value(true));
-        verify(medicoService).buscarPorId(ID);
+        verify(medicoService).buscarPorId(ID, ORG_ID);
     }
 
     @Test
@@ -211,7 +216,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("PUT /{id} devuelve 200 con el request validado aplicado")
     void actualizar_shouldReturn200_whenRequestIsValid() throws Exception {
-        when(medicoService.actualizar(eq(ID), any(MedicoRequest.class)))
+        when(medicoService.actualizar(eq(ID), eq(ORG_ID), any(MedicoRequest.class)))
                 .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dra. Ana Torres Ruiz", "Cardiología",
                         "12345678", null, "650.50", true));
 
@@ -225,13 +230,13 @@ class MedicoControllerTest {
                 .andExpect(jsonPath("$.nombre").value("Dra. Ana Torres Ruiz"))
                 .andExpect(jsonPath("$.tarifaBase").value(650.50))
                 .andExpect(jsonPath("$.activo").value(true));
-        verify(medicoService).actualizar(eq(ID), any(MedicoRequest.class));
+        verify(medicoService).actualizar(eq(ID), eq(ORG_ID), any(MedicoRequest.class));
     }
 
     @Test
     @DisplayName("PUT con consultorio distinto del actual devuelve 400 con ErrorResponse (R13)")
     void actualizar_shouldReturn400WithErrorResponse_whenConsultorioDiffers() throws Exception {
-        when(medicoService.actualizar(eq(ID), any(MedicoRequest.class)))
+        when(medicoService.actualizar(eq(ID), eq(ORG_ID), any(MedicoRequest.class)))
                 .thenThrow(new CambioDeConsultorioNoPermitidoException(CONSULTORIO_ID, OTRO_CONSULTORIO_ID));
 
         perform(put("/api/v1/medicos/{id}", ID)
@@ -244,7 +249,7 @@ class MedicoControllerTest {
                 .andExpect(jsonPath("$.error").value("Bad Request"))
                 .andExpect(jsonPath("$.mensaje").value(MENSAJE_CAMBIO_DE_CONSULTORIO))
                 .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + ID));
-        verify(medicoService).actualizar(eq(ID), any(MedicoRequest.class));
+        verify(medicoService).actualizar(eq(ID), eq(ORG_ID), any(MedicoRequest.class));
     }
 
     @Test
@@ -269,13 +274,13 @@ class MedicoControllerTest {
         perform(delete("/api/v1/medicos/{id}", ID))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
-        verify(medicoService).desactivar(ID);
+        verify(medicoService).desactivar(ID, ORG_ID);
     }
 
     @Test
     @DisplayName("GET /{id} inexistente devuelve 404 con ErrorResponse")
     void buscarPorId_shouldReturn404WithErrorResponse_whenMissing() throws Exception {
-        when(medicoService.buscarPorId(ID))
+        when(medicoService.buscarPorId(ID, ORG_ID))
                 .thenThrow(new ResourceNotFoundException("Medico", ID));
 
         perform(get("/api/v1/medicos/{id}", ID))
@@ -289,7 +294,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("PUT /{id} inexistente devuelve 404 con ErrorResponse")
     void actualizar_shouldReturn404_whenMissing() throws Exception {
-        when(medicoService.actualizar(eq(ID), any(MedicoRequest.class)))
+        when(medicoService.actualizar(eq(ID), eq(ORG_ID), any(MedicoRequest.class)))
                 .thenThrow(new ResourceNotFoundException("Medico", ID));
 
         perform(put("/api/v1/medicos/{id}", ID)
@@ -308,7 +313,7 @@ class MedicoControllerTest {
     @DisplayName("DELETE /{id} inexistente devuelve 404 con ErrorResponse")
     void desactivar_shouldReturn404_whenMissing() throws Exception {
         doThrow(new ResourceNotFoundException("Medico", ID))
-                .when(medicoService).desactivar(ID);
+                .when(medicoService).desactivar(ID, ORG_ID);
 
         perform(delete("/api/v1/medicos/{id}", ID))
                 .andExpect(status().isNotFound())
@@ -404,6 +409,38 @@ class MedicoControllerTest {
         verifyNoInteractions(medicoService);
     }
 
+    @Test
+    @DisplayName("Las rutas anidadas con el organizacionId de otro tenant responden 403 sin llamar al service")
+    void rutasAnidadas_shouldReturn403_whenThePathTenantDiffersFromTheClaim() throws Exception {
+        UUID organizacionAjena = UUID.randomUUID();
+
+        afirmarAccesoDenegado(perform(get("/api/v1/organizaciones/{organizacionId}/medicos",
+                        organizacionAjena)),
+                "/api/v1/organizaciones/" + organizacionAjena + "/medicos");
+        afirmarAccesoDenegado(perform(post("/api/v1/organizaciones/{organizacionId}/medicos",
+                        organizacionAjena)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Dra. Ajena"}
+                                """.formatted(CONSULTORIO_ID))),
+                "/api/v1/organizaciones/" + organizacionAjena + "/medicos");
+
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("Las rutas planas por id entregan al service el tenant del claim, no el del path")
+    void rutasPorId_shouldPassTheClaimTenantToTheService() throws Exception {
+        when(medicoService.buscarPorId(ID, ORG_ID))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dr. Luis Prado", null, null, null,
+                        null, true));
+
+        perform(get("/api/v1/medicos/{id}", ID))
+                .andExpect(status().isOk());
+
+        verify(medicoService).buscarPorId(ID, ORG_ID);
+    }
+
     private static MedicoResponse respuesta(UUID id, UUID organizacionId, UUID consultorioId, String nombre,
             String especialidad, String cedula, String telefono, String tarifaBase, boolean activo) {
         return new MedicoResponse(id, organizacionId, consultorioId, nombre, especialidad, cedula,
@@ -423,6 +460,25 @@ class MedicoControllerTest {
         registro.add("auth.public.key", () -> ClaveRsaDePrueba.CLAVE_PUBLICA_BASE64);
         registro.add("auth.issuer", () -> ClaveRsaDePrueba.EMISOR);
         registro.add("auth.audience", () -> ClaveRsaDePrueba.AUDIENCIA);
+    }
+
+    /**
+     * Afirma el contrato del {@code 403} que produce una discrepancia entre el tenant del
+     * path y el del claim.
+     *
+     * @param resultado resultado de la petición
+     * @param ruta      ruta esperada en el campo {@code ruta}
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    private static void afirmarAccesoDenegado(ResultActions resultado, String ruta) throws Exception {
+        resultado
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.codigo").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.mensaje").value(
+                        com.intoglobe.clinicas.security.SecurityErrorResponder.MENSAJE_ACCESO_DENEGADO))
+                .andExpect(jsonPath("$.ruta").value(ruta));
     }
 
     /**

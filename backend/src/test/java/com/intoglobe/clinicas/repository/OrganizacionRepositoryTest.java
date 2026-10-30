@@ -130,25 +130,36 @@ class OrganizacionRepositoryTest {
     }
 
     @Test
-    void listarActivas_shouldExcludeInactiveAndSortByName() {
-        var zeta = new Organizacion("Zeta Clínica", PlanTipo.CLINICA, null);
+    void buscarActivaPorId_shouldReturnOnlyTheRequestedActiveOrganization() {
         var alfa = new Organizacion("Alfa Salud", PlanTipo.SOLO, null);
         var beta = new Organizacion("Beta Medica", PlanTipo.ENTERPRISE, null);
         var inactiva = new Organizacion("Omega Inactiva", PlanTipo.SOLO, null);
         inactiva.desactivar();
-        entityManager.persist(zeta);
         entityManager.persist(alfa);
         entityManager.persist(beta);
         entityManager.persist(inactiva);
         entityManager.flush();
+        UUID alfaId = alfa.getId();
+        UUID betaId = beta.getId();
+        UUID inactivaId = inactiva.getId();
         entityManager.clear();
 
-        var activas = organizacionRepository.listarActivas();
-
-        assertThat(activas)
-                .extracting(Organizacion::getNombre)
-                .containsExactly("Alfa Salud", "Beta Medica", "Zeta Clínica");
-        assertThat(activas).allMatch(Organizacion::isActivo);
+        assertThat(organizacionRepository.buscarActivaPorId(alfaId))
+                .as("debe devolver exactamente la organización pedida, no el resto del tenant ajeno")
+                .isPresent();
+        assertThat(organizacionRepository.buscarActivaPorId(alfaId).orElseThrow().getNombre())
+                .isEqualTo("Alfa Salud");
+        assertThat(organizacionRepository.buscarActivaPorId(alfaId).orElseThrow().isActivo())
+                .as("el listado de la API solo publica organizaciones activas")
+                .isTrue();
+        assertThat(organizacionRepository.buscarActivaPorId(betaId).orElseThrow().getNombre())
+                .isEqualTo("Beta Medica");
+        assertThat(organizacionRepository.buscarActivaPorId(inactivaId))
+                .as("una organización inactiva no se devuelve en el listado")
+                .isEmpty();
+        assertThat(organizacionRepository.buscarActivaPorId(UUID.randomUUID()))
+                .as("un tenant sin organización no devuelve nada")
+                .isEmpty();
     }
 
     @Test
@@ -157,7 +168,7 @@ class OrganizacionRepositoryTest {
         entityManager.persist(new Organizacion("Clínica Repetida", PlanTipo.CLINICA, null));
         entityManager.flush();
 
-        var repetidas = organizacionRepository.listarActivas().stream()
+        var repetidas = organizacionRepository.findAll().stream()
                 .filter(organizacion -> "Clínica Repetida".equals(organizacion.getNombre()))
                 .toList();
 
@@ -178,9 +189,9 @@ class OrganizacionRepositoryTest {
 
         var encontrada = organizacionRepository.findById(id).orElseThrow();
         assertThat(encontrada.isActivo()).isFalse();
-        assertThat(organizacionRepository.listarActivas())
-                .extracting(Organizacion::getId)
-                .doesNotContain(id);
+        assertThat(organizacionRepository.buscarActivaPorId(id))
+                .as("una organización dada de baja no debe aparecer en el listado de la API")
+                .isEmpty();
     }
 
     @Test
