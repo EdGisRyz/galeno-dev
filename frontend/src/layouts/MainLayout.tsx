@@ -29,8 +29,11 @@ export function MainLayout() {
   // Activación del temporizador HIPAA de 30 minutos
   useInactivityTimeout();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    // Igual que el cierre por inactividad (R-SEG-08): primero el emisor —que borra la cookie
+    // `httpOnly`— y después la navegación. Navegar antes aborta el POST y deja la cookie viva, con
+    // lo que el arranque volvería a autenticar la sesión.
+    await logout();
     navigate('/login');
   };
 
@@ -89,15 +92,14 @@ export function MainLayout() {
               <Stethoscope className="w-5 h-5 text-[#88BDDC]" />
             </div>
             <div>
+              {/* El tenant de la cabecera sale del claim de la sesión; si no hay, un guion neutro.
+                  Nunca el nombre de una clínica inventada (plan §2, guardarraíl 4). */}
               <span className="font-heading font-bold text-sm tracking-tight text-[#0A4D68] block">
-                VITALIX SaaS
+                {tenantSlug || '—'}
               </span>
-              <span 
-  title={`Tenant ID: ${tenantSlug || 'vitalix'}`} 
-  className="text-[11px] text-[#64748B] tracking-wide block uppercase font-medium"
->
-  Vitalix · Clínica
-</span>
+              <span className="text-[11px] text-[#64748B] tracking-wide block uppercase font-medium">
+                Clínica
+              </span>
             </div>
           </div>
           <button

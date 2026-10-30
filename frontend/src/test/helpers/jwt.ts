@@ -21,14 +21,28 @@ export function makeToken(payload: Record<string, unknown>): string {
   return `${JWT_HEADER}.${toBase64Url(JSON.stringify(payload))}.${JWT_SIGNATURE}`;
 }
 
-/** Claims mínimos obligatorios según el contrato del emisor. */
+/**
+ * Vencimiento (`exp`) que cae `segundos` en el futuro, en segundos epoch (RFC 7519 §2).
+ * Los fixtures de token vigente se calculan desde el reloj real: un `exp` fijo caduca y convierte
+ * el fixture en un token vencido sin que nadie lo note (pasó con 1793000000, ya en el pasado).
+ */
+export function expVigente(segundos = 1800): number {
+  return Math.floor(Date.now() / 1000) + segundos;
+}
+
+/** Vencimiento (`exp`) que cayó `segundos` en el pasado. */
+export function expVencido(segundos = 5): number {
+  return Math.floor(Date.now() / 1000) - segundos;
+}
+
+/** Claims mínimos obligatorios según el contrato del emisor (ADR-010), con `exp` vigente. */
 export const CLAIMS = {
   sub: 'usr-0001',
   email: 'medico@clinica.mx',
   role: 'MEDICO',
   tenantId: 'org-001',
   medicoId: 'med-0001',
-  exp: 1793000000,
+  exp: expVigente(),
 };
 
 /** Usuario que la UI espera para los claims de arriba. */

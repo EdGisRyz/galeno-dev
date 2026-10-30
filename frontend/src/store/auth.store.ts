@@ -17,8 +17,9 @@ interface AuthState {
   /** Hay un refresco de arranque en vuelo: la sesión todavía no es anónima ni autenticada. */
   inicializando: boolean;
   /**
-   * Slug de la clínica. Hoy no hay contrato que lo emita y **no se inventa** un valor por defecto
-   * (GAL-Front001 §2, guardarraíl 4): queda vacío. T7 lo deriva del claim `tenantId`.
+   * Slug/token del tenant de la sesión. Se deriva del claim `tenantId` al abrir la sesión y **nunca**
+   * se rellena con un valor por defecto (GAL-Front001 §2, guardarraíl 4): si no hay claim, no hay
+   * sesión.
    */
   tenantSlug: string;
   lastActivity: number;
@@ -53,10 +54,25 @@ function decodeBase64UrlSegment(segment: string): Uint8Array {
 }
 
 /**
+ * Claims del token que la sesión consume (ADR-010).
+ * `exp` se guarda tal como llega: su presencia y su tipo forman parte del contrato, así que la
+ * validación decide si sirve, en lugar de que la proyección lo dé por bueno.
+ */
+interface ClaimsToken {
+  id?: string;
+  email?: string;
+  role?: UserRole;
+  tenantId?: string;
+  medicoId?: string;
+  /** Vencimiento en segundos epoch (RFC 7519 §2). Crudo a propósito: puede faltar o no ser número. */
+  exp?: unknown;
+}
+
+/**
  * Decodificador seguro de payload JWT en navegador: base64url + UTF-8.
  * Devuelve `null` ante cualquier entrada mal formada; nunca lanza.
  */
-function decodeJwtPayload(token: string): Partial<AuthUser> | null {
+function decodeJwtPayload(token: string): ClaimsToken | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -72,27 +88,67 @@ function decodeJwtPayload(token: string): Partial<AuthUser> | null {
       role: payload.role as UserRole,
       tenantId: payload.tenantId as string,
       medicoId: payload.medicoId as string,
+      exp: payload.exp,
     };
   } catch {
     return null;
   }
 }
 
-/**
- * Proyecta los claims decodificados a la sesión de la UI.
- * Sin identidad completa (`sub`, `email`, `role`) no hay usuario: fail-closed.
- */
-function usuarioDesdeClaims(decoded: Partial<AuthUser> | null): AuthUser | null {
-  if (!decoded || !decoded.id || !decoded.email || !decoded.role) return null;
+/** Motivo por el que un token no puede abrir sesión (R-SEG-07, fail-closed). */
+type MotivoRechazo = 'malformado' | 'identidad_incompleta' | 'sin_tenant' | 'sin_vencimiento' | 'vencido';
 
-  return {
-    id: decoded.id,
-    email: decoded.email,
-    role: decoded.role,
-    tenantId: decoded.tenantId || 'org-001',
-    medicoId: decoded.medicoId,
-  };
+/** Resultado de intentar convertir un token en sesión: usuario, o el motivo del rechazo. */
+type SesionResuelta = { ok: true; usuario: AuthUser } | { ok: false; motivo: MotivoRechazo };
+
+/** Mensaje explícito por motivo: un rechazo se ve, no se silencia (plan §2 guardarraíl 4). */
+const MENSAJE_RECHAZO: Record<MotivoRechazo, string> = {
+  malformado: 'El token de acceso emitido no se pudo decodificar.',
+  identidad_incompleta: 'El token de acceso no trae la identidad completa (sub, email, role).',
+  sin_tenant: 'El token de acceso no trae el claim obligatorio tenantId.',
+  sin_vencimiento: 'El token de acceso no trae el claim obligatorio exp (ADR-010).',
+  vencido: 'El token de acceso está vencido: exp quedó en el pasado (ADR-012).',
+};
+
+/** Ahora en segundos epoch: la unidad de `exp` según RFC 7519 §2. */
+function ahoraEnSegundos(): number {
+  return Math.floor(Date.now() / 1000);
 }
+
+/**
+ * Proyecta los claims a la sesión de la UI, o explica por qué no puede hacerlo.
+ *
+ * Fail-closed (R-SEG-07, ADR-010, ADR-012, ADR-013): sin identidad completa, sin `tenantId` o
+ * sin un `exp` numérico vigente no hay usuario. El tenant **jamás** se rellena con un valor por
+ * defecto: el claim es la autoridad y un token sin él se rechaza (plan §2, guardarraíl 4).
+ */
+function resolverSesion(claims: ClaimsToken | null): SesionResuelta {
+  if (!claims) return { ok: false, motivo: 'malformado' };
+
+  const { id, email, role, tenantId, medicoId, exp } = claims;
+
+  if (!id || !email || !role) return { ok: false, motivo: 'identidad_incompleta' };
+  if (!tenantId) return { ok: false, motivo: 'sin_tenant' };
+  if (typeof exp !== 'number' || !Number.isFinite(exp)) {
+    return { ok: false, motivo: 'sin_vencimiento' };
+  }
+  if (exp <= ahoraEnSegundos()) return { ok: false, motivo: 'vencido' };
+
+  return { ok: true, usuario: { id, email, role, tenantId, medicoId } };
+}
+
+/**
+ * Estado observable de una sesión cerrada. Un solo lugar define su forma, para que login
+ * rechazado, refresco inválido y cierre de sesión no limpien cosas distintas.
+ */
+const SESION_CERRADA = {
+  accessToken: null,
+  user: null,
+  isAuthenticated: false,
+  inicializando: false,
+  tenantSlug: '',
+  showInactivityWarning: false,
+} as const;
 
 /**
  * Refresco en vuelo. Es la cola single-flight: cinco `401` concurrentes esperan esta misma
@@ -104,22 +160,31 @@ let refrescoEnVuelo: Promise<string | null> | null = null;
 export const useAuthStore = create<AuthState>((set) => {
   /**
    * Único camino por el que un token se convierte en sesión (fail-closed, R-SEG-07): si el
-   * payload no se puede decodificar, no se abre sesión y no se guarda nada en ninguna parte.
+   * payload no se puede decodificar, si le falta la identidad, el tenant o un `exp` vigente, no se
+   * abre sesión, se limpia la memoria y se devuelve el motivo. Login y refresco de arranque pasan
+   * por aquí, así que ninguno puede saltarse la comprobación de vigencia (ADR-010, ADR-012).
    */
-  function establecerSesion(accessToken: string): AuthUser | null {
-    const usuario = usuarioDesdeClaims(decodeJwtPayload(accessToken));
-    if (!usuario) return null;
+  function establecerSesion(accessToken: string): SesionResuelta {
+    const resultado = resolverSesion(decodeJwtPayload(accessToken));
 
+    if (!resultado.ok) {
+      set(SESION_CERRADA);
+      return resultado;
+    }
+
+    const usuario = resultado.usuario;
     set({
       accessToken,
       user: usuario,
       isAuthenticated: true,
       inicializando: false,
+      // El tenant de la sesión sale del claim `tenantId`: no se inventa un nombre de clínica.
+      tenantSlug: usuario.tenantId,
       lastActivity: Date.now(),
       showInactivityWarning: false,
     });
 
-    return usuario;
+    return resultado;
   }
 
   return {
@@ -135,15 +200,14 @@ export const useAuthStore = create<AuthState>((set) => {
 
     login: async (email, password) => {
       const { accessToken } = await authService.login({ email, password });
-      const usuario = establecerSesion(accessToken);
+      const resultado = establecerSesion(accessToken);
 
-      if (!usuario) {
-        // El emisor respondió 200 pero el token no es legible: la sesión no se abre.
-        set({ accessToken: null, user: null, isAuthenticated: false, inicializando: false });
-        throw new Error('El token de acceso emitido no se pudo decodificar.');
+      if (!resultado.ok) {
+        // El emisor respondió 200 pero el token no sirve para abrir sesión: falla visible.
+        throw new Error(MENSAJE_RECHAZO[resultado.motivo]);
       }
 
-      return usuario;
+      return resultado.usuario;
     },
 
     refresh: () => {
@@ -152,7 +216,9 @@ export const useAuthStore = create<AuthState>((set) => {
       const intento = (async () => {
         try {
           const { accessToken } = await authService.refresh();
-          return establecerSesion(accessToken) ? accessToken : null;
+          // El refresco usa la misma puerta que el login: un token vencido o sin `exp` deja la
+          // sesión anónima en lugar de renovarla a ciegas (ADR-012).
+          return establecerSesion(accessToken).ok ? accessToken : null;
         } catch {
           return null;
         } finally {
@@ -171,14 +237,7 @@ export const useAuthStore = create<AuthState>((set) => {
     logout: async () => {
       // La memoria se limpia primero: el cierre local no depende de que el emisor responda, y el
       // estado observable queda cerrado en el mismo instante de la llamada.
-      set({
-        accessToken: null,
-        user: null,
-        isAuthenticated: false,
-        inicializando: false,
-        tenantSlug: '',
-        showInactivityWarning: false,
-      });
+      set(SESION_CERRADA);
 
       try {
         await authService.logout();

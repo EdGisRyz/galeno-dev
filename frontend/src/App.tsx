@@ -25,8 +25,10 @@ function App() {
         <Route path="/login" element={<LoginForm />} />
       </Route>
 
-      {/* Rutas protegidas de la estación clínica */}
-      <Route element={<ProtectedRoute />}>
+      {/* Rutas protegidas de la estación clínica. ADR-013: la agenda es de `ADMIN` y `MEDICO`;
+          `PACIENTE` no tiene pantalla todavía y ProtectedRoute lo devuelve al login con
+          `reason=sin_acceso`. */}
+      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'MEDICO']} />}>
         <Route element={<MainLayout />}>
           <Route path="/" element={<Navigate to="/agenda" replace />} />
           <Route path="/agenda" element={<AgendaPage />} />

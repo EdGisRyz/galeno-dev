@@ -42,7 +42,7 @@ const URL_SAFE_CLAIMS = {
   email: 'jramirez~@clinica.mx',
   role: 'ADMIN',
   tenantId: 'org-002',
-  exp: 1793000000,
+  exp: Math.floor(Date.now() / 1000) + 1800,
 };
 
 function toBase64Url(json: string): string {

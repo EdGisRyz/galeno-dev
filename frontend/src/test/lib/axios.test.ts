@@ -3,7 +3,7 @@ import { AxiosError } from 'axios';
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { api, authApi, API_BASE_URL, AUTH_BASE_URL } from '@/lib/axios';
 import { useAuthStore } from '@/store/auth.store';
-import { CLAIMS, makeToken } from '../helpers/jwt';
+import { CLAIMS, expVigente, makeToken } from '../helpers/jwt';
 
 /**
  * Contrato de los dos clientes HTTP y del manejo del 401 (ADR-011, T6b).
@@ -13,8 +13,10 @@ import { CLAIMS, makeToken } from '../helpers/jwt';
  * (cookie, sin Bearer) y se pueda contar cuántas veces se pide.
  */
 
-const TOKEN_VIEJO = makeToken({ ...CLAIMS, exp: 1793000000 });
-const TOKEN_NUEVO = makeToken({ ...CLAIMS, exp: 1793000600 });
+// `exp` vigente: la sesión rechaza tokens vencidos (ADR-010/ADR-012), así que un fixture
+// "fresco" tiene que vencer de verdad en el futuro.
+const TOKEN_VIEJO = makeToken({ ...CLAIMS, exp: expVigente(60) });
+const TOKEN_NUEVO = makeToken({ ...CLAIMS, exp: expVigente(1800) });
 
 interface Peticion {
   url: string;

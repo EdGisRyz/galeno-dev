@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { authService } from '@/features/auth/auth.service';
 import { useAuthStore } from '@/store/auth.store';
+import { expVigente } from '../helpers/jwt';
 
 /**
  * Adaptado en T6b (ADR-011): `login` ya no recibe un token — lo pide al emisor y lo guarda solo
@@ -53,7 +54,7 @@ const CLAIMS = {
   role: 'MEDICO',
   tenantId: 'org-001',
   medicoId: 'med-0001',
-  exp: 1793000000,
+  exp: expVigente(),
 };
 
 /** Autentica con un token concreto, como haría el emisor al responder un login válido. */
