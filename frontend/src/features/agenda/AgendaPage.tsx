@@ -16,7 +16,10 @@ import {
   TableCell,
   Alert,
 } from '@/components/ui';
-import type { Appointment, AppointmentStatus, Doctor, Patient, ClinicRoom } from '@/types/models';
+import type { Cita, EstadoCita } from '@/features/citas/citas.types';
+import type { Consultorio } from '@/features/consultorios/consultorios.types';
+import type { Medico } from '@/features/medicos/medicos.types';
+import type { Paciente } from '@/features/pacientes/pacientes.types';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -30,10 +33,10 @@ import {
 } from 'lucide-react';
 
 export function AgendaPage() {
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [clinicRooms, setClinicRooms] = useState<ClinicRoom[]>([]);
+  const [appointments, setAppointments] = useState<Cita[]>([]);
+  const [doctors, setDoctors] = useState<Medico[]>([]);
+  const [patients, setPatients] = useState<Paciente[]>([]);
+  const [clinicRooms, setClinicRooms] = useState<Consultorio[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Filtros
@@ -56,10 +59,10 @@ export function AgendaPage() {
   // Cargar datos
   const loadData = () => {
     return Promise.all([
-      api.get<Appointment[]>('/citas'),
-      api.get<Doctor[]>('/medicos'),
-      api.get<Patient[]>('/pacientes'),
-      api.get<ClinicRoom[]>('/consultorios'),
+      api.get<Cita[]>('/citas'),
+      api.get<Medico[]>('/medicos'),
+      api.get<Paciente[]>('/pacientes'),
+      api.get<Consultorio[]>('/consultorios'),
     ])
       .then(([aptRes, docRes, patRes, roomRes]) => {
         setAppointments(aptRes.data);
@@ -90,7 +93,7 @@ export function AgendaPage() {
   }, []);
 
   // Actualizar estado de cita (ej. Confirmar o Cancelar)
-  const handleUpdateStatus = async (aptId: string, newStatus: AppointmentStatus) => {
+  const handleUpdateStatus = async (aptId: string, newStatus: EstadoCita) => {
     try {
       await api.patch(`/citas/${aptId}/estado`, { estado: newStatus, cancelada_por: 'ADMIN' });
       setAppointments((prev) =>
@@ -111,7 +114,7 @@ export function AgendaPage() {
     try {
       setIsSubmitting(true);
       const fechaHora = new Date(`${newDate}T${newTime}:00`).toISOString();
-      const res = await api.post<Appointment>('/citas', {
+      const res = await api.post<Cita>('/citas', {
         paciente_id: newPatientId,
         medico_id: newDoctorId,
         consultorio_id: newRoomId,

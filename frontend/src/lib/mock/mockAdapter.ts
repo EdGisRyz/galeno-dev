@@ -11,10 +11,24 @@ import {
   mockDiagnoses,
   mockPrescriptions,
 } from './mockData';
-import type { Appointment, AppointmentStatus, Patient, SoapNote } from '@/types/models';
+import type { Cita, EstadoCita } from '@/features/citas/citas.types';
+import type { Paciente } from '@/features/pacientes/pacientes.types';
+import type { SoapNote } from '@/types/futuro.types';
 
 /**
- * Registra interceptores de Mock en la instancia de Axios si VITE_USE_MOCKS=true.
+ * Decisión única de activación de mocks: **fail-closed** (R-SEG-07, plan §2 guardarraíl 3).
+ *
+ * Solo se usan mocks con `import.meta.env.DEV` **y** `VITE_USE_MOCKS === 'true'`. Si la variable
+ * no está definida, NO hay mocks: un despliegue mal configurado debe apuntar a la red real y
+ * fallar limpio, nunca fabricar datos clínicos ni aceptar inicios de sesión falsos.
+ * Se exporta para poder probar la decisión sin instanciar Axios.
+ */
+export function debenUsarseMocks(): boolean {
+  return Boolean(import.meta.env.DEV) && import.meta.env.VITE_USE_MOCKS === 'true';
+}
+
+/**
+ * Registra interceptores de Mock en la instancia de Axios cuando `debenUsarseMocks()`.
  * Permite desarrollar y probar todos los flujos UI de forma 100% autónoma.
  */
 export function setupMockAdapter(axiosInstance: AxiosInstance) {
@@ -27,9 +41,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   let soapNotes = [...mockSoapNotes];
 
   axiosInstance.interceptors.request.use(async (config) => {
-    // Si la bandera está desactivada, no intervenir (va a la red real)
-    const useMocks = import.meta.env.VITE_USE_MOCKS === 'true' || import.meta.env.VITE_USE_MOCKS === undefined;
-    if (!useMocks) return config;
+    // Si los mocks no están explícitamente habilitados, no intervenir (va a la red real)
+    if (!debenUsarseMocks()) return config;
 
     const url = config.url || '';
     const method = (config.method || 'get').toLowerCase();
@@ -86,7 +99,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
 
     if (url.includes('/pacientes') && method === 'post') {
       await delay();
-      const newPatient: Patient = {
+      const newPatient: Paciente = {
         id: `pac-${Date.now()}`,
         organizacion_id: 'org-001',
         activo: true,
@@ -153,7 +166,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       const medico = mockDoctors.find((m) => m.id === body.medico_id) || mockDoctors[0];
       const consultorio = mockClinicRooms.find((c) => c.id === body.consultorio_id) || mockClinicRooms[0];
 
-      const newApt: Appointment = {
+      const newApt: Cita = {
         id: `apt-${Date.now()}`,
         organizacion_id: 'org-001',
         paciente_id: body.paciente_id,
@@ -186,7 +199,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       const match = url.match(/\/citas\/([^/]+)\/estado/);
       const id = match ? match[1] : '';
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-      const newStatus = body.estado as AppointmentStatus;
+      const newStatus = body.estado as EstadoCita;
 
       appointments = appointments.map((apt) =>
         apt.id === id

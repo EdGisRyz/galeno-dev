@@ -6,7 +6,7 @@ import { loginSchema, type LoginFormValues } from './auth.schema';
 import { authService } from './auth.service';
 import { useAuthStore } from '@/store/auth.store';
 import { Button, Input, Alert } from '@/components/ui';
-import { Mail, Lock, LogIn, Sparkles } from 'lucide-react';
+import { Mail, Lock, LogIn } from 'lucide-react';
 
 export function LoginForm() {
   const navigate = useNavigate();
@@ -17,17 +17,13 @@ export function LoginForm() {
 
   const reason = searchParams.get('reason');
 
+  // Sin `defaultValues` con credenciales: el formulario arranca vacío (plan §2 guardarraíl 5).
   const {
     register,
     handleSubmit,
-    setValue,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: 'dra.elena@sanrafael.com',
-      password: 'password123',
-    },
   });
 
   const onSubmit = async (values: LoginFormValues) => {
@@ -51,11 +47,6 @@ export function LoginForm() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickLogin = (email: string) => {
-    setValue('email', email);
-    setValue('password', 'password123');
   };
 
   return (
@@ -134,40 +125,6 @@ export function LoginForm() {
           Acceder al Sistema
         </Button>
       </form>
-
-      {/* Selector Rápido de Usuarios para Desarrollo */}
-      <div className="pt-4 border-t border-[#F1F5F9]">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#64748B] mb-2">
-          <Sparkles className="w-3.5 h-3.5 text-[#088395]" />
-          <span>Acceso Rápido de Prueba (Mock):</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => handleQuickLogin('dra.elena@sanrafael.com')}
-            className="p-2 text-left rounded-lg border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#0A4D68] transition-all cursor-pointer text-xs"
-          >
-            <span className="font-semibold text-[#0B1C30] block">Dra. Elena</span>
-            <span className="text-[10px] text-[#64748B] block truncate">Medicina Gral.</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickLogin('dr.roberto@sanrafael.com')}
-            className="p-2 text-left rounded-lg border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#0A4D68] transition-all cursor-pointer text-xs"
-          >
-            <span className="font-semibold text-[#0B1C30] block">Dr. Roberto</span>
-            <span className="text-[10px] text-[#64748B] block truncate">Pediatría</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickLogin('admin@sanrafael.com')}
-            className="p-2 text-left rounded-lg border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#0A4D68] transition-all cursor-pointer text-xs"
-          >
-            <span className="font-semibold text-[#0B1C30] block">Administrador</span>
-            <span className="text-[10px] text-[#64748B] block truncate">Clínica Admin</span>
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
