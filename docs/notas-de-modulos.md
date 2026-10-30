@@ -112,6 +112,14 @@ respuestas que devuelve son las correctas y están cubiertas por tests.
    vivo el 2026-10-16. Remediación posible cuando se aborde el endurecimiento
    (mapear `NoHandlerFoundException` o un `ErrorController` propio); **no** se
    implementa ahora.
+   **Corrección (2026-10-29):** la remediación se implementó (`config/RestErrorController`,
+   commit `b55e3b7`). Lo que pasa hoy, verificado por test: una ruta inexistente **sin**
+   token responde `401` con `ErrorResponse` —la autenticación va antes del enrutado— y
+   **con** token válido responde `404` con el mismo contrato; ver
+   `ErrorYPreflightRealTest.unaRutaInexistenteSinTokenResponde401` y
+   `unaRutaInexistenteConTokenResponde404ConElContrato`. La página de error del framework
+   ya no aparece en ningún caso. Lo que el `GlobalExceptionHandler` sigue sin cubrir son
+   las excepciones que no conoce, como antes.
 
 ### Decisión 3 — `SecurityConfig` abierto y sin estado: temporal, NO de producción
 
@@ -163,6 +171,31 @@ autorizada por el humano: **no corrige el hallazgo ni hace desaparecer la
 vulnerabilidad**, y no debe leerse como aprobación de seguridad. La disposición del
 hallazgo sigue pendiente.
 
+### Corrección (2026-10-29) — el sprint de seguridad invalidó esta sección
+
+El registro de arriba es el del módulo 00 y **no se reescribe**. Lo que cambió después,
+verificado en el árbol:
+
+- **`SecurityConfig` ya no está abierto.** No existe `anyRequest().permitAll()`: la cadena
+  termina en `DenyByDefaultAuthorizationManager`, aplica la matriz por rol y el
+  `tenantId` del token es la autoridad del tenant (commits `c74d347`, `fa60195`,
+  `b55e3b7`; ADR-013).
+- **El hallazgo `permitall-tenant-mutations` quedó cerrado con código**, no con
+  documentación: las quince operaciones exigen token (`CadenaDeFiltrosCerradaTest`), la
+  matriz y el aislamiento se ejercitan por celda (`AislamientoYMatrizRbacTest`) y el
+  `401`/`403`/`404` sale con el contrato `ErrorResponse`.
+- **El pipeline de CI/CD ya existe** (commit `fe17340`): `.github/workflows/test.yml`
+  corre `sh scripts/verificar-seguridad.sh` antes de compilar y falla si reaparece un
+  `permitAll()` no declarado. La afirmación «es trabajo FUTURO y NO está implementado»
+  correspondía al momento del módulo 00.
+- **La duda R8.3(a) quedó resuelta:** `GET /api/v1/organizaciones` devuelve solo la
+  organización del token, no un listado global (`AislamientoYMatrizRbacTest`,
+  «GET /organizaciones devuelve exactamente la organización del token»). La hipótesis de
+  esta sección se cumplió para el listado; el alta de organizaciones quedó **bloqueada
+  con `403` para todos** hasta que exista el flujo de onboarding (ADR-013).
+- Los `[ ]` del checklist de abajo describen el estado del módulo 00 y ya no aplican: se
+  conservan como registro, no se borran.
+
 ### Duda abierta
 
 > **R8.3(a) — ¿Cómo filtrará `listarActivas` por tenant cuando llegue el JWT?**
@@ -187,7 +220,7 @@ ellas.
 | `src/main/resources/db/migration/**` (V1) | Congelado, sin cambios |
 | `src/main/java/com/intoglobe/clinicas/config/**` y su `.gitkeep` | Congelado, sin cambios |
 | `security/` salvo `SecurityConfig.java`, incluido `security/.gitkeep` | Congelado, sin cambios |
-| `application.properties`, `application-test.properties` | Preservados; la modificación local preexistente NO la produce este módulo y se excluye del diff |
+| `application.properties`, `application-test.properties` | Preservados en el módulo 00. **Corregido el 2026-10-29:** `application-test.properties` se movió de `src/main/resources` a `src/test/resources` para que el perfil de pruebas no viaje en el artefacto (ADR-009, ver «Sprint de seguridad» al final) |
 | `BackendApplicationTests` y bootstrap | Sin cambios |
 | `pom.xml` | Solo la dependencia de test autorizada; el resto congelado |
 | `.gitkeep` de paquetes que ganaron archivos reales | Eliminados (controller, dto/request, dto/response, exception, model, repository, service) |
@@ -201,8 +234,8 @@ versión** (la gestiona el BOM). Ninguna otra dependencia fue tocada.
 - **Suite completa verificada en T5:** salida 0; reportes actuales de contexto (1),
   controller (21), repositorio (10) y service (13), todos con 0 fallos, 0 errores y
   0 omitidos. La evidencia real de `echo $?` y las líneas Surefire está en
-  `backend/target/organizacion-verificacion.txt`; RED/GREEN enfocado en
-  `odd/tasks/organizacion.md`.
+  `backend/target/organizacion-verificacion.txt`; RED/GREEN enfocado en la tarjeta
+  de la tarea del módulo (documento de trabajo local, no versionado).
 - **No se declara una línea `BUILD SUCCESS` no observada**: `-q` la suprimió.
 - Los tests de repositorio cursan sobre H2 en modo PostgreSQL. **H2 no es prueba
   suficiente para PostgreSQL**: la validación con la base real queda pendiente.
@@ -481,11 +514,16 @@ mapper necesita, así que ahí no es una consulta extra).
 
 > **¿De dónde sale `organizacionId` cuando llegue el JWT?**
 
-Hoy llega por el path, porque `SecurityConfig` está abierto y no hay tenant en el
-`SecurityContext`. Es la continuación de R8.3(a) del módulo 00. Hipótesis registrada
-como tal, **no decidida**: con JWT, el `tenantId` del claim reemplaza al parámetro
-para roles MEDICO/PACIENTE (el tenant ES la organización) y el parámetro queda solo
-para ADMIN. No se inventan reglas ahora.
+Hoy llega por el path. Es la continuación de R8.3(a) del módulo 00. Hipótesis
+registrada como tal, **no decidida**: con JWT, el `tenantId` del claim reemplaza al
+parámetro para roles MEDICO/PACIENTE (el tenant ES la organización) y el parámetro
+queda solo para ADMIN. No se inventan reglas ahora.
+
+**Corrección (2026-10-29):** la hipótesis se confirmó y está implementada. El
+`tenantId` del claim es la autoridad; el `{organizacionId}` del path solo se acepta si
+coincide con el claim —**sin excepción de rol**— y, si no coincide, responde `403`
+(`TenantAccessGuard`, ADR-013). Las lecturas por id se filtran por organización en el
+`WHERE` y un recurso de otro tenant da `404`, no `403`.
 
 ### Riesgos declarados (documentarlos no los resuelve)
 
@@ -674,6 +712,13 @@ es que sí, entra en el V2 agrupado.
    agujero de **integridad de datos** (distinto del aislamiento por autenticación del T8). Con
    la API hoy abierta (`permitAll`), no es peor que el resto; el día que llegue RS256 pasa a
    importar mucho más.
+   **Corrección (2026-10-29):** RS256 llegó y la API ya no está abierta, pero **este hueco
+   sigue abierto tal como se describió**: el aislamiento por tenant acota a qué organización
+   se puede escribir, no que el `consultorioId` del cuerpo pertenezca a esa organización. Lo
+   que sí cambió: el consultorio del cuerpo se resuelve con la consulta acotada por
+   organización (commit `fa60195`), así que un consultorio de **otro** tenant da `404` y no
+   hay oráculo de existencia (`AislamientoYMatrizRbacTest`). Queda el caso dentro del mismo
+   tenant, que es el que el V2 agrupado tiene que cerrar.
 3. **`cedula` sin `UNIQUE`** (ver la duda de arriba).
 4. **Una tarifa negativa sigue siendo válida para el esquema.** El `@DecimalMin` la frena en
    la aplicación, pero un `INSERT` directo la acepta.
@@ -740,3 +785,25 @@ decisión de Eduardo. **Tests verdes no equivalen a review aprobada.**
 - [ ] Confirmé que las aserciones débiles están declaradas, no maquilladas.
 - [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
 - [ ] Confirmé que no hay conteos de tests ni éxito de suite inventados.
+
+---
+
+## Sprint de seguridad (2026-10-29)
+
+Cierre del hallazgo `permitall-tenant-mutations` del módulo 00. Lo que lo cerró fue
+código, no esta documentación:
+
+- La cadena de filtros está cerrada y termina en **deny-by-default**: sin token, las
+  quince operaciones responden `401`; con token, la matriz por rol y el `tenantId` del
+  claim deciden (`c74d347`, `fa60195`, `b55e3b7`).
+- El `401`/`403` y el `404` por recurso ajeno salen con el contrato `ErrorResponse`
+  único del proyecto, incluida una ruta inexistente (`RestErrorController`).
+- La **compuerta de CI** existe: `sh scripts/verificar-seguridad.sh` corre en el job
+  `test-java` y falla si vuelve un `permitAll()` no declarado (`fe17340`).
+- Las decisiones están en **ADR-008 a ADR-016** de `docs/decisiones.md`: validación
+  RS256 y clave pública, contrato de claims, sesión del cliente, vigencia, autorización
+  por rol y tenant, auditoría, verificación del frontend y supuestos pendientes.
+
+Lo que **no** queda cerrado y no debe leerse como cerrado: la review nativa del
+candidato de seguridad no está aprobada, `iss`/`aud` dependen de supuestos sin respuesta
+externa (ADR-016) y sigue sin existir flujo de alta de organizaciones.

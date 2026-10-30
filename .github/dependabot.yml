@@ -1,3 +1,17 @@
+# Dependabot: actualizaciones de VERSIÓN (mantener dependencias al día).
+#
+# Esto NO son alertas de vulnerabilidad. Los avisos y las actualizaciones de
+# seguridad son una configuración del repositorio (Settings → Code security:
+# Dependabot alerts y Dependabot security updates) que habilita el owner; este
+# archivo no las activa ni las puede activar.
+#
+# Ojo con la rama destino: `target-branch` aplica a las actualizaciones de
+# versión, que sí van a `develop`. Las actualizaciones de SEGURIDAD que abre
+# Dependabot apuntan siempre a la rama por defecto del repositorio (`main`), no
+# a `develop`. Un PR de seguridad sobre `main` es esperado, no un error de
+# configuración.
+#
+# Las entradas de `docker` y `github-actions` se dejan como estaban: funcionan.
 version: 2
 updates:
   - package-ecosystem: "maven"
@@ -5,20 +19,74 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "develop"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencias"
+      - "backend"
     groups:
+      # Un solo PR por familia: menos ruido y menos conflictos entre sí.
+      spring:
+        patterns:
+          - "org.springframework.boot:*"
+          - "org.springframework:*"
       jjwt:
-        patterns: ["io.jsonwebtoken:*"]
-      spring-boot:
-        patterns: ["org.springframework.boot:*"]
+        patterns:
+          - "io.jsonwebtoken:*"
+      testing:
+        patterns:
+          - "org.junit*:*"
+          - "org.mockito:*"
+          - "org.assertj:*"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
     target-branch: "develop"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencias"
+      - "frontend"
     groups:
-      types:
-        patterns: ["@types/*"]
+      # El orden importa: Dependabot asigna cada dependencia al PRIMER grupo
+      # cuyos patrones coinciden, así que `react` (con @types/react*) va antes
+      # que `tipos` (@types/*), que recoge el resto (@types/node).
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+          - "react-router-dom"
+      datos:
+        patterns:
+          - "@tanstack/*"
+          - "zustand"
+          - "axios"
+      validacion:
+        patterns:
+          - "zod"
+          - "@hookform/*"
+          - "react-hook-form"
+      testing:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "jsdom"
+          - "@testing-library/*"
+      tooling:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "typescript"
+          - "eslint*"
+          - "typescript-eslint"
+          - "tailwindcss"
+          - "@tailwindcss/*"
+      # Grupo existente, conservado y último para no robarle @types/react* a
+      # `react`.
+      tipos:
+        patterns:
+          - "@types/*"
 
   - package-ecosystem: "docker"
     directory: "/"
