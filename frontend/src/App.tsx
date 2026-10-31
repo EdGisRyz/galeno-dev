@@ -4,6 +4,7 @@ import { MainLayout } from './layouts/MainLayout';
 import { AuthLayout } from './layouts/AuthLayout';
 import { LoginForm } from './features/auth/LoginForm';
 import { AgendaPage } from './features/agenda/AgendaPage';
+import { PacientesPage } from './features/pacientes/PacientesPage';
 import { ProtectedRoute } from './components/navigation/ProtectedRoute';
 import { useAuthStore } from './store/auth.store';
 
@@ -32,7 +33,8 @@ function App() {
         <Route element={<MainLayout />}>
           <Route path="/" element={<Navigate to="/agenda" replace />} />
           <Route path="/agenda" element={<AgendaPage />} />
-          {/* Próximos módulos: /pacientes, /expediente, /cobros, /administracion */}
+          <Route path="/pacientes" element={<PacientesPage />} />
+          {/* Próximos módulos: /expediente, /cobros, /administracion */}
           <Route path="*" element={<Navigate to="/agenda" replace />} />
         </Route>
       </Route>
