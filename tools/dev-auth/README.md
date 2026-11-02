@@ -58,7 +58,7 @@ que si no aparece como «todos los tokens son inválidos» sin causa visible.
 ## Cómo obtener la clave privada
 
 La generación y la custodia del par RSA ya están documentadas para el equipo en la guía
-externa **`guia-claves-rs256.md`** (carpeta `Antecedentes_IntoGlobe`). No se duplica aquí para
+externa **`guia-claves-rs256.md`**. No se duplica aquí para
 que no existan dos versiones de las mismas instrucciones.
 
 Resumen de lo que esta herramienta espera: la **clave privada en PEM** en la ruta que indique
@@ -130,7 +130,7 @@ El access token lleva exactamente el contrato de ADR-010:
   inactividad del frontend (ADR-012).
 - `iss` sale de `AUTH_ISSUER`, `aud` de `AUTH_AUDIENCE`. **Configurar `auth.issuer` y
   `auth.audience` en el backend es lo que ejercita la validación de `iss`/`aud`**: con esas
-  propiedades en blanco el backend omite ambas comprobaciones (supuesto de §5.6), así que un
+  propiedades en blanco el backend omite ambas comprobaciones (supuesto de sección 5.6), así que un
   `iss` mal puesto pasaría inadvertido. Parea siempre emisor y backend con los mismos valores.
 
 ### Cookie de refresco

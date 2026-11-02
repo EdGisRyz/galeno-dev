@@ -5,7 +5,7 @@ import { LoginForm } from '@/features/auth/LoginForm';
 import { authService } from '@/features/auth/auth.service';
 
 /**
- * El formulario de login no embebe credenciales (plan §2 guardarraíl 5, R-SEG-07):
+ * El formulario de login no embebe credenciales (plan sección 2 guardarraíl 5, R-SEG-07):
  * ni contraseña por defecto, ni usuarios de prueba en el DOM.
  *
  * T6b (E): además debe mostrar el mensaje del emisor. dev-auth y el `ErrorResponse` del backend

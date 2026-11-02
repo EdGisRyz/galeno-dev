@@ -55,7 +55,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * se ejerce es la de producción, de modo que una regla que falte en la cadena o un recurso
  * ajeno que se cuele en un service hacen fallar estas pruebas.</p>
  *
- * <h2>Cobertura de la matriz (§5.3)</h2>
+ * <h2>Cobertura de la matriz (sección 5.3)</h2>
  *
  * <ul>
  *   <li><strong>ADMIN</strong>: las catorce operaciones permitidas sobre su propio tenant

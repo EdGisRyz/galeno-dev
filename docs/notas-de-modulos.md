@@ -6,21 +6,21 @@ código; **no sustituyen la review humana ni la review externa**.
 
 ## Estado de lectura rápida
 
-- Módulo `organizacion`: implementación inicial y pruebas enfocadas por tarea.
-  **Todavía no es la referencia de los módulos 1-10**: requiere una revisión línea por
-  línea contra la tarjeta del módulo 00 y una revisión externa antes de recibir ese
-  estatus.
+- Módulo `organizacion`: **referencia de facto de los módulos 1-10**. Las tarjetas 01,
+  02 y 03 replican su patrón y están aprobadas por Eduardo. Lo que sigue pendiente es la
+  **revisión externa formal** del módulo 00 (revisión línea por línea contra su tarjeta),
+  no su uso como patrón.
 - La suite completa `sh ./mvnw -q test` pasó en la verificación independiente de T5
-  (2026-10-12 01:20 UTC): salida real **0**, **45 tests**, 0 fallos, 0 errores y
-  0 omitidos (total calculado desde cuatro reportes Surefire actuales).
-  Evidencia: `backend/target/organizacion-verificacion.txt`. `-q` no imprimió
-  `BUILD SUCCESS`; no se inventa esa línea.
+  (2026-10-12 01:20 UTC): salida real **0**, **45 tests**, 0 fallos, 0 errores y 0 omitidos.
+  Esa cifra es **histórica**: la última corrida completa registrada es de **322 tests**,
+  0 fallos, 0 errores, 0 omitidos (reportes Surefire del 2026-10-30). Evidencia:
+  `backend/target/surefire-reports/`. `-q` no imprime `BUILD SUCCESS`; no se inventa esa línea.
 - Módulo `configuracion-tenant`: alcance parcial (entidad + repositorio + tests de
   integración), replicando el patrón del módulo 00. La aceptación nativa y la review
   externa del módulo 00 siguen pendientes y NO se asumen aprobadas.
 - Módulo `consultorio`: alcance **COMPLETO** (dominio, repositorio, DTOs, mapper,
   service, controller, tests y notas). Es el molde de los módulos 3-10. Rutas
-  anidadas para colección y planas para ítem: desviación justificada de GAL-001 §5.8.
+  anidadas para colección y planas para ítem: desviación justificada de GAL-001 sección 5.8.
 - Módulo `medico`: alcance **COMPLETO**. **Cierra los 3 modelos de la rama**
   (`Organizacion`, `Consultorio`, `Medico`). Misma convención de rutas. Incluye la
   primera excepción de negocio del proyecto que responde **400** y la primera
@@ -208,8 +208,8 @@ quedando el listado global solo para ADMIN. Se resolverá al implementar la
 seguridad; no se inventan reglas ahora.
 
 **Contexto de roadmap (no es respuesta a la duda).** R8.3 también menciona la
-matriz RBAC de los endpoints (§b) y si el alta de tenants pasará por este controller
-o por un `OnboardingService` dedicado (§c, Sprint 2). Se documentan solo como
+matriz RBAC de los endpoints (sección b) y si el alta de tenants pasará por este controller
+o por un `OnboardingService` dedicado (sección c, Sprint 2). Se documentan solo como
 contexto de roadmap: **no están respondidas aquí** y no se inventan reglas para
 ellas.
 
@@ -261,14 +261,14 @@ versión** (la gestiona el BOM). Ninguna otra dependencia fue tocada.
 
 ## configuracion-tenant
 
-Módulo 01 en **alcance parcial** según GAL-001 §6: entidad, repositorio y tests de
+Módulo 01 en **alcance parcial** según GAL-001 sección 6: entidad, repositorio y tests de
 integración. **No** hay DTO, mapper, service ni controller: leer las API keys por
 organización pertenece a un sprint distinto. La tabla no tiene `activo` ni
 `updated_at`, así que el módulo no define borrado lógico ni auditoría de modificación.
 
 ### Decisión 1 — Relación 1-1 unidireccional y obligatoria con `organizacion`
 
-**Contexto.** El plan §6 pide practicar `@OneToOne` "opcional", pero V1 declara
+**Contexto.** El plan sección 6 pide practicar `@OneToOne` "opcional", pero V1 declara
 `organizacion_id UUID NOT NULL` con `UNIQUE` y `FOREIGN KEY ... ON DELETE CASCADE`.
 
 **Decisión.**
@@ -324,7 +324,7 @@ decir manipulando campos privados.
 **Por qué.** Sin una vía legítima de poblar sus columnas, la entidad no es usable ni
 testeable sin trampas. El precedente está en el módulo 00, cuyo constructor de
 negocio ya incluía el campo opcional `subscriptionId`. Este ajuste se aplicó el
-2026-10-14 con aprobación humana explícita (`Modulo_01_Configuracion_Tenant.md` §9/R10).
+2026-10-14 con aprobación humana explícita (`Modulo_01_Configuracion_Tenant.md` sección 9/R10).
 
 ### Duda abierta
 
@@ -397,7 +397,7 @@ fase de seguridad del backend. **Tests verdes no equivalen a review aprobada.**
 
 ## consultorio
 
-Módulo 02 con alcance **COMPLETO** (GAL-001 §6): dominio, repositorio, tests de
+Módulo 02 con alcance **COMPLETO** (GAL-001 sección 6): dominio, repositorio, tests de
 integración, DTOs, mapper, service, tests unitarios, controller, tests MVC y estas
 notas. Es el molde de los módulos 3-10.
 
@@ -490,22 +490,22 @@ mapper necesita, así que ahí no es una consulta extra).
 
 ### Desviaciones deliberadas respecto del plan
 
-- **GAL-001 §7 (slicing).** La tarjeta define 3 unidades; el módulo se commitea en **4**.
+- **GAL-001 sección 7 (slicing).** La tarjeta define 3 unidades; el módulo se commitea en **4**.
   Se separó `test(consultorio): el proxy LAZY no se inicializa al leer el id` porque el
   test que cierra ese invariante es de **integración** (vive en
   `ConsultorioRepositoryTest`, archivo de la unidad de dominio) y no encajaba en el
   mensaje `contratos y servicio con tests unitarios`. Separarlo mantiene cada unidad con
   un propósito único y deja el invariante visible en el historial. El caso está
-  sancionado por §6, dentro del "mínimo 3" que exige el repositorio.
-- **GAL-001 §5.8** dicta `@RequestMapping("/api/v1/<recurso>")`. Este módulo usa **dos
+  sancionado por sección 6, dentro del "mínimo 3" que exige el repositorio.
+- **GAL-001 sección 5.8** dicta `@RequestMapping("/api/v1/<recurso>")`. Este módulo usa **dos
   rutas base**: la colección cuelga de la organización y el ítem va plano. Se adoptó
   ADR-005 (*recursos anidados con ID*) porque el tenant es contexto real de la
   colección, porque deja el `organizacionId` del path como el lugar natural para
   validar el `tenantId` del token cuando llegue el JWT (una comprobación por request
   en lugar de un query param falsificable) y porque decidirlo **antes de que exista un
   consumidor** evita necesitar `/api/v2` después.
-- **GAL-001 §4.1** muestra el `@Query` del repositorio **sin `ORDER BY`**. Aquí sí lo
-  lleva, porque §3 de la tarjeta exige "ordenados por nombre" y el caso 4 de §6 lo
+- **GAL-001 sección 4.1** muestra el `@Query` del repositorio **sin `ORDER BY`**. Aquí sí lo
+  lleva, porque sección 3 de la tarjeta exige "ordenados por nombre" y el caso 4 de sección 6 lo
   afirma. El snippet del plan ilustra la regla (nombre en español + `@Query`
   explícito, sin name-derivation), no el texto exacto de la consulta; el módulo 00 ya
   ordena.
@@ -591,7 +591,7 @@ modelo durante el módulo 01. **Tests verdes no equivalen a review aprobada.**
 
 - [ ] Confirmé que la sección tiene **4 decisiones** y **1 duda**.
 - [ ] Confirmé que la duda (tenant con JWT) queda abierta y con la hipótesis marcada como tal.
-- [ ] Confirmé que las desviaciones respecto de GAL-001 §4.1 y §5.8 están justificadas, no silenciadas.
+- [ ] Confirmé que las desviaciones respecto de GAL-001 sección 4.1 y sección 5.8 están justificadas, no silenciadas.
 - [ ] Confirmé que los 4 riesgos declarados están declarados y que se dice que documentarlos no los resuelve.
 - [ ] Confirmé que la aserción tautológica está declarada y que su cobertura real vive en el test de repositorio.
 - [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
@@ -601,7 +601,7 @@ modelo durante el módulo 01. **Tests verdes no equivalen a review aprobada.**
 
 ## medico
 
-Módulo 03 con alcance **COMPLETO** (GAL-001 §6). **Cierra los 3 modelos de la rama**
+Módulo 03 con alcance **COMPLETO** (GAL-001 sección 6). **Cierra los 3 modelos de la rama**
 (`Organizacion`, `Consultorio`, `Medico`).
 
 Expone cinco endpoints bajo `/api/v1`, con la convención de rutas del proyecto (**la
@@ -654,7 +654,7 @@ comportamientos distintos conviviendo, y uno de ellos (CASCADE sobre horarios) e
 **Decisión.** No existe `GET /consultorios/{id}/medicos`.
 
 **Por qué.** (a) V1 **no tiene índice** sobre `medico.consultorio_id` (el único es
-`idx_medico_org`): ese endpoint haría *seq scan*; (b) el plan §4.1 dicta únicamente
+`idx_medico_org`): ese endpoint haría *seq scan*; (b) el plan sección 4.1 dicta únicamente
 `listarPorOrganizacion`; (c) sería inventar superficie de API sin demanda comprobada.
 
 **Consecuencia declarada.** Si la UI necesita los médicos de un consultorio, hoy filtra en

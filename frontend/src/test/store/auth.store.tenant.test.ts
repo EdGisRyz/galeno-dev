@@ -8,7 +8,7 @@ import { CLAIMS, makeToken } from '../helpers/jwt';
  *
  * Antes el store hacía `decoded.tenantId || 'org-001'`: un token sin tenant quedaba autenticado
  * dentro de una organización inventada, y la UI mostraba una clínica que nadie le dio. Ahora el
- * claim es obligatorio y el valor por defecto no existe (plan §2 guardarraíl 4).
+ * claim es obligatorio y el valor por defecto no existe (plan sección 2 guardarraíl 4).
  */
 
 vi.mock('@/features/auth/auth.service', () => ({

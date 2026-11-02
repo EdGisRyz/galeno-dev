@@ -18,7 +18,7 @@ interface AuthState {
   inicializando: boolean;
   /**
    * Slug/token del tenant de la sesión. Se deriva del claim `tenantId` al abrir la sesión y **nunca**
-   * se rellena con un valor por defecto (GAL-Front001 §2, guardarraíl 4): si no hay claim, no hay
+   * se rellena con un valor por defecto (GAL-Front001 sección 2, guardarraíl 4): si no hay claim, no hay
    * sesión.
    */
   tenantSlug: string;
@@ -36,7 +36,7 @@ interface AuthState {
 }
 
 /**
- * Decodifica un segmento en base64url (RFC 7515 §2) a bytes.
+ * Decodifica un segmento en base64url (RFC 7515 sección 2) a bytes.
  * `atob` solo entiende el alfabeto base64 estándar y exige relleno: hay que traducir
  * '-'(62) → '+' y '_'(63) → '/' y reponer '=' hasta un múltiplo de 4.
  */
@@ -64,7 +64,7 @@ interface ClaimsToken {
   role?: UserRole;
   tenantId?: string;
   medicoId?: string;
-  /** Vencimiento en segundos epoch (RFC 7519 §2). Crudo a propósito: puede faltar o no ser número. */
+  /** Vencimiento en segundos epoch (RFC 7519 sección 2). Crudo a propósito: puede faltar o no ser número. */
   exp?: unknown;
 }
 
@@ -101,7 +101,7 @@ type MotivoRechazo = 'malformado' | 'identidad_incompleta' | 'sin_tenant' | 'sin
 /** Resultado de intentar convertir un token en sesión: usuario, o el motivo del rechazo. */
 type SesionResuelta = { ok: true; usuario: AuthUser } | { ok: false; motivo: MotivoRechazo };
 
-/** Mensaje explícito por motivo: un rechazo se ve, no se silencia (plan §2 guardarraíl 4). */
+/** Mensaje explícito por motivo: un rechazo se ve, no se silencia (plan sección 2 guardarraíl 4). */
 const MENSAJE_RECHAZO: Record<MotivoRechazo, string> = {
   malformado: 'El token de acceso emitido no se pudo decodificar.',
   identidad_incompleta: 'El token de acceso no trae la identidad completa (sub, email, role).',
@@ -110,7 +110,7 @@ const MENSAJE_RECHAZO: Record<MotivoRechazo, string> = {
   vencido: 'El token de acceso está vencido: exp quedó en el pasado (ADR-012).',
 };
 
-/** Ahora en segundos epoch: la unidad de `exp` según RFC 7519 §2. */
+/** Ahora en segundos epoch: la unidad de `exp` según RFC 7519 sección 2. */
 function ahoraEnSegundos(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -120,7 +120,7 @@ function ahoraEnSegundos(): number {
  *
  * Fail-closed (R-SEG-07, ADR-010, ADR-012, ADR-013): sin identidad completa, sin `tenantId` o
  * sin un `exp` numérico vigente no hay usuario. El tenant **jamás** se rellena con un valor por
- * defecto: el claim es la autoridad y un token sin él se rechaza (plan §2, guardarraíl 4).
+ * defecto: el claim es la autoridad y un token sin él se rechaza (plan sección 2, guardarraíl 4).
  */
 function resolverSesion(claims: ClaimsToken | null): SesionResuelta {
   if (!claims) return { ok: false, motivo: 'malformado' };

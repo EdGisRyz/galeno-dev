@@ -65,7 +65,7 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <h2>Matriz de autorización por rol (R-SEG-05, D4)</h2>
  *
- * <p>La matriz congelada en §5.3 se aplica aquí, celda por celda, para que quede auditable
+ * <p>La matriz congelada en sección 5.3 se aplica aquí, celda por celda, para que quede auditable
  * en un solo archivo en lugar de repartida en anotaciones por los controladores. Un rol sin
  * permiso recibe {@code 403} con el {@code ErrorResponse} habitual, porque la denegación de
  * la cadena la escribe {@link RestAccessDeniedHandler}.</p>
@@ -169,7 +169,7 @@ public class SecurityConfig {
      * matriz de autorización por rol, deny-by-default para el resto, CORS con credenciales y
      * errores de seguridad dentro del contrato {@code ErrorResponse}.
      *
-     * <p>El orden de las reglas sigue la matriz de §5.3: primero las rutas anidadas —son las
+     * <p>El orden de las reglas sigue la matriz de sección 5.3: primero las rutas anidadas —son las
      * más específicas— y después las de ítem. Las reglas de {@code ADMIN} cubren tanto lo
      * exclusivo del rol como lo compartido con {@code MEDICO}; la lectura compartida se
      * declara antes para que {@code MEDICO} no caiga en la regla de {@code ADMIN}. Lo que no

@@ -21,7 +21,7 @@ import org.springframework.core.env.Environment;
  * {@code application-test.properties}; las que validan firmas la sobrescriben con
  * {@code @DynamicPropertySource} y un par generado en memoria.</p>
  *
- * <p><strong>Supuesto de trabajo declarado (§5.6):</strong> en producción
+ * <p><strong>Supuesto de trabajo declarado (sección 5.6):</strong> en producción
  * {@code auth.issuer} y {@code auth.audience} deben estar definidos; en desarrollo pueden
  * quedar en blanco y entonces esa validación se omite. Este chequeo solo cubre la clave
  * pública, que es la que no puede faltar para validar una firma.</p>

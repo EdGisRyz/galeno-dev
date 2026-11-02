@@ -1,5 +1,5 @@
 // Clientes HTTP de la aplicación. Este es el ÚNICO módulo que crea instancias de Axios
-// (GAL-Front001 §2, guardarraíl 1): ni componentes, ni features, ni páginas importan `axios`.
+// (GAL-Front001 sección 2, guardarraíl 1): ni componentes, ni features, ni páginas importan `axios`.
 //
 // El navegador habla con DOS orígenes (ADR-011):
 //   - `api`     → `VITE_API_URL`, el backend. Adjunta `Authorization: Bearer <token>` leyendo el

@@ -22,7 +22,7 @@ import org.springframework.util.StringUtils;
  *
  * <p>Si el decodificador cambia de fuente —por ejemplo si el AuthService publica un
  * JWKS—, se reemplaza esta clase y no la validación ni el mapeo de claims (supuesto de
- * trabajo de §5.6).</p>
+ * trabajo de sección 5.6).</p>
  */
 public final class AuthPublicKey {
 

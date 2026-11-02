@@ -93,7 +93,7 @@ export function MainLayout() {
             </div>
             <div>
               {/* El tenant de la cabecera sale del claim de la sesión; si no hay, un guion neutro.
-                  Nunca el nombre de una clínica inventada (plan §2, guardarraíl 4). */}
+                  Nunca el nombre de una clínica inventada (plan sección 2, guardarraíl 4). */}
               <span className="font-heading font-bold text-sm tracking-tight text-[#0A4D68] block">
                 {tenantSlug || '—'}
               </span>

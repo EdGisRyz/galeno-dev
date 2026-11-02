@@ -5,7 +5,7 @@ import routeSource from '@/components/navigation/ProtectedRoute.tsx?raw';
 import appSource from '@/App.tsx?raw';
 
 /**
- * T7 · plan §2, guardarraíl 4: prohibidos los valores por defecto inventados.
+ * T7 · plan sección 2, guardarraíl 4: prohibidos los valores por defecto inventados.
  *
  * El guardarraíl habla de lo que el código de producción *puede mostrar*, así que se lee la
  * fuente que se envía al navegador: `tenantId || 'org-001'` y `tenantSlug || 'vitalix'` no pueden

@@ -1,6 +1,6 @@
 // Tipos TypeScript del dominio Auth
 // `auth` se conserva en inglés: es una preocupación técnica, no una entidad del dominio
-// (ADR / plan §4.3, excepción declarada).
+// (ADR / plan sección 4.3, excepción declarada).
 // Reflejo tipado de la tabla `usuario` del esquema V1 y de los claims del token.
 
 export type UserRole = 'ADMIN' | 'MEDICO' | 'PACIENTE';

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { debenUsarseMocks } from '@/lib/mock/mockAdapter';
 
 /**
- * Contrato fail-closed de los mocks (R-SEG-07, plan §2 guardarraíl 3):
+ * Contrato fail-closed de los mocks (R-SEG-07, plan sección 2 guardarraíl 3):
  * los mocks solo existen con `import.meta.env.DEV && VITE_USE_MOCKS === 'true'`.
  * Una variable sin definir NO activa mocks: un despliegue mal configurado debe
  * fallar limpio contra la red real, no fabricar datos ni aceptar logins falsos.

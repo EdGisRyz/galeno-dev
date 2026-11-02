@@ -71,7 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>Nunca se registra el token ni su contenido: los rechazos se registran con la ruta, el
  * método y el tipo de excepción (R-SEG-10).</p>
  *
- * <p><strong>Supuesto de desarrollo declarado (§5.6):</strong> {@code auth.issuer} y
+ * <p><strong>Supuesto de desarrollo declarado (sección 5.6):</strong> {@code auth.issuer} y
  * {@code auth.audience} son opcionales en la configuración y, si están en blanco, la
  * validación de ese claim se omite. En producción ambos deben estar definidos; no es una
  * decisión del Product Owner, sino un supuesto de trabajo con fecha, sujeto a la

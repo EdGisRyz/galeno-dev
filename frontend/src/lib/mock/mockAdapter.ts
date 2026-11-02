@@ -18,7 +18,7 @@ import type { PatientIdentification, SoapNote } from '@/types/futuro.types';
 type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 
 /**
- * Decisión única de activación de mocks: **fail-closed** (R-SEG-07, plan §2 guardarraíl 3).
+ * Decisión única de activación de mocks: **fail-closed** (R-SEG-07, plan sección 2 guardarraíl 3).
  *
  * Solo se usan mocks con `import.meta.env.DEV` **y** `VITE_USE_MOCKS === 'true'`. Si la variable
  * no está definida, NO hay mocks: un despliegue mal configurado debe apuntar a la red real y

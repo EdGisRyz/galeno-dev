@@ -8,7 +8,7 @@
  * mientras no exista el AuthService de InToGlobe. El nombre `dev-auth` es deliberado: dice
  * en voz alta que no es producción, y su disparador de borrado está en el README.</p>
  *
- * <p><strong>Contrato que implementa</strong> (ADR-008 a ADR-012, §5.1, §5.2 y §5.6):</p>
+ * <p><strong>Contrato que implementa</strong> (ADR-008 a ADR-012, sección 5.1, sección 5.2 y sección 5.6):</p>
  * <ul>
  *   <li>Firma RS256 con la clave privada PEM indicada por {@code AUTH_PRIVATE_KEY_PATH}. El
  *       arranque <em>falla</em> si la variable no está, si el archivo no se puede leer o si

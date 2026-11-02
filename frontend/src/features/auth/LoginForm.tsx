@@ -16,7 +16,7 @@ export function LoginForm() {
 
   const reason = searchParams.get('reason');
 
-  // Sin `defaultValues` con credenciales: el formulario arranca vacío (plan §2 guardarraíl 5).
+  // Sin `defaultValues` con credenciales: el formulario arranca vacío (plan sección 2 guardarraíl 5).
   const {
     register,
     handleSubmit,

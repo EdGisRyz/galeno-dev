@@ -22,7 +22,7 @@ export function makeToken(payload: Record<string, unknown>): string {
 }
 
 /**
- * Vencimiento (`exp`) que cae `segundos` en el futuro, en segundos epoch (RFC 7519 §2).
+ * Vencimiento (`exp`) que cae `segundos` en el futuro, en segundos epoch (RFC 7519 sección 2).
  * Los fixtures de token vigente se calculan desde el reloj real: un `exp` fijo caduca y convierte
  * el fixture en un token vencido sin que nadie lo note (pasó con 1793000000, ya en el pasado).
  */
