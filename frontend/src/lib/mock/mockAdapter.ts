@@ -13,7 +13,9 @@ import {
 } from './mockData';
 import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
-import type { SoapNote } from '@/types/futuro.types';
+import type { PatientIdentification, SoapNote } from '@/types/futuro.types';
+
+type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 
 /**
  * Decisión única de activación de mocks: **fail-closed** (R-SEG-07, plan §2 guardarraíl 3).
@@ -43,7 +45,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   const delay = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // Mutable in-memory store for mocks
-  const patients = [...mockPatients];
+  const patients: PacienteConFicha[] = [...mockPatients];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
 
@@ -99,7 +101,10 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     if (url.includes('/pacientes') && method === 'get') {
       await delay();
       config.adapter = async () => ({
-        data: patients,
+        // Copia defensiva: nunca devolver el array mutable por referencia, o un POST/PUT
+        // posterior (que muta el store vía unshift/índice) duplicaría registros en el estado
+        // de React que ya lo recibió.
+        data: [...patients],
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -110,18 +115,53 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
 
     if (url.includes('/pacientes') && method === 'post') {
       await delay();
-      const newPatient: Paciente = {
-        id: `pac-${Date.now()}`,
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const newPatientId = `pac-${Date.now()}`;
+      const newPatient: PacienteConFicha = {
+        id: newPatientId,
         organizacion_id: 'org-001',
         activo: true,
         created_at: new Date().toISOString(),
-        ...(typeof config.data === 'string' ? JSON.parse(config.data) : config.data),
+        ...body,
+        ficha: body.ficha
+          ? { id: `ficha-${Date.now()}`, paciente_id: newPatientId, ...body.ficha }
+          : undefined,
       };
       patients.unshift(newPatient);
       config.adapter = async () => ({
         data: newPatient,
         status: 201,
         statusText: 'Created',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // Actualizar paciente existente (datos básicos + ficha NOM-004)
+    if (url.includes('/pacientes/') && (method === 'put' || method === 'patch')) {
+      await delay();
+      const match = url.match(/\/pacientes\/([^/]+)/);
+      const id = match ? match[1] : '';
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const idx = patients.findIndex((p) => p.id === id);
+
+      if (idx !== -1) {
+        const current = patients[idx];
+        const { ficha: fichaBody, ...patientBody } = body as { ficha?: Partial<PatientIdentification> } & Partial<Paciente>;
+        patients[idx] = {
+          ...current,
+          ...patientBody,
+          ficha: fichaBody
+            ? { id: current.ficha?.id || `ficha-${Date.now()}`, paciente_id: id, ...current.ficha, ...fichaBody }
+            : current.ficha,
+        };
+      }
+
+      config.adapter = async () => ({
+        data: patients[idx],
+        status: 200,
+        statusText: 'OK',
         headers: {},
         config,
       });
@@ -161,7 +201,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     if (url.includes('/citas') && method === 'get') {
       await delay();
       config.adapter = async () => ({
-        data: appointments,
+        data: [...appointments],
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -255,7 +295,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     if (url.includes('/expediente/notas') && method === 'get') {
       await delay();
       config.adapter = async () => ({
-        data: soapNotes,
+        data: [...soapNotes],
         status: 200,
         statusText: 'OK',
         headers: {},
