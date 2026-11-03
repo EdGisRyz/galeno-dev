@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { differenceInYears } from 'date-fns';
 import { api } from '@/lib/axios';
+import { resumenDeErrorHttp } from '@/lib/apiError';
 import {
   Button,
   Input,
@@ -31,9 +32,15 @@ import {
   Pencil,
   Baby,
   FileText,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 
 type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
+
+/** Mensaje único del estado de error de carga: el detalle técnico solo va a la consola. */
+const MENSAJE_ERROR_CARGA =
+  'No fue posible obtener el directorio de pacientes. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -58,6 +65,7 @@ function calcularEdad(fechaNacimiento?: string | null): string {
 export function PacientesPage() {
   const [patients, setPatients] = useState<PacienteConFicha[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -69,14 +77,31 @@ export function PacientesPage() {
   const loadData = () => {
     return api
       .get<PacienteConFicha[]>('/pacientes')
-      .then((res) => setPatients(res.data))
-      .catch((err) => console.error('Error al cargar pacientes:', err))
+      .then((res) => {
+        setPatients(res.data);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        // Se registra un resumen sin secretos (API_ADR-011) y además se hace visible el fallo:
+        // un directorio vacío por error no puede confundirse con «no hay pacientes».
+        console.error('Error al cargar pacientes:', resumenDeErrorHttp(err));
+        setPatients([]);
+        setLoadError(MENSAJE_ERROR_CARGA);
+      })
       .finally(() => setIsLoading(false));
   };
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Refresco manual: el loader y la limpieza del error se marcan aquí y no dentro de `loadData`,
+  // para que el efecto inicial no encienda estados antes de que responda la petición.
+  const handleRetry = () => {
+    setIsLoading(true);
+    setLoadError(null);
+    loadData();
+  };
 
   const openCreateModal = () => {
     setEditingId(null);
@@ -163,6 +188,12 @@ export function PacientesPage() {
     return { total, activos, pediatricos, conNotas };
   }, [patients]);
 
+  /**
+   * Un dato que no se pudo leer no es cero: mientras carga o si la carga falló, la métrica se
+   * muestra como desconocida. Escribir 0 afirmaría que el directorio está vacío.
+   */
+  const metrica = (valor: number): string | number => (isLoading || loadError ? '—' : valor);
+
   return (
     <div className="space-y-6">
       {/* ─────────────────────────────────────────
@@ -205,7 +236,7 @@ export function PacientesPage() {
                 Total Pacientes
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#0B1C30] mt-1 tnum">
-                {stats.total}
+                {metrica(stats.total)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#EFF4FF] text-[#0A4D68] flex items-center justify-center">
@@ -221,7 +252,7 @@ export function PacientesPage() {
                 Activos
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#047857] mt-1 tnum">
-                {stats.activos}
+                {metrica(stats.activos)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center">
@@ -237,7 +268,7 @@ export function PacientesPage() {
                 Pediátricos
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#4338CA] mt-1 tnum">
-                {stats.pediatricos}
+                {metrica(stats.pediatricos)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#EEF2FF] text-[#4F46E5] flex items-center justify-center">
@@ -253,7 +284,7 @@ export function PacientesPage() {
                 Con Notas Clínicas
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#B45309] mt-1 tnum">
-                {stats.conNotas}
+                {metrica(stats.conNotas)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#FFFBEB] text-[#D97706] flex items-center justify-center">
@@ -281,11 +312,13 @@ export function PacientesPage() {
           TABLA DE PACIENTES
           ───────────────────────────────────────── */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between text-xs text-[#64748B] px-1">
-          <span>
-            Mostrando <strong>{filteredPatients.length}</strong> pacientes registrados
-          </span>
-        </div>
+        {!isLoading && !loadError && (
+          <div className="flex items-center justify-between text-xs text-[#64748B] px-1">
+            <span>
+              Mostrando <strong>{filteredPatients.length}</strong> pacientes registrados
+            </span>
+          </div>
+        )}
 
         <Table>
           <TableHeader>
@@ -300,7 +333,38 @@ export function PacientesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {!isLoading && filteredPatients.length > 0 ? (
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-12">
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    className="inline-flex items-center gap-2 text-[#64748B]"
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Cargando pacientes...
+                  </span>
+                </TableCell>
+              </TableRow>
+            ) : loadError ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-8">
+                  <Alert variant="error" title="No se pudieron cargar los pacientes">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <span>{loadError}</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRetry}
+                        leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                      >
+                        Reintentar
+                      </Button>
+                    </div>
+                  </Alert>
+                </TableCell>
+              </TableRow>
+            ) : filteredPatients.length > 0 ? (
               filteredPatients.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell>
@@ -365,8 +429,22 @@ export function PacientesPage() {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-12 text-[#94A3B8]">
-                  {isLoading ? 'Cargando pacientes...' : 'No se encontraron pacientes con ese criterio.'}
+                <TableCell colSpan={7} className="text-center py-12">
+                  {search ? (
+                    <span className="text-[#94A3B8]">
+                      No se encontraron pacientes con ese criterio.
+                    </span>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="flex items-center justify-center gap-2 text-[#41484D] font-semibold">
+                        <Users className="w-4 h-4 text-[#64748B]" />
+                        Aún no hay pacientes registrados
+                      </p>
+                      <p className="text-[#94A3B8]">
+                        Da de alta al primer paciente con el botón «Nuevo Paciente».
+                      </p>
+                    </div>
+                  )}
                 </TableCell>
               </TableRow>
             )}
