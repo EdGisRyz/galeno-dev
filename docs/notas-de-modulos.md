@@ -807,3 +807,104 @@ código, no esta documentación:
 Lo que **no** queda cerrado y no debe leerse como cerrado: la review nativa del
 candidato de seguridad no está aprobada, `iss`/`aud` dependen de supuestos sin respuesta
 externa (ADR-016) y sigue sin existir flujo de alta de organizaciones.
+
+---
+
+## horario-medico
+
+Módulo 04 con alcance **COMPLETO** (GAL-001 sección 6). Tarjeta `Modulo_04_Horario_Medico.md`
+en v2, aprobada por Eduardo el 2026-11-03. Es el primer módulo cuya autorización se decidió
+**antes** de escribir el controller, después de que el módulo 03 mostrara el costo de
+decidirla al final.
+
+Expone cinco endpoints bajo `/api/v1`. La colección cuelga de su dueño inmediato y el ítem
+va plano, la convención que fijaron los módulos 02 y 03:
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| `POST` | `/api/v1/medicos/{medicoId}/horarios` | 201 + `Location` |
+| `GET` | `/api/v1/medicos/{medicoId}/horarios` | 200 (por día y hora de inicio) |
+| `GET` | `/api/v1/horarios/{id}` | 200 |
+| `PUT` | `/api/v1/horarios/{id}` | 200 |
+| `DELETE` | `/api/v1/horarios/{id}` | 204 (baja física) |
+
+### Decisiones
+
+1. **`dia_semana` usa la convención de JavaScript: `0=Domingo … 6=Sábado`.** El schema
+declara el rango 0..6 pero no su semántica. Se eligió la convención que el frontend **ya
+asumía** (`features/medicos/medicos.types.ts`), para no introducir una traducción que se
+olvide en un `forEach` y corra el calendario un día. [Derivada: la convención vive en el
+tipo del frontend y en los mocks.]
+2. **Se rechazan los solapamientos con 400.** La detección es **una consulta de conteo**
+(`contarSolapamientos`), no una carga en memoria: la base cuenta y devuelve un número. Se
+descartó el `EXCLUDE USING gist` de PostgreSQL porque exige migración (V1 congelado) y
+porque **H2 no soporta `EXCLUDE`**: la suite no podría probarlo. Va al V2, junto con el
+requisito de limpiar los datos que violen la constraint. [Probada: test de bordes de intervalo.]
+3. **Rango horario válido, con 400**, y es **prerrequisito** de la decisión 2: un bloque
+invertido (12:00–09:00) no solapa con nada según el predicado de intervalos (`10:00 < 09:00`
+es falso), así que sin esta regla esquiva la validación. También se rechaza la duración cero.
+[Probada: test del servicio y test que demuestra que la base lo acepta igual.]
+4. **Baja física.** `horario_medico` no tiene `activo` y **ninguna tabla la referencia**
+(`cita` apunta a `medico_id`), así que borrar no rompe FKs ni deja huérfanos. La baja lógica
+de `medico` se justificaba por `cita` y por el CASCADE destructivo; acá no ocurre ninguna.
+[Probada: búsqueda de referencias en V1 y test de CASCADE.]
+5. **El conjunto `{20,30,45,60}` se valida en el service, no en el DTO.** Bean Validation no
+expresa un conjunto cerrado sin infraestructura de constraints nueva, así que
+`DuracionConsultaInvalidaException` lo rechaza con 400. Es una **desviación declarada** del
+borrador de la tarjeta, con el mismo efecto observable. [Decidida en S2.]
+
+### Autorización en tres capas
+
+Ninguna capa alcanza sola, y el reparto no es cosmético:
+
+| Capa | Dónde | Qué decide | Respuesta |
+|---|---|---|---|
+| Rol | `SecurityConfig` | quién entra a la ruta | **403** para `PACIENTE` (deny-by-default) |
+| Organización | service | el bloque es de mi tenant | **404** si es de otra organización |
+| Propiedad | service | el bloque es de **mi** agenda | **403** si es de un colega |
+
+El **404 para cross-tenant es deliberado**: un 403 confirmaría que el recurso existe en otra
+clínica. La propiedad solo restringe a `MEDICO` —con `medicoId` nulo también falla cerrado—
+y el `ADMIN` opera cualquier agenda de su organización, porque editar la de un colega es una
+función administrativa, no una comodidad del médico (decisión de Eduardo, 2026-11-03).
+
+### Tests
+
+Corte S1–S3 cerrado con **400 tests en la suite completa**, 0 fallos, 0 errores, 0 omitidos
+(32 clases). Por clase: `HorarioMedicoRepositoryTest` **13**, `HorarioMedicoServiceTest` **37**,
+`HorarioMedicoControllerTest` **22**, `AislamientoYMatrizRbacTest` **57** invocaciones.
+[Probada: conteos leídos de `target/surefire-reports/`.]
+
+El camino hasta acá dejó dos lecciones medidas: los 20 casos MVC respondían **403** mientras
+la matriz no tuviera las celdas (deny-by-default), y el `@NotNull` sobre un primitivo no
+valida nada —omitir `duracionConsulta` llega como `0` y lo rechaza el service, mientras que
+omitir `diaSemana` llega como `0`, que **es domingo** y se acepta.
+
+### Estado nativo del módulo
+
+El módulo 04 **no tiene review nativa aprobada**. RDD sigue **apagado a nivel de clone** por
+decisión de Eduardo. **Tests verdes no equivalen a review aprobada.**
+
+### Riesgos declarados
+
+- **Sin `created_at`** en `horario_medico`: agregarlo sin migración rompería `ddl-auto=validate`. V2.
+- **Sin índice sobre `medico_id`**: el listado por médico recorre la tabla. V2.
+- **La garantía de no-solapamiento vive en la aplicación**, no en el schema: la base acepta
+tanto solapamientos como rangos invertidos, y un test lo deja probado a propósito.
+- **`AislamientoYMatrizRbacTest` no expresa la propiedad** médico-vs-colega: la matriz es por
+rol. Esa mitad se ejerce en los tests de service y en el 403 del controller.
+- **El Javadoc de `SecurityConfig` sigue describiendo quince operaciones** y solo los módulos
+01-03; las celdas de horarios se documentaron en un párrafo aparte. Deuda de redacción.
+- **`PACIENTE` queda apagado por decisión** y se reemplazará por un rol tipo `RECEPCIONISTA`;
+como el rol vive en `usuario_rol_check`, el cambio es una **migración**. Hasta entonces
+`PACIENTE` recibe 403 en las cinco rutas por deny-by-default.
+
+### Checklist de lectura
+
+- [ ] Confirmé que `dia_semana` es `0=Domingo … 6=Sábado` y de dónde sale esa convención.
+- [ ] Confirmé que el solapamiento se detecta con una consulta de conteo y no en memoria.
+- [ ] Confirmé que el rango válido es **prerrequisito** del solapamiento, con el caso del bloque invertido.
+- [ ] Confirmé que la baja es física y por qué `medico` sí usa baja lógica.
+- [ ] Confirmé que el 404 cross-tenant es deliberado y que el 403 de propiedad es solo para `MEDICO`.
+- [ ] Confirmé que los conteos de test salen de surefire y no de este documento.
+- [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
