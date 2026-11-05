@@ -71,7 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
  * la cadena la escribe {@link RestAccessDeniedHandler}.</p>
  *
  * <table>
- *   <caption>Matriz aplicada a las quince operaciones de la API</caption>
+ *   <caption>Matriz aplicada a las veinte operaciones de la API</caption>
  *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th></tr>
  *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td></tr>
@@ -84,6 +84,9 @@ import tools.jackson.databind.json.JsonMapper;
  *   <tr><td>{@code GET /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
  *   <tr><td>{@code GET /medicos/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
  *   <tr><td>{@code PUT|DELETE /medicos/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
+ *   <tr><td>{@code GET /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
+ *   <tr><td>{@code GET|PUT|DELETE /horarios/{id}}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
  * </table>
  *
  * <p>«Propio tenant» tiene dos mitades y las aplican dos piezas distintas: aquí se exige el
@@ -95,9 +98,9 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <h2>Horarios: la matriz concede el rol, el service acota el tenant y la agenda</h2>
  *
- * <p>Las cinco rutas de bloques de disponibilidad ({@code GET|POST /medicos/{id}/horarios} y
- * {@code GET|PUT|DELETE /horarios/{id}}) admiten {@code ADMIN} y {@code MEDICO}; {@code PACIENTE}
- * queda cerrado por el fallback deny-by-default, igual que en el resto de las operaciones.
+ * <p>Las cinco rutas de bloques de disponibilidad aparecen en la tabla como «su propia
+ * agenda» para {@code MEDICO}: esa columna no la aplica esta cadena, la aplica
+ * {@code HorarioMedicoService} (ver abajo).
  * La autorización de estas rutas tiene <strong>dos capas</strong> y esta cadena solo aplica la
  * primera: el rol abre la ruta, y {@code HorarioMedicoService} comprueba contra el token que
  * el médico —o el médico dueño del bloque— pertenezca al {@code tenantId} del claim
@@ -122,9 +125,11 @@ import tools.jackson.databind.json.JsonMapper;
  * venir acompañado del onboarding que haga alcanzable la organización creada, y de un test que
  * lo demuestre.</p>
  *
- * <p>{@code PACIENTE} recibe {@code 403} en las quince operaciones porque todavía no existe
- * ningún endpoint de paciente: no es una decisión de negocio, es ausencia de contrato. Su
- * matriz se define cuando exista {@code /pacientes}.</p>
+ * <p>{@code PACIENTE} recibe {@code 403} en las veinte operaciones por dos motivos distintos: en
+ * las quince de datos porque todavía no existe ningún endpoint de paciente —no es una decisión
+ * de negocio, es ausencia de contrato, y su matriz se define cuando exista {@code /pacientes}—,
+ * y en las cinco de horarios porque el rol queda <strong>apagado por decisión de producto</strong>
+ * hasta que la migración a {@code RECEPCIONISTA} lo reemplace.</p>
  *
  * <h2>No hay rutas {@code /api/v1/auth/**} que permitir</h2>
  *
