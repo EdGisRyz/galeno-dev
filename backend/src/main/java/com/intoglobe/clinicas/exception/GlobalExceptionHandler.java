@@ -83,6 +83,60 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Responde 400 cuando el bloque de disponibilidad tiene el rango horario invertido o
+     * vacío.
+     *
+     * <p>Es una regla de negocio que compara dos campos del cuerpo, así que no es
+     * expresable con anotaciones del DTO y necesita su propio caso. Reusa el mismo
+     * constructor de respuesta que el resto del traductor para no abrir un camino
+     * paralelo.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 400 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(RangoHorarioInvalidoException.class)
+    public ResponseEntity<ErrorResponse> manejarRangoHorarioInvalido(
+            RangoHorarioInvalidoException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.BAD_REQUEST, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 400 cuando la duración de consulta no pertenece al conjunto permitido.
+     *
+     * <p>El schema declara el CHECK, pero un choque contra él llegaría al cliente como
+     * error de integridad; este caso traduce la regla a un 400 con el mismo cuerpo que el
+     * resto de errores. Reusa el constructor de respuesta existente.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 400 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(DuracionConsultaInvalidaException.class)
+    public ResponseEntity<ErrorResponse> manejarDuracionConsultaInvalida(
+            DuracionConsultaInvalidaException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.BAD_REQUEST, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 400 cuando el bloque de disponibilidad se solapa con otro del mismo médico
+     * y día.
+     *
+     * <p>Es una regla que depende del estado de la base —compara el bloque enviado con los
+     * ya agendados—, así que no es expresable con anotaciones del DTO. Reusa el mismo
+     * constructor de respuesta que el resto del traductor.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 400 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(SolapamientoDeHorarioException.class)
+    public ResponseEntity<ErrorResponse> manejarSolapamientoDeHorario(
+            SolapamientoDeHorarioException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.BAD_REQUEST, excepcion.getMessage(), peticion);
+    }
+
+    /**
      * Responde 400 con un resumen en español de los campos inválidos.
      *
      * @param excepcion excepción con el resultado del Bean Validation
