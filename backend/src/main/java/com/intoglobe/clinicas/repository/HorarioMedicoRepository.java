@@ -31,12 +31,23 @@ public interface HorarioMedicoRepository extends JpaRepository<HorarioMedico, UU
      * así que hoy la consulta recorre la tabla (pequeña por ahora) y el índice es un
      * pendiente declarado del V2.</p>
      *
-     * @param medicoId médico dueño de la agenda
-     * @return bloques de ese médico, ordenados por {@code diaSemana} y
+     * <p><strong>Acotada por organización.</strong> El {@code WHERE} navega
+     * {@code h.medico.organizacion.id} y exige la organización del token, de modo que un
+     * {@code medicoId} de otro tenant no puede devolver filas ni siquiera si el llamador
+     * olvidara comprobar la pertenencia antes: el aislamiento viaja en la consulta y un
+     * listado ajeno es una lista vacía, no una fuga de la agenda de otra clínica
+     * (R-SEG-04, R-SEG-06).</p>
+     *
+     * @param medicoId       médico dueño de la agenda
+     * @param organizacionId organización dueña, según el {@code tenantId} del token
+     * @return bloques de ese médico en esa organización, ordenados por {@code diaSemana} y
      *         {@code horaInicio}
      */
-    @Query("SELECT h FROM HorarioMedico h WHERE h.medico.id = :medicoId ORDER BY h.diaSemana, h.horaInicio")
-    List<HorarioMedico> listarPorMedico(@Param("medicoId") UUID medicoId);
+    @Query("SELECT h FROM HorarioMedico h WHERE h.medico.id = :medicoId "
+            + "AND h.medico.organizacion.id = :organizacionId "
+            + "ORDER BY h.diaSemana, h.horaInicio")
+    List<HorarioMedico> listarPorMedico(@Param("medicoId") UUID medicoId,
+            @Param("organizacionId") UUID organizacionId);
 
     /**
      * Responde a la pregunta «¿este bloque se solapa con algún bloque ya agendado de
@@ -59,20 +70,29 @@ public interface HorarioMedicoRepository extends JpaRepository<HorarioMedico, UU
      * identificador del propio bloque, para que no cuente como solapado consigo
      * mismo.</p>
      *
-     * @param medicoId     médico dueño de la agenda
-     * @param diaSemana    día de la semana del bloque que se quiere guardar
-     * @param horaInicio   hora de inicio del bloque que se quiere guardar
-     * @param horaFin      hora de fin del bloque que se quiere guardar
-     * @param idExcluido   identificador del bloque que se está editando, o el UUID
-     *                     cero al crear
+     * <p>El conteo está acotado igual que el listado: exige que el médico pertenezca a la
+     * organización del token. Sin ese filtro, la comprobación de solapamiento sería una
+     * sonda sobre la agenda de otra clínica —un {@code medicoId} ajeno devolvería cuántos
+     * bloques chocan— y el alta podría rechazarse con datos que el llamador no puede
+     * ver.</p>
+     *
+     * @param medicoId       médico dueño de la agenda
+     * @param organizacionId organización dueña, según el {@code tenantId} del token
+     * @param diaSemana      día de la semana del bloque que se quiere guardar
+     * @param horaInicio     hora de inicio del bloque que se quiere guardar
+     * @param horaFin        hora de fin del bloque que se quiere guardar
+     * @param idExcluido     identificador del bloque que se está editando, o el UUID
+     *                       cero al crear
      * @return número de bloques del mismo médico y día que se solapan con el rango
      *         indicado, excluyendo {@code idExcluido}
      */
     @Query("SELECT COUNT(h) FROM HorarioMedico h "
-            + "WHERE h.medico.id = :medicoId AND h.diaSemana = :diaSemana "
+            + "WHERE h.medico.id = :medicoId AND h.medico.organizacion.id = :organizacionId "
+            + "AND h.diaSemana = :diaSemana "
             + "AND h.horaInicio < :horaFin AND h.horaFin > :horaInicio "
             + "AND h.id <> :idExcluido")
     long contarSolapamientos(@Param("medicoId") UUID medicoId,
+            @Param("organizacionId") UUID organizacionId,
             @Param("diaSemana") short diaSemana,
             @Param("horaInicio") LocalTime horaInicio,
             @Param("horaFin") LocalTime horaFin,

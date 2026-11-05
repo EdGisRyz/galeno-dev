@@ -93,6 +93,19 @@ import tools.jackson.databind.json.JsonMapper;
  * capa de datos y responden {@code 404} cuando son de otro tenant, para no revelar que
  * existen.</p>
  *
+ * <h2>Horarios: la matriz concede el rol, el service acota el tenant y la agenda</h2>
+ *
+ * <p>Las cinco rutas de bloques de disponibilidad ({@code GET|POST /medicos/{id}/horarios} y
+ * {@code GET|PUT|DELETE /horarios/{id}}) admiten {@code ADMIN} y {@code MEDICO}; {@code PACIENTE}
+ * queda cerrado por el fallback deny-by-default, igual que en el resto de las operaciones.
+ * La autorización de estas rutas tiene <strong>dos capas</strong> y esta cadena solo aplica la
+ * primera: el rol abre la ruta, y {@code HorarioMedicoService} comprueba contra el token que
+ * el médico —o el médico dueño del bloque— pertenezca al {@code tenantId} del claim
+ * ({@code 404} si no, para no revelar que existe) y que un token {@code MEDICO} solo opere
+ * sobre su propia agenda ({@code 403} cuando el bloque es de otro médico de la misma
+ * organización). Ninguna de esas dos comprobaciones se puede expresar aquí: dependen del
+ * estado de la base, no del rol.</p>
+ *
  * <h2>El alta de organizaciones está bloqueada, y es deliberado</h2>
  *
  * <p>{@code POST /organizaciones} responde {@code 403} a <strong>los tres roles</strong>
@@ -154,6 +167,9 @@ public class SecurityConfig {
 
     /** Ruta base de los médicos pedidos por id. */
     private static final String RUTA_MEDICOS = "/api/v1/medicos";
+
+    /** Ruta base de los bloques de disponibilidad pedidos por id. */
+    private static final String RUTA_HORARIOS = "/api/v1/horarios";
 
     /** Endpoint de error del contenedor, servido por {@code RestErrorController}. */
     private static final String RUTA_ERROR = "/error";
@@ -235,6 +251,21 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.PUT, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
+                        // Horarios: ADMIN y MEDICO. Esta regla solo concede el rol; el
+                        // acotamiento por organización (404) y la propiedad de la agenda (403
+                        // si un MEDICO toca la de otro médico) los aplica HorarioMedicoService
+                        // contra el tenantId y el medicoId del token. Se declaran los cinco
+                        // verbos por separado porque cada uno es una operación de la matriz.
+                        .requestMatchers(HttpMethod.GET, RUTA_MEDICOS + "/*/horarios")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.POST, RUTA_MEDICOS + "/*/horarios")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.GET, RUTA_HORARIOS + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.PUT, RUTA_HORARIOS + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.DELETE, RUTA_HORARIOS + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
                         // Fallback: deny-by-default (R-SEG-09). Toda ruta con controlador que no
                         // esté declarada arriba queda cerrada para los tres roles; una ruta
                         // inexistente conserva el 401/404 normal del framework.

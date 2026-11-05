@@ -92,15 +92,18 @@ class HorarioMedicoRepositoryTest {
     void listarPorMedico_shouldExcludeOtherMedicosAndSortByDiaThenHora() {
         var medico = persistirMedico("Dr. Listado Propio");
         var otroMedico = persistirMedico("Dra. Listado Ajeno");
+        UUID medicoId = medico.getId();
+        UUID organizacionId = medico.getOrganizacion().getId();
         // Se insertan a propósito en desorden: primero el más tardío del martes,
         // después el lunes por la tarde y por último el lunes por la mañana.
         persistirHorario(medico, MARTES, LocalTime.of(8, 0), LocalTime.of(9, 0));
         persistirHorario(medico, LUNES, LocalTime.of(15, 0), LocalTime.of(19, 0));
         persistirHorario(medico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
         var ajeno = persistirHorario(otroMedico, LUNES, LocalTime.of(8, 0), LocalTime.of(9, 0));
+        UUID ajenoId = ajeno.getId();
         entityManager.clear();
 
-        var horarios = horarioMedicoRepository.listarPorMedico(medico.getId());
+        var horarios = horarioMedicoRepository.listarPorMedico(medicoId, organizacionId);
 
         assertThat(horarios)
                 .extracting(HorarioMedico::getDiaSemana, HorarioMedico::getHoraInicio)
@@ -110,7 +113,43 @@ class HorarioMedicoRepositoryTest {
                         org.assertj.core.groups.Tuple.tuple(MARTES, LocalTime.of(8, 0)));
         assertThat(horarios)
                 .extracting(HorarioMedico::getId)
-                .doesNotContain(ajeno.getId());
+                .doesNotContain(ajenoId);
+    }
+
+    /**
+     * Las dos consultas propias están acotadas por la organización del médico: con el
+     * {@code organizacionId} de otra clínica no devuelven ni una fila ni un solapamiento,
+     * aunque el {@code medicoId} sea correcto. Es el filtro que impide que una agenda ajena
+     * se lea —o se sondee— desde otro tenant, y viaja en el {@code WHERE} para que valga
+     * también si un llamador olvidara comprobar la pertenencia antes.
+     */
+    @Test
+    @DisplayName("las dos consultas propias están acotadas por la organización del médico")
+    void lasConsultasPropias_shouldBeScopedByOrganizacion() {
+        var medico = persistirMedico("Dr. Agenda Acotada");
+        var otroMedico = persistirMedico("Dra. Otra Clínica");
+        UUID medicoId = medico.getId();
+        UUID organizacionPropia = medico.getOrganizacion().getId();
+        UUID organizacionAjena = otroMedico.getOrganizacion().getId();
+        persistirHorario(medico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
+        var ajeno = persistirHorario(otroMedico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
+        UUID ajenoId = ajeno.getId();
+        entityManager.clear();
+
+        assertThat(organizacionAjena)
+                .as("las dos fixtures deben vivir en organizaciones distintas para que la prueba muerda")
+                .isNotEqualTo(organizacionPropia);
+        assertThat(horarioMedicoRepository.listarPorMedico(medicoId, organizacionAjena))
+                .as("el listado con el tenant de otra clínica debe quedar vacío aunque el médico exista")
+                .isEmpty();
+        assertThat(horarioMedicoRepository.contarSolapamientos(medicoId, organizacionAjena, LUNES,
+                LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
+                .as("el conteo de solapamientos no puede sondear la agenda de otra organización")
+                .isZero();
+        assertThat(horarioMedicoRepository.contarSolapamientos(medicoId, organizacionPropia, LUNES,
+                LocalTime.of(9, 0), LocalTime.of(10, 0), ajenoId))
+                .as("con el tenant correcto el mismo rango sí cuenta el bloque propio")
+                .isEqualTo(1L);
     }
 
     /**
@@ -283,40 +322,45 @@ class HorarioMedicoRepositoryTest {
     void contarSolapamientos_shouldUseHalfOpenIntervalsAndExcludeSelf() {
         var medico = persistirMedico("Dr. Solapamientos");
         var otroMedico = persistirMedico("Dra. Solapamientos Ajena");
+        UUID medicoId = medico.getId();
+        UUID organizacionId = medico.getOrganizacion().getId();
+        UUID otroMedicoId = otroMedico.getId();
+        UUID otraOrganizacionId = otroMedico.getOrganizacion().getId();
         var existente = persistirHorario(medico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
+        UUID existenteId = existente.getId();
         persistirHorario(otroMedico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
         entityManager.clear();
 
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), LUNES, LocalTime.of(10, 0), LocalTime.of(11, 0), ID_CERO))
+                medicoId, organizacionId, LUNES, LocalTime.of(10, 0), LocalTime.of(11, 0), ID_CERO))
                 .as("un bloque que empieza justo cuando termina el existente es contiguo, no solapado")
                 .isZero();
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), LUNES, LocalTime.of(8, 0), LocalTime.of(9, 0), ID_CERO))
+                medicoId, organizacionId, LUNES, LocalTime.of(8, 0), LocalTime.of(9, 0), ID_CERO))
                 .as("un bloque que termina justo cuando empieza el existente tampoco se solapa")
                 .isZero();
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), LUNES, LocalTime.of(9, 59), LocalTime.of(10, 59), ID_CERO))
+                medicoId, organizacionId, LUNES, LocalTime.of(9, 59), LocalTime.of(10, 59), ID_CERO))
                 .as("un minuto de solapamiento real debe contar")
                 .isEqualTo(1L);
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), LUNES, LocalTime.of(8, 30), LocalTime.of(10, 30), ID_CERO))
+                medicoId, organizacionId, LUNES, LocalTime.of(8, 30), LocalTime.of(10, 30), ID_CERO))
                 .as("un bloque que contiene al existente debe contar")
                 .isEqualTo(1L);
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), MARTES, LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
+                medicoId, organizacionId, MARTES, LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
                 .as("el mismo rango en otro día de la semana no se solapa")
                 .isZero();
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                otroMedico.getId(), LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
+                otroMedicoId, otraOrganizacionId, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
                 .as("el conteo está acotado al médico: solo ve su propio bloque, no el del primero")
                 .isEqualTo(1L);
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0), existente.getId()))
+                medicoId, organizacionId, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0), existenteId))
                 .as("al editar, el propio bloque debe excluirse del conteo")
                 .isZero();
         assertThat(horarioMedicoRepository.contarSolapamientos(
-                medico.getId(), LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
+                medicoId, organizacionId, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0), ID_CERO))
                 .as("con el UUID cero al crear, solo cuenta el bloque de este médico: si el del otro"
                         + " médico entrara en la consulta, el valor sería 2")
                 .isEqualTo(1L);
