@@ -58,16 +58,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <h2>Cobertura de la matriz (sección 5.3)</h2>
  *
  * <ul>
- *   <li><strong>ADMIN</strong>: las catorce operaciones permitidas sobre su propio tenant
- *       ({@link #adminOperaLasCatorceOperacionesPermitidasSobreSuPropioTenant()}); el alta de
+ *   <li><strong>ADMIN</strong>: las diecinueve operaciones permitidas sobre su propio tenant
+ *       ({@link #adminOperaLasDiecinueveOperacionesPermitidasSobreSuPropioTenant()}); el alta de
  *       organizaciones {@code 403} para los tres roles
  *       ({@link #crearOrganizacionResponde403ParaLosTresRoles()}); y las rutas con el
  *       {@code organizacionId} de otro tenant, todas {@code 403} sin excepción de rol
  *       ({@link #elPathDeOtroTenantResponde403TambienParaAdmin()}).</li>
- *   <li><strong>MEDICO</strong>: las cuatro lecturas de su tenant permitidas
- *       ({@link #medicoLeeSuPropioTenant()}) y las once operaciones restantes {@code 403}
- *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
- *   <li><strong>PACIENTE</strong>: las quince operaciones {@code 403}
+ *   <li><strong>MEDICO</strong>: las nueve operaciones de su tenant permitidas —las cuatro
+ *       lecturas de los módulos 02 y 03 ({@link #medicoLeeSuPropioTenant()}) y los cinco
+ *       endpoints de horarios sobre su propia agenda
+ *       ({@link #medicoOperaSuPropiaAgendaDeHorarios()})— y las once operaciones restantes
+ *       {@code 403} ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
+ *   <li><strong>PACIENTE</strong>: las veinte operaciones {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
  *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las seis operaciones
  *       por id → {@code 404} sin revelar el recurso
@@ -108,6 +110,12 @@ class AislamientoYMatrizRbacTest {
             """;
     private static final String CUERPO_CONSULTORIO_ACTUALIZADO = """
             {"nombre":"Consultorio Renombrado","direccion":"Calle Renombrada 9"}
+            """;
+    private static final String CUERPO_HORARIO_NUEVO = """
+            {"diaSemana":3,"horaInicio":"09:00:00","horaFin":"11:00:00","duracionConsulta":30}
+            """;
+    private static final String CUERPO_HORARIO_ACTUALIZADO = """
+            {"diaSemana":3,"horaInicio":"10:00:00","horaFin":"12:00:00","duracionConsulta":45}
             """;
 
     @Autowired
@@ -173,12 +181,12 @@ class AislamientoYMatrizRbacTest {
     }
 
     // ------------------------------------------------------------------
-    // ADMIN: las catorce operaciones permitidas sobre su propio tenant
+    // ADMIN: las diecinueve operaciones permitidas sobre su propio tenant
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("ADMIN opera las catorce operaciones permitidas sobre su propio tenant")
-    void adminOperaLasCatorceOperacionesPermitidasSobreSuPropioTenant() throws Exception {
+    @DisplayName("ADMIN opera las diecinueve operaciones permitidas sobre su propio tenant")
+    void adminOperaLasDiecinueveOperacionesPermitidasSobreSuPropioTenant() throws Exception {
         String rutaOrganizacionA = "/api/v1/organizaciones/" + organizacionA.getId();
         String rutaConsultoriosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/consultorios";
         String rutaMedicosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/medicos";
@@ -273,7 +281,37 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
-        // 15. DELETE /organizaciones/{id}
+        // 15. POST /medicos/{medicoId}/horarios
+        String horarioCreadoId = idDe(ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/horarios")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_HORARIO_NUEVO), tokenAdminA)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.medicoId").value(medicoA.getId().toString()))
+                .andReturn());
+
+        // 16. GET /medicos/{medicoId}/horarios
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId() + "/horarios"), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers.hasItem(horarioCreadoId)));
+
+        // 17. GET /horarios/{id}
+        ejecutar(get("/api/v1/horarios/" + horarioCreadoId), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(horarioCreadoId));
+
+        // 18. PUT /horarios/{id}
+        ejecutar(put("/api/v1/horarios/" + horarioCreadoId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_HORARIO_ACTUALIZADO), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.horaInicio").value("10:00:00"));
+
+        // 19. DELETE /horarios/{id}
+        ejecutar(delete("/api/v1/horarios/" + horarioCreadoId), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        // 20. DELETE /organizaciones/{id}
         ejecutar(delete(rutaOrganizacionA), tokenAdminA)
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
@@ -328,6 +366,44 @@ class AislamientoYMatrizRbacTest {
     }
 
     @Test
+    @DisplayName("MEDICO opera los cinco endpoints de horarios de su propia agenda")
+    void medicoOperaSuPropiaAgendaDeHorarios() throws Exception {
+        String token = tokenMedicoDeSuAgenda();
+        String rutaHorarios = "/api/v1/medicos/" + medicoA.getId() + "/horarios";
+
+        String horarioCreadoId = idDe(ejecutar(post(rutaHorarios)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_HORARIO_NUEVO), token)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.medicoId").value(medicoA.getId().toString()))
+                .andReturn());
+
+        ejecutar(get(rutaHorarios), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers.hasItem(horarioCreadoId)));
+
+        ejecutar(get("/api/v1/horarios/" + horarioCreadoId), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(horarioCreadoId));
+
+        ejecutar(put("/api/v1/horarios/" + horarioCreadoId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_HORARIO_ACTUALIZADO), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.horaInicio").value("10:00:00"))
+                .andExpect(jsonPath("$.duracionConsulta").value(45));
+
+        ejecutar(delete("/api/v1/horarios/" + horarioCreadoId), token)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        // El bloque eliminado no reaparece: el borrado es físico y el listado queda vacío.
+        ejecutar(get(rutaHorarios), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
     @DisplayName("Un MEDICO no puede mutar aunque sea de su tenant: la escritura queda intacta")
     void medicoNoPuedeMutarYElRecursoQuedaIntacto() throws Exception {
         ejecutar(put("/api/v1/medicos/" + medicoA.getId())
@@ -351,9 +427,11 @@ class AislamientoYMatrizRbacTest {
     // ------------------------------------------------------------------
 
     /**
-     * Celdas {@code 403} de la matriz: las quince operaciones para {@code PACIENTE} y las
-     * once que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path
-     * para que lo que se ejerza sea el rol y no el aislamiento.
+     * Celdas {@code 403} de la matriz: las veinte operaciones para {@code PACIENTE} y las once
+     * que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path para que
+     * lo que se ejerza sea el rol y no el aislamiento. Las nueve celdas que la matriz concede a
+     * {@code MEDICO} no aparecen aquí: cuatro se ejercen en {@link #medicoLeeSuPropioTenant()} y
+     * cinco en {@link #medicoOperaSuPropiaAgendaDeHorarios()}.
      *
      * @return rol, descripción de la operación, método, ruta y cuerpo de cada celda denegada
      */
@@ -361,7 +439,7 @@ class AislamientoYMatrizRbacTest {
         return Stream.concat(
                 celdasDenegadasDe(ROL_PACIENTE),
                 celdasDenegadasDe(ROL_MEDICO)
-                        .filter(celda -> !esLecturaPermitida((String) celda.get()[1])));
+                        .filter(celda -> !esCeldaPermitidaParaMedico((String) celda.get()[1])));
     }
 
     @ParameterizedTest(name = "{0} · {1} responde 403")
@@ -404,18 +482,33 @@ class AislamientoYMatrizRbacTest {
                         "/api/v1/medicos/" + medicoA.getId(), null),
                 Arguments.of(rol, "PUT médico", "PUT", "/api/v1/medicos/" + medicoA.getId(),
                         cuerpoMedico(consultorioA.getId().toString(), "Dr. Nuevo")),
-                Arguments.of(rol, "DELETE médico", "DELETE", "/api/v1/medicos/" + medicoA.getId(), null));
+                Arguments.of(rol, "DELETE médico", "DELETE", "/api/v1/medicos/" + medicoA.getId(), null),
+                Arguments.of(rol, "POST horario", "POST",
+                        "/api/v1/medicos/" + medicoA.getId() + "/horarios", CUERPO_HORARIO_NUEVO),
+                Arguments.of(rol, "GET horarios anidados", "GET",
+                        "/api/v1/medicos/" + medicoA.getId() + "/horarios", null),
+                Arguments.of(rol, "GET horario por id", "GET",
+                        "/api/v1/horarios/" + UUID.randomUUID(), null),
+                Arguments.of(rol, "PUT horario", "PUT",
+                        "/api/v1/horarios/" + UUID.randomUUID(), CUERPO_HORARIO_ACTUALIZADO),
+                Arguments.of(rol, "DELETE horario", "DELETE",
+                        "/api/v1/horarios/" + UUID.randomUUID(), null));
     }
 
     /**
-     * Las cuatro lecturas que la matriz concede a {@code MEDICO} en su propio tenant.
+     * Las nueve celdas que la matriz concede a {@code MEDICO}: las cuatro lecturas de su propio
+     * tenant y los cinco endpoints de horarios. Que las de horarios acaben en {@code 2xx} exige
+     * además que el actor sea el médico dueño de la agenda, y esa mitad la comprueba el service
+     * contra el claim {@code medicoId}; aquí solo se fija que el rol no es lo que deniega.
      *
      * @param descripcion descripción de la operación
      * @return {@code true} si la celda está permitida para {@code MEDICO}
      */
-    private static boolean esLecturaPermitida(String descripcion) {
+    private static boolean esCeldaPermitidaParaMedico(String descripcion) {
         return List.of("GET consultorios anidados", "GET consultorio por id",
-                "GET médicos anidados", "GET médico por id").contains(descripcion);
+                "GET médicos anidados", "GET médico por id", "POST horario",
+                "GET horarios anidados", "GET horario por id", "PUT horario", "DELETE horario")
+                .contains(descripcion);
     }
 
     // ------------------------------------------------------------------
@@ -649,6 +742,24 @@ class AislamientoYMatrizRbacTest {
             case ROL_PACIENTE -> tokenPacienteA;
             default -> throw new IllegalArgumentException("Rol sin token en estas pruebas: " + rol);
         };
+    }
+
+    /**
+     * Token {@code MEDICO} de la organización A que además lleva el claim {@code medicoId} de su
+     * propio médico.
+     *
+     * <p>Es el token que un médico real recibe del emisor, y el que permite ejercer las cinco
+     * celdas de horarios: con el token sin {@code medicoId} el servicio falla cerrado con
+     * {@code 403}, que es la mitad de propiedad de la agenda y no la de rol.</p>
+     *
+     * @return el token firmado del médico sembrado en {@link #medicoA}
+     */
+    private String tokenMedicoDeSuAgenda() {
+        return ClaveRsaDePrueba.token()
+                .conRol(ROL_MEDICO)
+                .conInquilino(organizacionA.getId().toString())
+                .conMedico(medicoA.getId().toString())
+                .compactar();
     }
 
     /**
