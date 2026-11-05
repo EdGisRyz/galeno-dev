@@ -895,9 +895,11 @@ tanto solapamientos como rangos invertidos, y un test lo deja probado a propósi
 rol. Esa mitad se ejerce en los tests de service y en el 403 del controller.
 - **El Javadoc de `SecurityConfig` sigue describiendo quince operaciones** y solo los módulos
 01-03; las celdas de horarios se documentaron en un párrafo aparte. Deuda de redacción.
-- **`PACIENTE` queda apagado por decisión** y se reemplazará por un rol tipo `RECEPCIONISTA`;
-como el rol vive en `usuario_rol_check`, el cambio es una **migración**. Hasta entonces
-`PACIENTE` recibe 403 en las cinco rutas por deny-by-default.
+- **Hoy no se emiten tokens `PACIENTE`**: el rol existe en `usuario_rol_check` y se **conserva**
+para una implementación futura, pero no hay cuentas de paciente (decisión de Eduardo con
+Santiago, 2026-11-03). `RECEPCIONISTA` es un rol de personal **nuevo** que se **agregará** al
+mismo CHECK —**sin retirar** `PACIENTE`—, así que la migración es aditiva y no toca datos.
+Mientras tanto, `PACIENTE` recibe 403 en las cinco rutas por deny-by-default.
 
 ### Checklist de lectura
 

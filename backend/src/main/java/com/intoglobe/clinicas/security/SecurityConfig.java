@@ -125,11 +125,17 @@ import tools.jackson.databind.json.JsonMapper;
  * venir acompañado del onboarding que haga alcanzable la organización creada, y de un test que
  * lo demuestre.</p>
  *
- * <p>{@code PACIENTE} recibe {@code 403} en las veinte operaciones por dos motivos distintos: en
- * las quince de datos porque todavía no existe ningún endpoint de paciente —no es una decisión
- * de negocio, es ausencia de contrato, y su matriz se define cuando exista {@code /pacientes}—,
- * y en las cinco de horarios porque el rol queda <strong>apagado por decisión de producto</strong>
- * hasta que la migración a {@code RECEPCIONISTA} lo reemplace.</p>
+ * <p>{@code PACIENTE} recibe {@code 403} en las veinte operaciones, por dos motivos distintos.
+ * En las quince de datos, porque todavía no existe ningún endpoint de paciente: es ausencia de
+ * contrato, no una decisión de negocio, y su matriz se define cuando exista {@code /pacientes}.
+ * En las cinco de horarios, porque <strong>hoy no se emiten tokens {@code PACIENTE}</strong>: el rol
+ * existe en el schema y se conserva para una implementación futura, pero no hay cuentas de
+ * paciente. Cuando las haya, necesitarán sus propias celdas acá.</p>
+ *
+ * <p>El rol de personal {@code RECEPCIONISTA} <strong>aún no está implementado</strong>: se
+ * <em>agregará</em> al CHECK de {@code usuario_rol} <strong>sin retirar</strong> {@code PACIENTE}.
+ * Mientras no exista, un token con ese rol no puede emitirse; cuando se emita, la cadena lo
+ * cerrará por deny-by-default hasta que tenga celdas explícitas.</p>
  *
  * <h2>No hay rutas {@code /api/v1/auth/**} que permitir</h2>
  *
