@@ -21,6 +21,7 @@ import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { Medico } from '@/features/medicos/medicos.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
+import { useAuthStore } from '@/store/auth.store';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -34,6 +35,19 @@ import {
 } from 'lucide-react';
 
 export function AgendaPage() {
+  /**
+   * Organización dueña del directorio de pacientes: sale del claim `tenantId` de la sesión, que es
+   * la autoridad del tenant, y **nunca** se rellena con un valor por defecto (plan sección 2,
+   * guardarraíl 4).
+   */
+  const organizacionId = useAuthStore((state) => state.user?.tenantId ?? '');
+
+  /**
+   * La colección de pacientes cuelga de la organización dueña:
+   * `GET /organizaciones/{id}/pacientes`. Sin ese claim no hay URL que pedir.
+   */
+  const rutaPacientes = organizacionId ? `/organizaciones/${organizacionId}/pacientes` : null;
+
   const [appointments, setAppointments] = useState<Cita[]>([]);
   const [doctors, setDoctors] = useState<Medico[]>([]);
   const [patients, setPatients] = useState<Paciente[]>([]);
@@ -58,21 +72,23 @@ export function AgendaPage() {
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
   // Cargar datos
-  const loadData = () => {
+  const loadData = (rutaPacientes: string | null) => {
     return Promise.all([
       api.get<Cita[]>('/citas'),
       api.get<Medico[]>('/medicos'),
-      api.get<Paciente[]>('/pacientes'),
+      // Sin organización de la sesión no se pide el directorio: no se inventa un tenant ni se
+      // llama a la colección plana, que el backend ya no expone.
+      rutaPacientes ? api.get<Paciente[]>(rutaPacientes) : null,
       api.get<Consultorio[]>('/consultorios'),
     ])
       .then(([aptRes, docRes, patRes, roomRes]) => {
         setAppointments(aptRes.data);
         setDoctors(docRes.data);
-        setPatients(patRes.data);
+        setPatients(patRes ? patRes.data : []);
         setClinicRooms(roomRes.data);
 
         if (docRes.data.length > 0) setNewDoctorId(docRes.data[0].id);
-        if (patRes.data.length > 0) setNewPatientId(patRes.data[0].id);
+        if (patRes && patRes.data.length > 0) setNewPatientId(patRes.data[0].id);
         if (roomRes.data.length > 0) setNewRoomId(roomRes.data[0].id);
       })
       .catch((err) => {
@@ -86,12 +102,12 @@ export function AgendaPage() {
   // Refresco manual (botón "Actualizar"): aquí sí mostramos el loader de inmediato
   const handleRefresh = () => {
     setIsLoading(true);
-    loadData();
+    loadData(rutaPacientes);
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData(rutaPacientes);
+  }, [rutaPacientes]);
 
   // Actualizar estado de cita (ej. Confirmar o Cancelar)
   const handleUpdateStatus = async (aptId: string, newStatus: EstadoCita) => {

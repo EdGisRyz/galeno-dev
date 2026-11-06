@@ -19,6 +19,7 @@ import {
   Alert,
 } from '@/components/ui';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
+import { useAuthStore } from '@/store/auth.store';
 import type { PatientIdentification } from '@/types/futuro.types';
 import {
   Users,
@@ -63,9 +64,26 @@ function calcularEdad(fechaNacimiento?: string | null): string {
 }
 
 export function PacientesPage() {
+  /**
+   * Organización dueña del directorio: sale del claim `tenantId` de la sesión, que es la autoridad
+   * del tenant, y **nunca** se rellena con un valor por defecto (plan sección 2, guardarraíl 4).
+   */
+  const organizacionId = useAuthStore((state) => state.user?.tenantId ?? '');
+
+  /**
+   * La colección cuelga de la organización dueña: `GET/POST /organizaciones/{id}/pacientes`. El
+   * ítem del paciente es plano (`PUT /pacientes/{id}`), así que solo la colección necesita la
+   * organización. Sin claim no hay URL que pedir.
+   */
+  const rutaColeccion = organizacionId ? `/organizaciones/${organizacionId}/pacientes` : null;
+
   const [patients, setPatients] = useState<PacienteConFicha[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // Sin organización en la sesión la pantalla nace en el estado de error visible: no hay petición
+  // que hacer ni se muestra un directorio vacío que afirmaría «no hay pacientes».
+  const [isLoading, setIsLoading] = useState(() => rutaColeccion !== null);
+  const [loadError, setLoadError] = useState<string | null>(() =>
+    rutaColeccion ? null : MENSAJE_ERROR_CARGA,
+  );
   const [search, setSearch] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,9 +92,9 @@ export function PacientesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
-  const loadData = () => {
+  const loadData = (ruta: string) => {
     return api
-      .get<PacienteConFicha[]>('/pacientes')
+      .get<PacienteConFicha[]>(ruta)
       .then((res) => {
         setPatients(res.data);
         setLoadError(null);
@@ -92,15 +110,17 @@ export function PacientesPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    // Solo se pide lo que existe: sin organización no hay colección y el estado inicial ya lo dice.
+    if (rutaColeccion) loadData(rutaColeccion);
+  }, [rutaColeccion]);
 
   // Refresco manual: el loader y la limpieza del error se marcan aquí y no dentro de `loadData`,
   // para que el efecto inicial no encienda estados antes de que responda la petición.
   const handleRetry = () => {
+    if (!rutaColeccion) return;
     setIsLoading(true);
     setLoadError(null);
-    loadData();
+    loadData(rutaColeccion);
   };
 
   const openCreateModal = () => {
@@ -150,11 +170,16 @@ export function PacientesPage() {
     try {
       setIsSubmitting(true);
       if (editingId) {
+        // El ítem es plano: la organización dueña no se envía ni se puede cambiar.
         const res = await api.put<PacienteConFicha>(`/pacientes/${editingId}`, payload);
         setPatients((prev) => prev.map((p) => (p.id === editingId ? res.data : p)));
         setAlertNotice('Ficha del paciente actualizada correctamente.');
       } else {
-        const res = await api.post<PacienteConFicha>('/pacientes', payload);
+        if (!rutaColeccion) {
+          // Sin organización de la sesión no hay colección donde registrar y no se inventa una.
+          return;
+        }
+        const res = await api.post<PacienteConFicha>(rutaColeccion, payload);
         setPatients((prev) => [res.data, ...prev]);
         setAlertNotice('Paciente registrado correctamente.');
       }

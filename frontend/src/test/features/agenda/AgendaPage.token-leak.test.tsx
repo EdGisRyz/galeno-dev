@@ -11,9 +11,22 @@ import { CLAIMS, makeToken } from '../../helpers/jwt';
  * F (T6b): un `console.error(err)` con el `AxiosError` completo publica el token en la consola del
  * navegador, porque el error lleva `config.headers.Authorization`. Cualquiera que abra DevTools lo
  * ve. El registro debe ser un resumen seguro: método, ruta y estado. Nunca el error ni el config.
+ *
+ * El segundo bloque fija las rutas que consume la agenda: la colección de pacientes cuelga de la
+ * organización de la sesión, igual que en el contrato del backend. Las demás colecciones siguen
+ * planas, así que la aserción nombra las cuatro.
  */
 
 const TOKEN = makeToken(CLAIMS);
+
+/** Organización del claim `tenantId` de la sesión: la dueña de la colección de pacientes. */
+const ORGANIZACION_ID = 'org-001';
+
+/** Colección del contrato anidado: `GET /organizaciones/{organizacionId}/pacientes`. */
+const RUTA_PACIENTES = `/organizaciones/${ORGANIZACION_ID}/pacientes`;
+
+/** Colección plana que el backend ya no expone: la agenda no puede volver a pedirla. */
+const RUTA_PACIENTES_PLANA = '/pacientes';
 
 function respuesta(config: InternalAxiosRequestConfig, status: number): AxiosResponse {
   return {
@@ -103,5 +116,58 @@ describe('AgendaPage · el token nunca llega a la consola', () => {
     expect(consola).not.toContain(TOKEN);
     expect(consola).not.toContain('Authorization');
     expect(consola).not.toContain('Bearer');
+  });
+});
+
+describe('AgendaPage · rutas del contrato del backend (colección de pacientes anidada)', () => {
+  /**
+   * Adaptador que anota cada ruta pedida y responde listas vacías. Se instala por prueba porque el
+   * `beforeEach` deja la API rechazando todo con 401.
+   */
+  function espiarPeticiones(peticiones: (string | undefined)[]) {
+    api.defaults.adapter = async (config) => {
+      peticiones.push(config.url);
+      return {
+        data: [],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      } as AxiosResponse;
+    };
+  }
+
+  it('pide el directorio en la colección de la organización de la sesión', async () => {
+    const peticiones: (string | undefined)[] = [];
+    espiarPeticiones(peticiones);
+
+    render(<AgendaPage />);
+
+    await waitFor(() => expect(peticiones).toContain(RUTA_PACIENTES));
+    expect(peticiones).not.toContain(RUTA_PACIENTES_PLANA);
+
+    // Las demás colecciones no cambian: el contrato solo anidó la de pacientes.
+    expect(peticiones).toContain('/citas');
+    expect(peticiones).toContain('/medicos');
+    expect(peticiones).toContain('/consultorios');
+  });
+
+  it('no pide el directorio si la sesión no trae organización', async () => {
+    const peticiones: (string | undefined)[] = [];
+    espiarPeticiones(peticiones);
+
+    useAuthStore.setState({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+      tenantSlug: '',
+      inicializando: false,
+    });
+
+    render(<AgendaPage />);
+
+    // El resto de la agenda sí carga; la colección que necesita organización no se pide.
+    await waitFor(() => expect(peticiones).toContain('/consultorios'));
+    expect(peticiones.some((url) => url?.includes('/pacientes'))).toBe(false);
   });
 });
