@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,17 +30,21 @@ import com.intoglobe.clinicas.repository.PacienteRepository;
  * {@code 200 []} que ocultaría el error del cliente—; en {@code crear} la resolución no
  * es una consulta extra, porque aporta la entidad que el mapper necesita.</p>
  *
- * <p><strong>Aislamiento por tenant (R-SEG-04):</strong> todas las operaciones reciben
- * el {@code tenantId} del token —nunca un dato del path sin validar— y un paciente de
- * otra organización responde {@code 404}, igual que un identificador inexistente: un
- * {@code 403} confirmaría que el recurso existe en otra clínica. Las operaciones por id
- * obtienen la fila con {@code findById} y comparan
+ * <p><strong>Aislamiento por tenant (R-SEG-04, D5):</strong> todas las operaciones reciben
+ * el {@code tenantId} del token —nunca un dato del path sin validar— y hay dos respuestas
+ * distintas, a propósito. Un <em>path</em> cuya organización no es la del claim responde
+ * {@link AccessDeniedException}, que el handler traduce a {@code 403}: el path es una
+ * afirmación del cliente y desmentirla no cuesta ninguna lectura, así que nada se filtra
+ * al negarla. Un <em>paciente pedido por id</em> que pertenece a otra organización responde
+ * {@link ResourceNotFoundException}, es decir {@code 404} igual que un identificador
+ * inexistente: aquí un {@code 403} confirmaría que el recurso existe en otra clínica.
+ * Las operaciones por id obtienen la fila con {@code findById} y comparan
  * {@code paciente.getOrganizacion().getId()} en memoria, el mismo mecanismo que usa
  * {@code HorarioMedicoService}. <strong>No se agregan consultas a
  * {@link PacienteRepository}</strong> para lograrlo: el acotamiento por organización
  * vive en este servicio y el repositorio conserva un único método propio, el listado.
- * En {@code crear} y {@code listarPorOrganizacion} el acotamiento se comprueba
- * comparando la organización del path con el tenant del token.</p>
+ * En {@code crear} y {@code listarPorOrganizacion} el acotamiento se comprueba comparando
+ * la organización del path con el tenant del token, antes de tocar la base.</p>
  *
  * <p>La baja es lógica mediante {@link Paciente#desactivar()}. El borrado físico está
  * descartado porque {@code cita.paciente_id} y {@code adjunto.paciente_id} son
@@ -62,7 +67,7 @@ public class PacienteService {
      * Crea un paciente dentro de la organización indicada.
      *
      * <p>El orden de las comprobaciones es contractual: primero se exige que la
-     * organización del path sea la del token —un id de otra clínica responde 404 sin
+     * organización del path sea la del token —un id de otra clínica responde 403 sin
      * consultar nada— y después que la organización exista, para responder 404 en vez
      * de dejar que la clave foránea produzca un 500.</p>
      *
@@ -71,8 +76,9 @@ public class PacienteService {
      * @param tenantId       organización del token de la petición
      * @param request        datos de entrada validados
      * @return representación del paciente persistido
-     * @throws ResourceNotFoundException si la organización del path no es la del token, o
-     *                                   si no existe una organización con ese id
+     * @throws AccessDeniedException     si la organización del path no es la del token; el
+     *                                   handler lo traduce a 403 sin consultar la base
+     * @throws ResourceNotFoundException si no existe una organización con ese id
      */
     @Transactional
     public PacienteResponse crear(UUID organizacionId, UUID tenantId, PacienteRequest request) {
@@ -102,15 +108,16 @@ public class PacienteService {
      * Lista los pacientes activos de una organización, ordenados por nombre.
      *
      * <p>Antes de listar se comprueba que la organización del path sea la del token y que
-     * exista. Un id de otra organización responde 404 sin llegar a consultar el listado, y
+     * exista. Un id de otra organización responde 403 sin llegar a consultar el listado, y
      * un id inexistente responde 404 en vez de una lista vacía que ocultaría el error del
      * cliente. El orden lo fija la consulta del repositorio y es parte del contrato.</p>
      *
      * @param organizacionId organización dueña de los pacientes
      * @param tenantId       organización del token de la petición
      * @return pacientes activos de esa organización en su representación de salida
-     * @throws ResourceNotFoundException si la organización del path no es la del token, o
-     *                                   si no existe una organización con ese id
+     * @throws AccessDeniedException     si la organización del path no es la del token; el
+     *                                   handler lo traduce a 403 sin consultar la base
+     * @throws ResourceNotFoundException si no existe una organización con ese id
      */
     @Transactional(readOnly = true)
     public List<PacienteResponse> listarPorOrganizacion(UUID organizacionId, UUID tenantId) {
@@ -189,27 +196,36 @@ public class PacienteService {
     }
 
     /**
-     * Exige que la organización indicada sea la del token.
+     * Exige que la organización del path sea la del token.
      *
-     * <p>Un id de otra organización y un UUID al azar producen el mismo
-     * {@link ResourceNotFoundException}: el mensaje no confirma que la organización
-     * exista. Se comprueba antes de consultar el repositorio, así que una organización
-     * ajena no se consulta siquiera.</p>
+     * <p><strong>Por qué esta comprobación responde 403 y no 404.</strong> El
+     * {@code organizacionId} de la ruta es una afirmación del cliente, no un recurso: si no
+     * coincide con el claim, negarla no confirma la existencia de nada, porque para saberlo
+     * haría falta consultar la base y aquí no se consulta. Es la misma regla que aplica
+     * {@code TenantAccessGuard} en los módulos anteriores y la que fija D5: {@code 403} para
+     * el path que no es el del tenant, {@code 404} para el recurso pedido por id. La
+     * comparación es pura —sin repositorio, sin base de datos— así que la denegación no
+     * revela si la organización ajena existe.</p>
      *
      * @param organizacionId organización recibida por el path
      * @param tenantId       organización del token de la petición
-     * @throws ResourceNotFoundException si {@code organizacionId} no es el del token
+     * @throws AccessDeniedException si {@code organizacionId} no es el del token; el
+     *                               manejador global lo traduce a {@code 403} con
+     *                               {@code ErrorResponse}
      */
     private static void exigirOrganizacionDelTenant(UUID organizacionId, UUID tenantId) {
         if (!Objects.equals(organizacionId, tenantId)) {
-            throw new ResourceNotFoundException("Organizacion", organizacionId);
+            throw new AccessDeniedException(
+                    "El organizacionId de la ruta no corresponde al tenant del token");
         }
     }
 
     /**
      * Recupera el paciente indicado solo si pertenece a la organización del token.
      *
-     * <p>Un id inexistente y un id de otra organización producen el mismo
+     * <p><strong>Por qué esto responde 404 y no 403.</strong> Aquí se pide un recurso
+     * concreto por identificador: un {@code 403} confirmaría que ese paciente existe en otra
+     * clínica, así que un id inexistente y un id de otra organización producen el mismo
      * {@link ResourceNotFoundException}. Se resuelve con {@code findById} —no se agregan
      * consultas a {@link PacienteRepository}— y la comparación se hace en memoria, igual
      * que {@code HorarioMedicoService} acota sus recursos por tenant: una sola lectura por

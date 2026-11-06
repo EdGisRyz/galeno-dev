@@ -13,6 +13,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.intoglobe.clinicas.dto.request.PacienteRequest;
 import com.intoglobe.clinicas.dto.response.PacienteResponse;
@@ -44,9 +45,13 @@ import static org.mockito.Mockito.when;
  * por reflexión está prohibido en este módulo: no se usa {@code ReflectionTestUtils}
  * ni reflexión propia.</p>
  *
- * <p>El acotamiento por tenant se prueba en las dos direcciones: un id inexistente y un
- * id de otra organización deben producir el mismo {@link ResourceNotFoundException}
- * —404, nunca 403— y ninguno debe persistir nada ni consultar el listado.</p>
+ * <p>El acotamiento por tenant se prueba en las dos direcciones que fija D5. La
+ * organización del <em>path</em> distinta del tenant del token responde
+ * {@link AccessDeniedException} —403— sin consultar la base: el path es una afirmación del
+ * cliente y desmentirla no cuesta ninguna lectura. Un <em>paciente</em> pedido por id que
+ * es de otra organización responde {@link ResourceNotFoundException} —404—, igual que un
+ * id inexistente, porque un 403 confirmaría que existe en otra clínica. En ambos casos la
+ * operación rechazada no persiste nada ni consulta el listado.</p>
  *
  * <p>Las validaciones Jakarta ({@code @NotBlank}, {@code @Size}, {@code @Pattern}) no se
  * prueban aquí: son del DTO y se ejercitan en los tests MVC de S3.</p>
@@ -98,15 +103,14 @@ class PacienteServiceTest {
     }
 
     @Test
-    @DisplayName("crear con la organización de otro tenant responde 404 y no consulta ni persiste nada")
-    void crear_shouldThrowResourceNotFoundExceptionAndNotSave_whenOrganizationBelongsToAnotherTenant() {
+    @DisplayName("crear con la organización de otro tenant responde 403 y no consulta ni persiste nada")
+    void crear_shouldThrowAccessDeniedAndNotSave_whenOrganizationBelongsToAnotherTenant() {
         var organizacionAjena = UUID.randomUUID();
         var tenantId = UUID.randomUUID();
 
         assertThatThrownBy(() -> pacienteService.crear(organizacionAjena, tenantId, requestCompleto()))
-                .isInstanceOf(ResourceNotFoundException.class)
-                .hasMessageContaining("Organizacion")
-                .hasMessageContaining(organizacionAjena.toString());
+                .as("el path es una afirmación del cliente: desmentirla no cuesta ninguna lectura")
+                .isInstanceOf(AccessDeniedException.class);
         verify(organizacionRepository, never()).findById(any(UUID.class));
         verify(pacienteRepository, never()).save(any(Paciente.class));
     }
@@ -201,15 +205,14 @@ class PacienteServiceTest {
     }
 
     @Test
-    @DisplayName("listarPorOrganizacion de otro tenant responde 404 sin consultar el listado")
-    void listarPorOrganizacion_shouldThrowResourceNotFoundExceptionAndNotQuery_whenAnotherTenant() {
+    @DisplayName("listarPorOrganizacion de otro tenant responde 403 sin consultar el listado")
+    void listarPorOrganizacion_shouldThrowAccessDeniedAndNotQuery_whenAnotherTenant() {
         var organizacionAjena = UUID.randomUUID();
         var tenantId = UUID.randomUUID();
 
         assertThatThrownBy(() -> pacienteService.listarPorOrganizacion(organizacionAjena, tenantId))
-                .isInstanceOf(ResourceNotFoundException.class)
-                .hasMessageContaining("Organizacion")
-                .hasMessageContaining(organizacionAjena.toString());
+                .as("el path es una afirmación del cliente: desmentirla no cuesta ninguna lectura")
+                .isInstanceOf(AccessDeniedException.class);
         verify(organizacionRepository, never()).findById(any(UUID.class));
         verify(pacienteRepository, never()).listarActivosPorOrganizacion(any(UUID.class));
     }
