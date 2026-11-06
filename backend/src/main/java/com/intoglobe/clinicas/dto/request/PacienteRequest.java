@@ -19,8 +19,9 @@ import jakarta.validation.constraints.Size;
  * actualizar.</p>
  *
  * <p>Tampoco incluye {@code activo} ni {@code createdAt}: la baja y la reactivación
- * son operaciones propias ({@code PATCH .../desactivar} y {@code PATCH .../activar})
- * y la fecha de alta es un dato que asigna el sistema. La columna {@code created_at}
+ * son operaciones propias —{@code DELETE /pacientes/{id}} para la baja lógica y
+ * {@code POST /pacientes/{id}/activar} para la reactivación, ambas idempotentes y sin
+ * cuerpo— y la fecha de alta es un dato que asigna el sistema. La columna {@code created_at}
  * es {@code updatable = false} en la entidad, así que un cliente no puede
  * sobrescribirla ni enviándola en el cuerpo de la actualización.</p>
  *
