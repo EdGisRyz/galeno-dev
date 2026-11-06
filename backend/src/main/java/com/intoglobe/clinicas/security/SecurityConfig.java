@@ -71,7 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
  * la cadena la escribe {@link RestAccessDeniedHandler}.</p>
  *
  * <table>
- *   <caption>Matriz aplicada a las veinte operaciones de la API</caption>
+ *   <caption>Matriz aplicada a las veintiséis operaciones de la API</caption>
  *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th></tr>
  *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td></tr>
@@ -87,6 +87,11 @@ import tools.jackson.databind.json.JsonMapper;
  *   <tr><td>{@code POST /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
  *   <tr><td>{@code GET /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
  *   <tr><td>{@code GET|PUT|DELETE /horarios/{id}}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
+ *   <tr><td>{@code POST /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
+ *   <tr><td>{@code GET /pacientes/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
+ *   <tr><td>{@code PUT|DELETE /pacientes/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /pacientes/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
  * </table>
  *
  * <p>«Propio tenant» tiene dos mitades y las aplican dos piezas distintas: aquí se exige el
@@ -109,10 +114,29 @@ import tools.jackson.databind.json.JsonMapper;
  * organización). Ninguna de esas dos comprobaciones se puede expresar aquí: dependen del
  * estado de la base, no del rol.</p>
  *
+ * <h2>Pacientes: la matriz concede el rol, el service acota la organización y la pertenencia</h2>
+ *
+ * <p>Las seis rutas de pacientes aparecen en la tabla como «propio tenant» para
+ * {@code ADMIN} y, en las dos lecturas, para {@code MEDICO}: esa columna tampoco la aplica
+ * esta cadena. Aquí se concede el rol —{@code ADMIN} escribe, {@code MEDICO} solo lee— y
+ * {@code PacienteService} comprueba contra el {@code tenantId} del claim que la
+ * organización del path sea la del token y que el paciente pertenezca a esa organización,
+ * respondiendo {@code 404} cuando no, para no revelar que existe en otra clínica.</p>
+ *
+ * <p>En las dos rutas anidadas la discrepancia entre el {@code organizacionId} del path y el
+ * tenant del claim la resuelve el service con {@code 404} —la misma respuesta que una
+ * organización inexistente— y no con el {@code 403} que {@link TenantAccessGuard} aplica a
+ * los módulos anteriores. Es una decisión del contrato de {@code PacienteService} (sus
+ * comprobaciones se ordenan así y el módulo la declara en su nota), no una excepción de
+ * esta cadena: la respuesta difiere de la de los módulos anteriores y se deja dicha acá para
+ * que la matriz no se lea como «todo path ajeno responde {@code 403}». Lo que se conserva es
+ * la propiedad que importa: ninguna de las dos respuestas confirma que la organización ajena
+ * exista.</p>
+ *
  * <h2>El alta de organizaciones está bloqueada, y es deliberado</h2>
  *
  * <p>{@code POST /organizaciones} responde {@code 403} a <strong>los tres roles</strong>
- * mediante {@code denyAll()} (decisión de producto de Eduardo, 2026-10-29). No es un
+ * mediante {@code denyAll()} (decisión de producto, 2026-10-29). No es un
  * descuido ni una celda pendiente: con el aislamiento por tenant de esta misma matriz, la
  * organización recién creada quedaría <em>inalcanzable</em> para quien la creó —el {@code 201}
  * devolvía un {@code Location} que respondía {@code 403} a la lectura, al alta de hijos y a la
@@ -125,12 +149,13 @@ import tools.jackson.databind.json.JsonMapper;
  * venir acompañado del onboarding que haga alcanzable la organización creada, y de un test que
  * lo demuestre.</p>
  *
- * <p>{@code PACIENTE} recibe {@code 403} en las veinte operaciones, por dos motivos distintos.
- * En las quince de datos, porque todavía no existe ningún endpoint de paciente: es ausencia de
- * contrato, no una decisión de negocio, y su matriz se define cuando exista {@code /pacientes}.
- * En las cinco de horarios, porque <strong>hoy no se emiten tokens {@code PACIENTE}</strong>: el rol
- * existe en el schema y se conserva para una implementación futura, pero no hay cuentas de
- * paciente. Cuando las haya, necesitarán sus propias celdas acá.</p>
+ * <p>{@code PACIENTE} recibe {@code 403} en las veintiséis operaciones. Desde este módulo
+ * existe contrato de pacientes, así que su {@code 403} ya no es ausencia de endpoint:
+ * <strong>hoy no se emiten tokens {@code PACIENTE}</strong> —el rol existe en el schema y se
+ * conserva para una implementación futura, pero no hay cuentas de paciente— y por eso no
+ * tiene ninguna celda concedida, ni las lecturas de pacientes que serían las primeras
+ * candidatas. Cuando se emitan, necesitarán sus propias celdas acá, incluida la de sus
+ * propios datos.</p>
  *
  * <p>El rol de personal {@code RECEPCIONISTA} <strong>aún no está implementado</strong>: se
  * <em>agregará</em> al CHECK de {@code usuario_rol} <strong>sin retirar</strong> {@code PACIENTE}.
@@ -181,6 +206,9 @@ public class SecurityConfig {
 
     /** Ruta base de los bloques de disponibilidad pedidos por id. */
     private static final String RUTA_HORARIOS = "/api/v1/horarios";
+
+    /** Ruta base de los pacientes pedidos por id y de su reactivación. */
+    private static final String RUTA_PACIENTES = "/api/v1/pacientes";
 
     /** Endpoint de error del contenedor, servido por {@code RestErrorController}. */
     private static final String RUTA_ERROR = "/error";
@@ -277,6 +305,22 @@ public class SecurityConfig {
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
                         .requestMatchers(HttpMethod.DELETE, RUTA_HORARIOS + "/*")
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        // Pacientes: ADMIN escribe y MEDICO solo lee. Esta regla solo concede
+                        // el rol; que la organización del path sea la del token y que el
+                        // paciente pertenezca a esa organización (404 si no) lo aplica
+                        // PacienteService contra el tenantId del claim. Se declaran las seis
+                        // operaciones por separado porque cada una es una celda de la matriz;
+                        // la reactivación se nombra aparte porque POST /pacientes/* no la
+                        // alcanza (son dos segmentos después de la base).
+                        .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*/pacientes")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.GET, RUTA_PACIENTES + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES + "/*/pacientes")
+                        .hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.PUT, RUTA_PACIENTES + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, RUTA_PACIENTES + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.POST, RUTA_PACIENTES + "/*/activar").hasRole(ROL_ADMIN)
                         // Fallback: deny-by-default (R-SEG-09). Toda ruta con controlador que no
                         // esté declarada arriba queda cerrada para los tres roles; una ruta
                         // inexistente conserva el 401/404 normal del framework.

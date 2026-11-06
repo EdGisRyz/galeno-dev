@@ -910,3 +910,152 @@ Mientras tanto, `PACIENTE` recibe 403 en las cinco rutas por deny-by-default.
 - [ ] Confirmé que el 404 cross-tenant es deliberado y que el 403 de propiedad es solo para `MEDICO`.
 - [ ] Confirmé que los conteos de test salen de surefire y no de este documento.
 - [ ] Confirmé que este módulo **no** tiene review nativa aprobada.
+
+---
+
+## paciente
+
+Corte **S1–S3**: dominio y repositorio (S1), DTOs, mapper y servicio (S2), y controller,
+pruebas MVC, celdas de autorización y estas notas (S3). Expone seis endpoints bajo
+`/api/v1`; la colección cuelga de la organización y el ítem va plano, la convención que
+fijaron los módulos 02 a 04 (ADR-005):
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| `POST` | `/api/v1/organizaciones/{organizacionId}/pacientes` | 201 + `Location: /api/v1/pacientes/{id}` |
+| `GET` | `/api/v1/organizaciones/{organizacionId}/pacientes` | 200 (solo activos, por nombre) |
+| `GET` | `/api/v1/pacientes/{id}` | 200 |
+| `PUT` | `/api/v1/pacientes/{id}` | 200 |
+| `DELETE` | `/api/v1/pacientes/{id}` | 204 (baja lógica, idempotente) |
+| `POST` | `/api/v1/pacientes/{id}/activar` | 204 (reactivación, idempotente) |
+
+### Decisiones
+
+1. **Colección anidada y ítem plano, y el frontend es lo que se adapta.** El dueño del
+paciente es la organización, así que viaja en el path del alta y la actualización no lo
+recibe: el cuerpo no puede expresar un cambio de dueño y un único `PacienteRequest` sirve
+para `POST` y `PUT`. La razón es la del módulo 02 (ADR-005): el tenant es contexto real de
+la colección y el `organizacionId` del path es el lugar donde se contrasta el claim, en
+lugar de un parámetro falsificable. La página de pacientes del frontend habla hoy con el
+adaptador de mocks por rutas planas —`api.get('/pacientes')`, `api.post('/pacientes')`,
+`api.put('/pacientes/{id}')`—, así que contra el backend real esas llamadas no resuelven a
+ningún controlador: la adaptación pendiente es del cliente, no un cambio de contrato.
+[Probada: lectura de `frontend/src/features/pacientes/PacientesPage.tsx` y
+`frontend/src/lib/axios.ts` frente a las rutas de `PacienteController`.] Los mocks solo se
+instalan en `DEV` con `VITE_USE_MOCKS=true`, de modo que la discrepancia no puede llegar a
+producción en silencio. [Probada: `debenUsarseMocks()` en `frontend/src/lib/mock/mockAdapter.ts`.]
+2. **NOM-004 queda fuera de alcance, con ítem V2 declarado.** El módulo almacena
+identificación y contacto (nombre, teléfono, fecha de nacimiento, sexo, correo, notas); no
+implementa expediente clínico: ni inmutabilidad de notas clínicas, ni auditoría clínica, ni
+SOAP, ni prescripciones. El alcance del expediente está delimitado a `diagnostico` (CIE-10,
+descripción, tipo) más una proyección por paciente, y la auditoría clínica está diferida
+con disparador explícito. [Derivada: `odd/tasks/cronograma-anteproyecto.md` T7 y
+`odd/tasks/seguridad-rs256-auth.md` D8; no se infiere nada más de la norma.]
+3. **`email` sin validación de formato, a propósito.** La columna es `VARCHAR(180)` sin
+`CHECK` de formato, así que el DTO solo limita la longitud (180). Poner `@Email` sería
+inventar una regla que la base no tiene y rechazar datos que hoy se almacenan; el costo
+declarado es que un correo con formato inválido se guarda. [Probada: columna
+`paciente.email` de `V1__base_schema.sql` y `PacienteRequest`.]
+4. **Baja lógica (`DELETE`), idempotente.** `cita.paciente_id` y `adjunto.paciente_id` son
+claves foráneas sin `ON DELETE`, es decir `NO ACTION`: la base bloquearía el borrado físico y,
+aunque no lo hiciera, se perdería el historial clínico. Repetir la baja sobre un paciente ya
+inactivo sigue devolviendo 204. [Probada: FKs de `V1__base_schema.sql`; test de idempotencia
+en `PacienteServiceTest`.]
+5. **`activar` es una operación propia, no un efecto del `PUT`.** Un paciente que vuelve a
+la clínica después de meses debe seguir siendo el mismo registro: reactivar la fila conserva
+su historial, mientras que crearlo de nuevo lo partiría entre dos identificadores y dejaría
+las citas y adjuntos anteriores colgados del viejo. Por eso `PUT` no reactiva un paciente
+inactivo y existe `POST /pacientes/{id}/activar`, idempotente. Deuda declarada: `medico` y
+`consultorio` solo tienen `desactivar` y este módulo no les agrega la operación simétrica.
+[Probada: `PacienteServiceTest` (reactiva y repite sin error) y `PacienteControllerTest`
+(204 sin cuerpo).]
+6. **Las dos lecturas de la colección y del ítem admiten `MEDICO`; las cuatro mutaciones
+son de `ADMIN`.** Editar la ficha de un paciente es función administrativa; un médico la
+consulta. `PACIENTE` no tiene ninguna celda: hoy no se emiten tokens de ese rol.
+
+### Autorización en tres capas
+
+Ninguna capa alcanza sola, y el reparto no es cosmético:
+
+| Capa | Dónde | Qué decide | Respuesta |
+|---|---|---|---|
+| Rol | `SecurityConfig` | quién entra a la ruta | **403** a `PACIENTE` y a `MEDICO` en las mutaciones |
+| Organización | `PacienteService` | la organización del path es la del token | **403** en las dos rutas anidadas |
+| Pertenencia | `PacienteService` | el paciente es de esa organización | **404** en las cuatro rutas por id |
+
+**Alineado con D5 (ADR-013), con dos respuestas distintas a propósito.** Las dos
+comprobaciones no son el mismo caso y por eso no responden lo mismo:
+
+- **Path de otra organización → 403.** El `organizacionId` de la ruta es una afirmación
+del cliente, no un recurso. La comprobación es una comparación pura contra el claim, sin
+consultar el repositorio ni la base, así que negarla **no revela si esa organización
+existe**: no hay lectura que hacer y nada que filtrar. `PacienteService` la lanza como
+`AccessDeniedException` y `GlobalExceptionHandler` la publica con el mismo cuerpo
+`ErrorResponse` que el 403 de la cadena, indistinguible del de los módulos 02-04.
+- **Recurso pedido por id y de otra organización → 404.** Aquí sí se pide un recurso
+concreto: un 403 confirmaría que ese paciente existe en otra clínica. El mensaje de un
+paciente ajeno es indistinguible del de un id inexistente, y la decisión se toma con la
+fila leída y la organización comparada en memoria.
+
+[Probada: `PacienteServiceTest` (403 sin `findById` ni listado en las rutas anidadas;
+404 en las cuatro rutas por id), `PacienteControllerTest` (403 con `ErrorResponse` a través
+de la cadena real) y `AislamientoYMatrizRbacTest.elPathDeOtroTenantResponde403TambienParaAdmin`,
+que ya incluye las dos rutas anidadas de pacientes.]
+
+### Tests
+
+Corte S3 verificado con la suite completa: **465 tests, 0 fallos, 0 errores, 0 omitidos**
+(35 clases). Por clase: `PacienteControllerTest` **22**, `AislamientoYMatrizRbacTest` **68**
+invocaciones, `PacienteServiceTest` **20**, `PacienteRepositoryTest` **12**. [Probada:
+conteos leídos de `target/surefire-reports/` el 2026-11-05.]
+
+`AislamientoYMatrizRbacTest` pasó de **57** a **68** invocaciones: seis celdas nuevas de
+`ADMIN` en el test de las veinticinco operaciones, un test de las dos lecturas de `MEDICO`,
+seis celdas de `PACIENTE` denegadas y cuatro de `MEDICO` denegadas (las seis operaciones de
+pacientes menos sus dos lecturas). Las celdas existentes no se tocaron.
+
+Lección medida, la misma del módulo 04: con el controller ya escrito y `SecurityConfig` sin
+las celdas, **20 de los 22** casos MVC fallaron con **403** por deny-by-default —incluidos
+los `400` de validación y los `404` de negocio, porque la cadena corta antes del
+controlador—. Por eso el controller y las seis reglas se implementaron en el mismo corte.
+[Probada: corrida de `-Dtest='Paciente*'` antes y después de las reglas.]
+
+### Estado nativo del módulo
+
+Este corte **no tiene review nativa aprobada**. **Tests verdes no equivalen a review
+aprobada.**
+
+### Riesgos declarados
+
+- **Una sola respuesta de aislamiento mal leída.** Quien venga de los módulos 02-04 y
+espere 403 en toda operación con tenant ajeno encontrará 404 en las cuatro rutas por id de
+pacientes, y quien espere 404 en el path encontrará 403. El reparto es el de D5 (403 para
+el path, 404 para el recurso pedido por id) y vive en `PacienteService`, no en la cadena.
+- **`PacienteRequest` describe `PATCH .../desactivar` y `PATCH .../activar`**, pero el
+  contrato implementado y probado es `DELETE /pacientes/{id}` y `POST /pacientes/{id}/activar`.
+  Deuda de redacción del DTO (S2), fuera del alcance de este corte.
+- **NOM-004 no está implementada**: no hay expediente, inmutabilidad ni auditoría clínica.
+  El ítem V2 está declarado en la decisión 2.
+- **`email` se guarda sin validar formato** (decisión 3). Un dato inválido no se rechaza.
+- **La prueba MVC del tenant ajeno usa el servicio simulado**: fija que el controller
+  propaga el path y el claim y que el 403 llega con el contrato de error, pero la decisión
+  real de responder 403 vive en `PacienteServiceTest`. `AislamientoYMatrizRbacTest` ejerce
+  el 403 del path anidado contra la cadena y el repositorio reales, y el 404 cross-tenant de
+  pacientes por id solo se prueba en `PacienteServiceTest`, no contra la base.
+- **La página de pacientes del frontend sigue en rutas planas sobre el adaptador de mocks**;
+  la adaptación a la colección anidada está pendiente y hoy no la cubre ningún test.
+- **`PACIENTE` no tiene celdas** porque no se emiten tokens de ese rol. `RECEPCIONISTA`
+  sigue sin existir: se agregará al `CHECK` de `usuario_rol` en V2 y hasta entonces la cadena
+  lo cerrará por deny-by-default; no se agregó al código.
+
+### Checklist de lectura
+
+- [ ] Confirmé que la colección es anidada y el ítem plano, y que el frontend es quien adapta.
+- [ ] Confirmé que NOM-004 está fuera de alcance con ítem V2 declarado.
+- [ ] Confirmé que `email` no valida formato porque la columna tampoco lo hace.
+- [ ] Confirmé que la baja es lógica por las FKs `NO ACTION` de `cita` y `adjunto`.
+- [ ] Confirmé que `activar` existe para no partir el historial y que es idempotente.
+- [ ] Confirmé que las tres capas de autorización y que el path ajeno responde 403, no 404.
+- [ ] Confirmé que el 404 queda para el paciente de otra organización pedido por id.
+- [ ] Confirmé que los conteos salen de surefire y que `AislamientoYMatrizRbacTest` no perdió celdas.
+- [ ] Confirmé que este corte **no** tiene review nativa aprobada.
