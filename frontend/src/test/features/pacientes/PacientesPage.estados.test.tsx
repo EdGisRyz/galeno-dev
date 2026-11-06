@@ -4,6 +4,7 @@ import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { PacientesPage } from '@/features/pacientes/PacientesPage';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
+import { useAuthStore } from '@/store/auth.store';
 
 /**
  * F006 · estados de la pantalla de Pacientes: cargando, vacío y error.
@@ -22,6 +23,8 @@ vi.mock('@/lib/axios', () => ({
     post: vi.fn(),
     put: vi.fn(),
   },
+  // El store conecta el cliente HTTP al cargarse; aquí no hay red que conectar.
+  conectarSesionHttp: vi.fn(),
 }));
 
 const getMock = vi.mocked(api.get);
@@ -29,6 +32,18 @@ const getMock = vi.mocked(api.get);
 function respuestaCon<T>(data: T): AxiosResponse<T> {
   return { data } as AxiosResponse<T>;
 }
+
+/**
+ * Organización de la sesión: es el claim `tenantId` y la dueña de la colección de pacientes. La
+ * pantalla no puede inventar un tenant, así que la URL sale de aquí.
+ */
+const ORGANIZACION_ID = 'org-001';
+
+/** Colección del contrato anidado: `GET/POST /organizaciones/{organizacionId}/pacientes`. */
+const RUTA_COLECCION = `/organizaciones/${ORGANIZACION_ID}/pacientes`;
+
+/** Ítem del contrato plano: `PUT /pacientes/{id}`. */
+const RUTA_ITEM = (id: string) => `/pacientes/${id}`;
 
 const PACIENTE: Paciente = {
   id: 'pac-0001',
@@ -47,6 +62,17 @@ beforeEach(() => {
   getMock.mockReset();
   vi.mocked(api.post).mockReset();
   vi.mocked(api.put).mockReset();
+
+  // Sesión autenticada: la organización dueña del directorio sale de su claim `tenantId`.
+  useAuthStore.setState({
+    accessToken: null,
+    user: { id: 'usr-0001', email: 'admin@correo.mx', role: 'ADMIN', tenantId: ORGANIZACION_ID },
+    isAuthenticated: true,
+    inicializando: false,
+    tenantSlug: ORGANIZACION_ID,
+    lastActivity: Date.now(),
+    showInactivityWarning: false,
+  });
 });
 
 describe('PacientesPage · estado de error (F006)', () => {
@@ -92,12 +118,12 @@ describe('PacientesPage · estado de error (F006)', () => {
 
     const reintentar = await screen.findByRole('button', { name: /reintentar/i });
     expect(getMock).toHaveBeenCalledTimes(1);
-    expect(getMock).toHaveBeenCalledWith('/pacientes');
+    expect(getMock).toHaveBeenCalledWith(RUTA_COLECCION);
 
     fireEvent.click(reintentar);
 
     await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
-    expect(getMock).toHaveBeenLastCalledWith('/pacientes');
+    expect(getMock).toHaveBeenLastCalledWith(RUTA_COLECCION);
 
     await waitFor(() =>
       expect(screen.queryByText(/no se pudieron cargar los pacientes/i)).not.toBeInTheDocument(),
@@ -160,6 +186,78 @@ describe('PacientesPage · estado vacío (F006)', () => {
     expect(await screen.findByText(/aún no hay pacientes registrados/i)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByText(/cargando pacientes/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('PacientesPage · rutas del contrato del backend (colección anidada, ítem plano)', () => {
+  it('lista los pacientes en la colección de la organización de la sesión', async () => {
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
+
+    render(<PacientesPage />);
+
+    await screen.findByText(PACIENTE.nombre);
+
+    // Una sola petición y a la ruta anidada: la colección plana ya no existe en el backend.
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock).toHaveBeenCalledWith(RUTA_COLECCION);
+  });
+
+  it('da de alta al paciente en la colección de la organización de la sesión', async () => {
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
+    vi.mocked(api.post).mockResolvedValue(
+      respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0002', nombre: 'Ana Ruiz' }),
+    );
+
+    render(<PacientesPage />);
+
+    await screen.findByText(/aún no hay pacientes registrados/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /nuevo paciente/i }));
+    fireEvent.change(screen.getByLabelText(/nombre completo/i), {
+      target: { value: 'Ana Ruiz' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /registrar paciente/i }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.post).mock.calls[0][0]).toBe(RUTA_COLECCION);
+    expect(await screen.findByText(/paciente registrado correctamente/i)).toBeInTheDocument();
+  });
+
+  it('actualiza la ficha en la ruta plana del paciente', async () => {
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
+    vi.mocked(api.put).mockResolvedValue(
+      respuestaCon<Paciente>({ ...PACIENTE, nombre: 'María F. López' }),
+    );
+
+    render(<PacientesPage />);
+
+    await screen.findByText(PACIENTE.nombre);
+
+    fireEvent.click(screen.getByRole('button', { name: /ficha/i }));
+    fireEvent.change(screen.getByLabelText(/nombre completo/i), {
+      target: { value: 'María F. López' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /guardar cambios/i }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.put).mock.calls[0][0]).toBe(RUTA_ITEM(PACIENTE.id));
+  });
+
+  it('no pide el directorio si la sesión no trae organización', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    useAuthStore.setState({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+      tenantSlug: '',
+      inicializando: false,
+    });
+
+    render(<PacientesPage />);
+
+    // Fail-closed: sin claim de tenant no hay organización y no se inventa una por defecto.
+    expect(await screen.findByText(/no se pudieron cargar los pacientes/i)).toBeInTheDocument();
+    expect(getMock).not.toHaveBeenCalled();
   });
 });
 

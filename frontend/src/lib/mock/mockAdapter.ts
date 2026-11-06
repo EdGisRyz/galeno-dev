@@ -98,7 +98,13 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // PACIENTES
     // ─────────────────────────────────────────
-    if (url.includes('/pacientes') && method === 'get') {
+    // Las rutas replican el contrato del backend: la colección cuelga de la organización dueña y
+    // el ítem es plano. La comparación es exacta a propósito: el mock no puede ser más permisivo
+    // que el backend, o el desarrollo local diría que una pantalla funciona cuando responde 404.
+    const coleccionDePacientes = url.match(/^\/organizaciones\/([^/]+)\/pacientes\/?$/);
+    const pacientePorId = url.match(/^\/pacientes\/([^/]+)\/?$/);
+
+    if (coleccionDePacientes && method === 'get') {
       await delay();
       config.adapter = async () => ({
         // Copia defensiva: nunca devolver el array mutable por referencia, o un POST/PUT
@@ -113,16 +119,19 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/pacientes') && method === 'post') {
+    if (coleccionDePacientes && method === 'post') {
       await delay();
+      // La organización dueña llega por el path: el cuerpo no puede cambiar de tenant.
+      const organizacionId = coleccionDePacientes[1];
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const newPatientId = `pac-${Date.now()}`;
       const newPatient: PacienteConFicha = {
         id: newPatientId,
-        organizacion_id: 'org-001',
         activo: true,
         created_at: new Date().toISOString(),
         ...body,
+        // El dueño lo fija el path: si el cuerpo trae otro, no puede cambiarlo.
+        organizacion_id: organizacionId,
         ficha: body.ficha
           ? { id: `ficha-${Date.now()}`, paciente_id: newPatientId, ...body.ficha }
           : undefined,
@@ -138,11 +147,10 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    // Actualizar paciente existente (datos básicos + ficha NOM-004)
-    if (url.includes('/pacientes/') && (method === 'put' || method === 'patch')) {
+    // Actualizar paciente existente (datos básicos + ficha NOM-004): solo la ruta plana del ítem.
+    if (pacientePorId && method === 'put') {
       await delay();
-      const match = url.match(/\/pacientes\/([^/]+)/);
-      const id = match ? match[1] : '';
+      const id = pacientePorId[1];
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const idx = patients.findIndex((p) => p.id === id);
 

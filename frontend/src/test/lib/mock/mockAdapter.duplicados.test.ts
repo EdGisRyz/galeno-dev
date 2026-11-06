@@ -30,22 +30,22 @@ afterEach(() => {
 
 describe('mockAdapter · GET de pacientes entrega una copia (regresión del duplicado)', () => {
   it('no muta el array que ya le entregó al llamador cuando después se crea un paciente', async () => {
-    const primera = await api.get<PacienteMinimo[]>('/pacientes');
+    const primera = await api.get<PacienteMinimo[]>('/organizaciones/org-001/pacientes');
     const totalInicial = primera.data.length;
     expect(totalInicial).toBeGreaterThan(0);
 
-    await api.post('/pacientes', pacienteNuevo);
+    await api.post('/organizaciones/org-001/pacientes', pacienteNuevo);
 
     // La referencia entregada antes del POST no puede cambiar.
     expect(primera.data).toHaveLength(totalInicial);
 
-    const segunda = await api.get<PacienteMinimo[]>('/pacientes');
+    const segunda = await api.get<PacienteMinimo[]>('/organizaciones/org-001/pacientes');
     expect(segunda.data).toHaveLength(totalInicial + 1);
   });
 
   it('no repite el registro creado al combinar lo que el componente ya tenía con el nuevo', async () => {
-    const antes = (await api.get<PacienteMinimo[]>('/pacientes')).data;
-    const creado = (await api.post<PacienteMinimo>('/pacientes', pacienteNuevo)).data;
+    const antes = (await api.get<PacienteMinimo[]>('/organizaciones/org-001/pacientes')).data;
+    const creado = (await api.post<PacienteMinimo>('/organizaciones/org-001/pacientes', pacienteNuevo)).data;
 
     // El prepend optimista del componente: lo que ya tenía, más el registro nuevo.
     const enPantalla = [creado, ...antes];
@@ -53,7 +53,7 @@ describe('mockAdapter · GET de pacientes entrega una copia (regresión del dupl
 
     expect(new Set(ids).size).toBe(ids.length);
 
-    const despues = (await api.get<PacienteMinimo[]>('/pacientes')).data;
+    const despues = (await api.get<PacienteMinimo[]>('/organizaciones/org-001/pacientes')).data;
     expect(despues.filter((paciente) => paciente.id === creado.id)).toHaveLength(1);
   });
 });
