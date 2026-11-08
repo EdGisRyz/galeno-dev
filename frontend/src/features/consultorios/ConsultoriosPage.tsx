@@ -166,6 +166,11 @@ export function ConsultoriosPage() {
     }
   };
 
+  // No hay botón "Activar": el backend no expone reactivación (ConsultorioController solo tiene
+  // crear/listar/buscar/actualizar/desactivar, y Consultorio.actualizarDatos() documenta
+  // explícitamente que el PUT nunca toca `activo`). Una vez desactivado, un consultorio queda
+  // inactivo hasta que el backend agregue ese endpoint — no es algo que el frontend pueda resolver
+  // por su cuenta. Brecha señalada en la HU3-5, pendiente de decisión del equipo de backend.
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
     try {
@@ -518,8 +523,8 @@ export function ConsultoriosPage() {
         maxWidth="sm"
       >
         <p className="text-sm text-[#41484D]">
-          ¿Desactivar <strong>{consultorioADesactivar?.nombre}</strong>? Esta acción se puede
-          revertir solo desde soporte.
+          ¿Desactivar <strong>{consultorioADesactivar?.nombre}</strong>? El sistema todavía no
+          ofrece una forma de reactivarlo: confírmalo solo si estás seguro.
         </p>
         <div className="flex justify-end gap-2 pt-5">
           <Button type="button" variant="outline" onClick={() => setDeactivatingId(null)}>
