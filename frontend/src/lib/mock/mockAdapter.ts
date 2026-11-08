@@ -176,10 +176,10 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       const newPatient: PacienteConFicha = {
         id: newPatientId,
         activo: true,
-        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
         ...body,
         // El dueño lo fija el path: si el cuerpo trae otro, no puede cambiarlo.
-        organizacion_id: organizacionId,
+        organizacionId: organizacionId,
         ficha: body.ficha
           ? { id: `ficha-${Date.now()}`, paciente_id: newPatientId, ...body.ficha }
           : undefined,

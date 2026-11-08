@@ -47,15 +47,15 @@ const RUTA_ITEM = (id: string) => `/pacientes/${id}`;
 
 const PACIENTE: Paciente = {
   id: 'pac-0001',
-  organizacion_id: 'org-001',
+  organizacionId: 'org-001',
   nombre: 'María Fernanda López',
   telefono: '5551234567',
-  fecha_nacimiento: '1990-05-04',
+  fechaNacimiento: '1990-05-04',
   sexo: 'F',
   email: 'maria@correo.mx',
   notas: null,
   activo: true,
-  created_at: '2026-01-02T10:00:00.000Z',
+  createdAt: '2026-01-02T10:00:00.000Z',
 };
 
 beforeEach(() => {

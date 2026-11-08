@@ -109,24 +109,24 @@ describe('mockAdapter · vigencia del token simulado (ADR-012)', () => {
 
 describe('mockAdapter · rutas de pacientes del contrato (colección anidada, ítem plano)', () => {
   it('sirve la lista en la colección anidada de la organización', async () => {
-    const { data, status } = await api.get<{ id: string; organizacion_id: string }[]>(
+    const { data, status } = await api.get<{ id: string; organizacionId: string }[]>(
       RUTA_COLECCION,
     );
 
     expect(status).toBe(200);
     expect(data.length).toBeGreaterThan(0);
-    expect(data.every((paciente) => paciente.organizacion_id === ORGANIZACION_ID)).toBe(true);
+    expect(data.every((paciente) => paciente.organizacionId === ORGANIZACION_ID)).toBe(true);
   });
 
   it('da de alta al paciente en la organización del path y responde 201', async () => {
-    const { data, status } = await api.post<{ id: string; organizacion_id: string }>(
+    const { data, status } = await api.post<{ id: string; organizacionId: string }>(
       RUTA_COLECCION,
       { nombre: 'Paciente de prueba' },
     );
 
     expect(status).toBe(201);
     // La organización dueña viene del path, no del cuerpo ni de un valor por defecto.
-    expect(data.organizacion_id).toBe(ORGANIZACION_ID);
+    expect(data.organizacionId).toBe(ORGANIZACION_ID);
 
     const lista = await api.get<{ id: string }[]>(RUTA_COLECCION);
     expect(lista.data.some((paciente) => paciente.id === data.id)).toBe(true);
