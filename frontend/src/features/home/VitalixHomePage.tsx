@@ -55,11 +55,6 @@ export function VitalixHomePage() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const navigate = useNavigate();
 
-  const handleRegistroClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    alert('El registro público de clínicas estará disponible próximamente.');
-  };
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0B1C30]">
       {/* ─────────────────────────────────────────
@@ -95,7 +90,7 @@ export function VitalixHomePage() {
                 <Button variant="outline" size="sm" onClick={() => navigate('/login')}>
                   Iniciar sesión
                 </Button>
-                <Button variant="primary" size="sm" onClick={handleRegistroClick}>
+                <Button variant="primary" size="sm" onClick={() => navigate('/registro')}>
                   Registrar mi clínica
                 </Button>
               </>
@@ -123,7 +118,7 @@ export function VitalixHomePage() {
           <Button
             variant="primary"
             size="lg"
-            onClick={handleRegistroClick}
+            onClick={() => navigate('/registro')}
             rightIcon={<ArrowRight className="w-4 h-4" />}
           >
             Registrar mi clínica
