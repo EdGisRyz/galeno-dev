@@ -23,7 +23,9 @@ const numeroEntreUnoY = (max: number) =>
 export const registroClinicaSchema = z
   .object({
     nombreClinica: z.string().min(2, 'Ingresa el nombre de la clínica').max(120),
-    plan: z.enum(['SOLO', 'CLINICA', 'ENTERPRISE']),
+    // Sin "ENTERPRISE": ese plan implica multi-sede, fuera del alcance actual del anteproyecto
+    // (sección 2.5.2). Sale de un flujo de ventas asistido, no de este formulario público.
+    plan: z.enum(['SOLO', 'CLINICA']),
     maxMedicos: numeroEntreUnoY(100),
     maxConsultorios: numeroEntreUnoY(50),
     nombreAdmin: z.string().min(2, 'Ingresa tu nombre completo').max(120),

@@ -120,10 +120,14 @@ export function RegistroClinicaPage() {
                       <Select
                         label="Plan"
                         error={errors.plan?.message}
+                        // "Enterprise" no se ofrece aquí a propósito: ese plan implica
+                        // multi-sede, y el anteproyecto excluye explícitamente la gestión de
+                        // varias clínicas/sucursales del alcance actual. Autorregistrarse como
+                        // Enterprise prometería una función que el producto no tiene todavía;
+                        // ese plan debe salir de un flujo de ventas asistido, no de este form.
                         options={[
                           { value: 'SOLO', label: 'Solo (un profesional)' },
                           { value: 'CLINICA', label: 'Clínica (varios médicos)' },
-                          { value: 'ENTERPRISE', label: 'Enterprise' },
                         ]}
                         {...register('plan')}
                       />
