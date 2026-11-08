@@ -3,7 +3,9 @@ import {
   mockUsers,
   mockPatients,
   mockDoctors,
+  mockDoctorSchedules,
   mockClinicRooms,
+  mockOrganization,
   mockAppointments,
   mockPayments,
   mockSoapNotes,
@@ -87,6 +89,53 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
           accessToken: fakeToken,
           user: fakePayload,
         },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // DIRECTORIO PÚBLICO DE CLÍNICA
+    // ─────────────────────────────────────────
+    // Sin contrato real: ningún GET de organizaciones o médicos es público en el backend (toda
+    // la cadena de filtros exige un token válido, igual que /organizaciones). El prefijo
+    // /publico/ distingue estas rutas de sus equivalentes reales autenticadas; no existen en el
+    // backend y no deben confundirse con la colección de /organizaciones/{id}/medicos.
+    const clinicaPublica = url.match(/^\/publico\/clinicas\/([^/]+)\/?$/);
+    const medicosPublicos = url.match(/^\/publico\/clinicas\/([^/]+)\/medicos\/?$/);
+
+    if (clinicaPublica && method === 'get') {
+      await delay();
+      const id = clinicaPublica[1];
+      const organizacion = id === mockOrganization.id ? mockOrganization : null;
+      config.adapter = async () =>
+        organizacion
+          ? { data: organizacion, status: 200, statusText: 'OK', headers: {}, config }
+          : {
+              data: { mensaje: 'Clínica no encontrada' },
+              status: 404,
+              statusText: 'Not Found',
+              headers: {},
+              config,
+            };
+      return config;
+    }
+
+    if (medicosPublicos && method === 'get') {
+      await delay();
+      const id = medicosPublicos[1];
+      const medicos = mockDoctors
+        .filter((m) => m.organizacion_id === id && m.activo)
+        .map((m) => ({
+          ...m,
+          horarios: mockDoctorSchedules.filter((h) => h.medico_id === m.id),
+          consultorio: mockClinicRooms.find((c) => c.id === m.consultorio_id)?.nombre,
+        }));
+      config.adapter = async () => ({
+        data: medicos,
         status: 200,
         statusText: 'OK',
         headers: {},

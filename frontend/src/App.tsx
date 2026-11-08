@@ -5,6 +5,7 @@ import { AuthLayout } from './layouts/AuthLayout';
 import { LoginForm } from './features/auth/LoginForm';
 import { AgendaPage } from './features/agenda/AgendaPage';
 import { PacientesPage } from './features/pacientes/PacientesPage';
+import { ClinicaPublicaPage } from './features/clinica-publica/ClinicaPublicaPage';
 import { ProtectedRoute } from './components/navigation/ProtectedRoute';
 import { useAuthStore } from './store/auth.store';
 
@@ -21,6 +22,10 @@ function App() {
 
   return (
     <Routes>
+      {/* Directorio público de una clínica (sin login). Solo habla con el mock: ningún GET de
+          organizaciones o médicos es público en el backend real todavía. */}
+      <Route path="/clinica/:organizacionId" element={<ClinicaPublicaPage />} />
+
       {/* Rutas públicas de autenticación */}
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<LoginForm />} />
