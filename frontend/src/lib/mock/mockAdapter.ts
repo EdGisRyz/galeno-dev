@@ -13,7 +13,7 @@ import {
 } from './mockData';
 import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
-import type { PatientIdentification, SoapNote } from '@/types/futuro.types';
+import type { MarcaClinica, PatientIdentification, SoapNote } from '@/types/futuro.types';
 
 type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 
@@ -48,6 +48,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   const patients: PacienteConFicha[] = [...mockPatients];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
+  // Marca por organización: sin contrato real, cada tenant parte de los mismos valores por
+  // defecto hasta que el admin los personalice (no existe fila en ninguna tabla real).
+  const marcasPorOrganizacion = new Map<string, MarcaClinica>();
 
   axiosInstance.interceptors.request.use(async (config) => {
     // Si los mocks no están explícitamente habilitados, no intervenir (va a la red real)
@@ -87,6 +90,51 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
           accessToken: fakeToken,
           user: fakePayload,
         },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // MARCA DE LA CLÍNICA (personalización, panel de administración)
+    // ─────────────────────────────────────────
+    // Sin contrato real: `configuracion_tenant` no tiene columnas de marca y ningún GET/PUT de
+    // organizaciones es público ni acepta estos campos todavía. Ruta exclusiva del mock.
+    const marcaDeOrganizacion = url.match(/^\/organizaciones\/([^/]+)\/marca\/?$/);
+
+    if (marcaDeOrganizacion && method === 'get') {
+      await delay();
+      const id = marcaDeOrganizacion[1];
+      const marca = marcasPorOrganizacion.get(id) || {
+        organizacion_id: id,
+        color_primario: '#0A4D68',
+        fuente_titulos: 'Plus Jakarta Sans',
+      };
+      config.adapter = async () => ({
+        data: marca,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (marcaDeOrganizacion && method === 'put') {
+      await delay();
+      const id = marcaDeOrganizacion[1];
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const actualizada: MarcaClinica = {
+        organizacion_id: id,
+        color_primario: body.color_primario,
+        fuente_titulos: body.fuente_titulos,
+      };
+      marcasPorOrganizacion.set(id, actualizada);
+      config.adapter = async () => ({
+        data: actualizada,
         status: 200,
         statusText: 'OK',
         headers: {},

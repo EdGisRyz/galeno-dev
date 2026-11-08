@@ -94,6 +94,14 @@ export interface NoteCorrection {
   created_at: string;
 }
 
+// Personalización de marca por clínica (branding). No hay tabla en V1: es alcance nuevo del
+// anteproyecto actualizado (2026-11-07), sin historia de usuario ni contrato de backend todavía.
+export interface MarcaClinica {
+  organizacion_id: string;
+  color_primario: string; // hex, ej. "#0A4D68"
+  fuente_titulos: string; // familia tipográfica de encabezados, ej. "Plus Jakarta Sans"
+}
+
 // Prescripción. No hay tabla en V1; el backend declaró prescripciones fuera de alcance.
 export interface Prescription {
   id: string;
