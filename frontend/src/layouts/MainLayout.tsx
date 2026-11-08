@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui';
 import {
   Calendar,
   Users,
+  Building2,
   FileText,
   CreditCard,
   Settings,
@@ -49,6 +50,12 @@ export function MainLayout() {
       label: 'Pacientes',
       icon: Users,
       description: 'Directorio y ficha NOM-004',
+    },
+    {
+      to: '/consultorios',
+      label: 'Consultorios',
+      icon: Building2,
+      description: 'Espacios físicos de la clínica',
     },
     {
       to: '/expediente',

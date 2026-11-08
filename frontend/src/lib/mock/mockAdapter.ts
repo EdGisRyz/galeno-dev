@@ -13,6 +13,7 @@ import {
 } from './mockData';
 import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
+import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { MarcaClinica, PatientIdentification, SoapNote } from '@/types/futuro.types';
 
 type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
@@ -46,6 +47,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
 
   // Mutable in-memory store for mocks
   const patients: PacienteConFicha[] = [...mockPatients];
+  const consultorios: Consultorio[] = [...mockClinicRooms];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
   // Marca por organización: sin contrato real, cada tenant parte de los mismos valores por
@@ -225,9 +227,11 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // ─────────────────────────────────────────
-    // MEDICOS Y CONSULTORIOS
+    // MEDICOS (sin contrato real todavía: la Agenda consume este listado plano)
     // ─────────────────────────────────────────
-    if (url.includes('/medicos') && method === 'get') {
+    // Comparación exacta: la ruta anidada de Consultorios usa un patrón distinto más abajo y no
+    // debe quedar atrapada por un `.includes('/medicos')` ni colisionar con él.
+    if (url === '/medicos' && method === 'get') {
       await delay();
       config.adapter = async () => ({
         data: mockDoctors,
@@ -239,12 +243,124 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/consultorios') && method === 'get') {
+    // ─────────────────────────────────────────
+    // CONSULTORIOS (HU3-5)
+    // ─────────────────────────────────────────
+    // Mismo contrato real que Pacientes: colección anidada a la organización dueña
+    // (`/organizaciones/{id}/consultorios`) e ítem plano (`/consultorios/{id}`). La comparación es
+    // exacta para no colisionar con el listado plano `/consultorios` que todavía consume la Agenda
+    // (sin contrato real de Citas) ni con la ruta anidada.
+    if (url === '/consultorios' && method === 'get') {
       await delay();
       config.adapter = async () => ({
-        data: mockClinicRooms,
+        data: [...consultorios],
         status: 200,
         statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    const coleccionDeConsultorios = url.match(/^\/organizaciones\/([^/]+)\/consultorios\/?$/);
+    const consultorioPorId = url.match(/^\/consultorios\/([^/]+)\/?$/);
+
+    if (coleccionDeConsultorios && method === 'get') {
+      await delay();
+      const organizacionId = coleccionDeConsultorios[1];
+      const activos = consultorios
+        .filter((c) => c.organizacionId === organizacionId && c.activo)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
+      config.adapter = async () => ({
+        data: activos,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (coleccionDeConsultorios && method === 'post') {
+      await delay();
+      const organizacionId = coleccionDeConsultorios[1];
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const newConsultorio: Consultorio = {
+        id: `room-${Date.now()}`,
+        activo: true,
+        createdAt: new Date().toISOString(),
+        ...body,
+        // El dueño lo fija el path: si el cuerpo trae otro, no puede cambiarlo.
+        organizacionId,
+      };
+      consultorios.unshift(newConsultorio);
+      config.adapter = async () => ({
+        data: newConsultorio,
+        status: 201,
+        statusText: 'Created',
+        headers: { Location: `/api/v1/consultorios/${newConsultorio.id}` },
+        config,
+      });
+      return config;
+    }
+
+    if (consultorioPorId && method === 'get') {
+      await delay();
+      const id = consultorioPorId[1];
+      const found = consultorios.find((c) => c.id === id);
+      if (!found) {
+        config.adapter = async () => ({
+          data: { message: 'Consultorio no encontrado' },
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+      config.adapter = async () => ({
+        data: found,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (consultorioPorId && method === 'put') {
+      await delay();
+      const id = consultorioPorId[1];
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const idx = consultorios.findIndex((c) => c.id === id);
+
+      if (idx !== -1) {
+        // El ítem es plano: la organización dueña no se envía ni se puede cambiar.
+        const editable = body as Partial<Consultorio>;
+        consultorios[idx] = { ...consultorios[idx], ...editable, organizacionId: consultorios[idx].organizacionId };
+      }
+
+      config.adapter = async () => ({
+        data: consultorios[idx],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (consultorioPorId && method === 'delete') {
+      await delay();
+      const id = consultorioPorId[1];
+      const idx = consultorios.findIndex((c) => c.id === id);
+      // Baja lógica idempotente: igual que el backend real, repetir la baja sigue devolviendo 204.
+      if (idx !== -1) consultorios[idx] = { ...consultorios[idx], activo: false };
+
+      config.adapter = async () => ({
+        data: undefined,
+        status: 204,
+        statusText: 'No Content',
         headers: {},
         config,
       });

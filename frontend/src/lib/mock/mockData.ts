@@ -48,21 +48,21 @@ export const mockUsers: Usuario[] = [
 export const mockClinicRooms: Consultorio[] = [
   {
     id: 'room-101',
-    organizacion_id: 'org-001',
+    organizacionId: 'org-001',
     nombre: 'Consultorio 101 - Medicina General',
     direccion: 'Planta Baja, Pasillo Central',
     telefono: '951-501-2001',
     activo: true,
-    created_at: new Date('2026-01-01').toISOString(),
+    createdAt: new Date('2026-01-01').toISOString(),
   },
   {
     id: 'room-102',
-    organizacion_id: 'org-001',
+    organizacionId: 'org-001',
     nombre: 'Consultorio 102 - Pediatría y Nutrición',
     direccion: 'Planta Alta, Módulo B',
     telefono: '951-501-2002',
     activo: true,
-    created_at: new Date('2026-01-01').toISOString(),
+    createdAt: new Date('2026-01-01').toISOString(),
   },
 ];
 

@@ -1,12 +1,13 @@
 // Tipos TypeScript del dominio Consultorio.
-// Reflejo tipado de la tabla `consultorio` del esquema V1.
+// Reflejo tipado de `ConsultorioResponse` (backend): camelCase, igual que `Paciente`
+// (ver pacientes.types.ts) — Jackson serializa los records del backend en camelCase por defecto.
 
 export interface Consultorio {
   id: string;
-  organizacion_id: string;
+  organizacionId: string;
   nombre: string;
   direccion?: string | null;
   telefono?: string | null;
   activo: boolean;
-  created_at: string;
+  createdAt: string;
 }
