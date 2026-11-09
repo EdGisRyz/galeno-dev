@@ -34,6 +34,10 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
+// `duracionConsultaMin` no existe en `MedicoResponse`: es un atajo mock-only (ver mockData.ts)
+// para sugerir la duración de la cita al elegir médico, mientras Citas no tenga contrato real.
+type MedicoConDuracionSugerida = Medico & { duracionConsultaMin?: number };
+
 export function AgendaPage() {
   /**
    * Organización dueña del directorio de pacientes: sale del claim `tenantId` de la sesión, que es
@@ -49,7 +53,7 @@ export function AgendaPage() {
   const rutaPacientes = organizacionId ? `/organizaciones/${organizacionId}/pacientes` : null;
 
   const [appointments, setAppointments] = useState<Cita[]>([]);
-  const [doctors, setDoctors] = useState<Medico[]>([]);
+  const [doctors, setDoctors] = useState<MedicoConDuracionSugerida[]>([]);
   const [patients, setPatients] = useState<Paciente[]>([]);
   const [clinicRooms, setClinicRooms] = useState<Consultorio[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -75,7 +79,7 @@ export function AgendaPage() {
   const loadData = (rutaPacientes: string | null) => {
     return Promise.all([
       api.get<Cita[]>('/citas'),
-      api.get<Medico[]>('/medicos'),
+      api.get<MedicoConDuracionSugerida[]>('/medicos'),
       // Sin organización de la sesión no se pide el directorio: no se inventa un tenant ni se
       // llama a la colección plana, que el backend ya no expone.
       rutaPacientes ? api.get<Paciente[]>(rutaPacientes) : null,
@@ -518,8 +522,8 @@ export function AgendaPage() {
               onChange={(e) => {
                 setNewDoctorId(e.target.value);
                 const doc = doctors.find((d) => d.id === e.target.value);
-                if (doc?.duracion_consulta_min) {
-                  setNewDuration(doc.duracion_consulta_min.toString());
+                if (doc?.duracionConsultaMin) {
+                  setNewDuration(doc.duracionConsultaMin.toString());
                 }
               }}
               options={doctors.map((d) => ({

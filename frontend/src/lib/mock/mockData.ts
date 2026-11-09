@@ -66,29 +66,32 @@ export const mockClinicRooms: Consultorio[] = [
   },
 ];
 
-export const mockDoctors: Medico[] = [
+// `duracionConsultaMin` no existe en `MedicoResponse`: la duración real vive por bloque en
+// `HorarioMedico.duracionConsulta`. Se conserva aquí solo como atajo mock-only para que la Agenda
+// (sin contrato real de Citas) sugiera una duración al elegir médico — ver AgendaPage.tsx.
+export const mockDoctors: (Medico & { duracionConsultaMin?: number })[] = [
   {
     id: 'med-001',
-    organizacion_id: 'org-001',
-    consultorio_id: 'room-101',
+    organizacionId: 'org-001',
+    consultorioId: 'room-101',
     nombre: 'Dra. Elena Ruiz Morales',
     especialidad: 'Medicina General',
     cedula: 'CED-10928374',
     telefono: '951-111-2233',
-    tarifa_base: 500,
-    duracion_consulta_min: 30,
+    tarifaBase: 500,
+    duracionConsultaMin: 30,
     activo: true,
   },
   {
     id: 'med-002',
-    organizacion_id: 'org-001',
-    consultorio_id: 'room-102',
+    organizacionId: 'org-001',
+    consultorioId: 'room-102',
     nombre: 'Dr. Roberto Vargas Silva',
     especialidad: 'Pediatría y Control Infantil',
     cedula: 'CED-55667788',
     telefono: '951-444-5566',
-    tarifa_base: 700,
-    duracion_consulta_min: 45,
+    tarifaBase: 700,
+    duracionConsultaMin: 45,
     activo: true,
   },
 ];
@@ -97,20 +100,20 @@ export const mockDoctorSchedules: HorarioMedico[] = [
   // Dra. Elena (Lunes a Viernes 09:00 a 14:00)
   ...[1, 2, 3, 4, 5].map((dia) => ({
     id: `sch-elena-${dia}`,
-    medico_id: 'med-001',
-    dia_semana: dia,
-    hora_inicio: '09:00:00',
-    hora_fin: '14:00:00',
-    duracion_consulta: 30 as const,
+    medicoId: 'med-001',
+    diaSemana: dia,
+    horaInicio: '09:00:00',
+    horaFin: '14:00:00',
+    duracionConsulta: 30 as const,
   })),
   // Dr. Roberto (Lunes, Miércoles, Viernes 10:00 a 16:00)
   ...[1, 3, 5].map((dia) => ({
     id: `sch-roberto-${dia}`,
-    medico_id: 'med-002',
-    dia_semana: dia,
-    hora_inicio: '10:00:00',
-    hora_fin: '16:00:00',
-    duracion_consulta: 45 as const,
+    medicoId: 'med-002',
+    diaSemana: dia,
+    horaInicio: '10:00:00',
+    horaFin: '16:00:00',
+    duracionConsulta: 45 as const,
   })),
 ];
 

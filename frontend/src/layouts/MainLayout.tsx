@@ -58,6 +58,12 @@ export function MainLayout() {
       description: 'Espacios físicos de la clínica',
     },
     {
+      to: '/medicos',
+      label: 'Médicos',
+      icon: Stethoscope,
+      description: 'Directorio y horarios de disponibilidad',
+    },
+    {
       to: '/expediente',
       label: 'Expediente Clínico',
       icon: FileText,
@@ -73,7 +79,7 @@ export function MainLayout() {
       to: '/administracion/marca',
       label: 'Administración',
       icon: Settings,
-      description: 'Médicos, horarios y ajustes',
+      description: 'Marca de la clínica y ajustes',
       adminOnly: true,
     },
   ];
