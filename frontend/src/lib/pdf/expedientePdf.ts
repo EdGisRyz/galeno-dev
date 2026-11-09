@@ -84,9 +84,10 @@ export interface DatosReceta {
   medico: Medico | undefined;
   paciente: Paciente;
   prescripcion: Prescription;
+  /** Diagnósticos del paciente: se listan los activos en el campo "Diagnóstico" de la receta. */
+  diagnosticos: Diagnostico[];
 }
 
-const ANCHO_PAGINA = 210;
 const COLOR_PRIMARIO: [number, number, number] = [10, 77, 104]; // #0A4D68
 const COLOR_ACENTO: [number, number, number] = [6, 182, 212]; // #06B6D4
 const COLOR_ACENTO_CLARO: [number, number, number] = [136, 189, 220]; // #88BDDC
@@ -94,40 +95,50 @@ const COLOR_ACENTO_CLARO: [number, number, number] = [136, 189, 220]; // #88BDDC
 /**
  * Genera y descarga la receta de una prescripción individual con formato de documento clínico
  * (encabezado del establecimiento, datos del paciente, cuerpo de la prescripción y firma del
- * médico — NOM-004: contenido mínimo). No incluye franja de contacto (teléfono/domicilio/redes):
- * la organización real no tiene esos campos en el backend y no se inventan (plan sección 2,
- * guardarraíl 4).
+ * médico — NOM-004: contenido mínimo). Horizontal para aprovechar el ancho en vez de dejar la
+ * mitad inferior de una hoja vertical en blanco. No incluye franja de contacto
+ * (teléfono/domicilio/redes): la organización real no tiene esos campos en el backend y no se
+ * inventan (plan sección 2, guardarraíl 4).
  */
-export function descargarRecetaPdf({ organizacion, medico, paciente, prescripcion }: DatosReceta) {
-  const doc = new jsPDF();
+export function descargarRecetaPdf({
+  organizacion,
+  medico,
+  paciente,
+  prescripcion,
+  diagnosticos,
+}: DatosReceta) {
+  const doc = new jsPDF({ orientation: 'landscape' });
+  const anchoPagina = doc.internal.pageSize.getWidth();
+  const anchoUtil = anchoPagina - MARGEN * 2;
 
   // Encabezado: franja de color con el establecimiento, el médico y su cédula.
   doc.setFillColor(...COLOR_PRIMARIO);
-  doc.rect(0, 0, ANCHO_PAGINA, 34, 'F');
+  doc.rect(0, 0, anchoPagina, 30, 'F');
   doc.setFillColor(...COLOR_ACENTO);
-  doc.rect(0, 34, ANCHO_PAGINA, 3, 'F');
+  doc.rect(0, 30, anchoPagina, 3, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text(organizacion.nombre, MARGEN, 15);
+  doc.text(organizacion.nombre, MARGEN, 13);
 
   doc.setTextColor(...COLOR_ACENTO_CLARO);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
-  doc.text(nombreYEspecialidad(medico), MARGEN, 23);
+  doc.text(nombreYEspecialidad(medico), MARGEN, 21);
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(9);
   const textoCedula = `Cédula Profesional: ${medico?.cedula || '—'}`;
-  doc.text(textoCedula, ANCHO_PAGINA - MARGEN - doc.getTextWidth(textoCedula), 13);
+  doc.text(textoCedula, anchoPagina - MARGEN - doc.getTextWidth(textoCedula), 11);
 
   doc.setTextColor(0, 0, 0);
 
-  // Datos del paciente, a dos columnas (igual que el resto de la ficha: nunca se deja un campo en
-  // blanco esperando que alguien lo complete a mano, se imprime lo que ya se conoce).
-  let y = 50;
-  const colDerecha = MARGEN + ANCHO_UTIL / 2 + 6;
+  // Datos del paciente: nunca se deja un campo en blanco esperando que alguien lo complete a
+  // mano, se imprime lo que ya se conoce. El diagnóstico lista los diagnósticos ACTIVOS del
+  // paciente (Prescription no tiene un vínculo directo a un diagnóstico puntual).
+  let y = 44;
+  const anchoCol = anchoUtil / 3;
 
   const campo = (label: string, valor: string, x: number, yPos: number) => {
     doc.setFont('helvetica', 'bold');
@@ -138,14 +149,25 @@ export function descargarRecetaPdf({ organizacion, medico, paciente, prescripcio
   };
 
   campo('Paciente:', paciente.nombre, MARGEN, y);
-  campo('Edad:', calcularEdad(paciente.fechaNacimiento), colDerecha, y);
+  campo('Edad:', calcularEdad(paciente.fechaNacimiento), MARGEN + anchoCol, y);
+  campo('Fecha:', new Date().toLocaleDateString('es-MX'), MARGEN + anchoCol * 2, y);
   y += 8;
-  campo('Diagnóstico:', '—', MARGEN, y);
-  campo('Fecha:', new Date().toLocaleDateString('es-MX'), colDerecha, y);
-  y += 6;
+
+  const textoDiagnostico =
+    diagnosticos.filter((d) => d.estado === 'ACTIVO').map((d) => d.descripcion).join(', ') || '—';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Diagnóstico:', MARGEN, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(
+    doc.splitTextToSize(textoDiagnostico, anchoUtil - doc.getTextWidth('Diagnóstico:') - 3),
+    MARGEN + doc.getTextWidth('Diagnóstico:') + 3,
+    y,
+  );
+  y += 10;
 
   doc.setDrawColor(203, 213, 225);
-  doc.line(MARGEN, y, MARGEN + ANCHO_UTIL, y);
+  doc.line(MARGEN, y, MARGEN + anchoUtil, y);
   y += 14;
 
   // Cuerpo de la receta: el espacio que en un talonario queda en blanco para escribir a mano.
@@ -182,7 +204,7 @@ export function descargarRecetaPdf({ organizacion, medico, paciente, prescripcio
     doc.setFontSize(9);
     doc.text('Instrucciones', MARGEN + SANGRIA, y + 4);
     doc.setFont('helvetica', 'normal');
-    const lineas = doc.splitTextToSize(prescripcion.instrucciones, ANCHO_UTIL - SANGRIA);
+    const lineas = doc.splitTextToSize(prescripcion.instrucciones, anchoUtil - SANGRIA);
     doc.text(lineas, MARGEN + SANGRIA, y + 9);
   }
 
@@ -200,7 +222,7 @@ export function descargarRecetaPdf({ organizacion, medico, paciente, prescripcio
   // Franja inferior de cierre, puramente decorativa (sin datos de contacto inventados).
   doc.setFillColor(...COLOR_ACENTO_CLARO);
   const altoPagina = doc.internal.pageSize.getHeight();
-  doc.rect(0, altoPagina - 8, ANCHO_PAGINA, 8, 'F');
+  doc.rect(0, altoPagina - 8, anchoPagina, 8, 'F');
 
   doc.save(`receta-${paciente.nombre.replace(/\s+/g, '-')}-${prescripcion.id}.pdf`);
 }

@@ -407,6 +407,7 @@ export function ExpedientePage() {
       medico: medicosPorId.get(prescripcion.medico_id),
       paciente: pacienteSeleccionado,
       prescripcion,
+      diagnosticos,
     });
   };
 
