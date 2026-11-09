@@ -25,9 +25,12 @@ import {
   Alert,
 } from '@/components/ui';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
+import type { Medico } from '@/features/medicos/medicos.types';
+import type { Organizacion } from '@/features/organizaciones/organizaciones.types';
 import type { Diagnostico, TipoDiagnostico, EstadoDiagnostico } from '@/features/expediente/expediente.types';
 import type { SoapNote, Prescription } from '@/types/futuro.types';
 import { useAuthStore } from '@/store/auth.store';
+import { descargarRecetaPdf, descargarExpedientePdf } from '@/lib/pdf/expedientePdf';
 import {
   FileText,
   ClipboardList,
@@ -39,6 +42,7 @@ import {
   RefreshCw,
   Search,
   Ban,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -102,6 +106,8 @@ export function ExpedientePage() {
   const puedeRegistrar = useAuthStore((state) => state.user?.role === 'MEDICO') && Boolean(medicoId);
 
   const rutaPacientes = organizacionId ? `/organizaciones/${organizacionId}/pacientes` : null;
+  const rutaMedicos = organizacionId ? `/organizaciones/${organizacionId}/medicos` : null;
+  const rutaOrganizacion = organizacionId ? `/organizaciones/${organizacionId}` : null;
 
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [isLoadingPacientes, setIsLoadingPacientes] = useState(() => rutaPacientes !== null);
@@ -110,6 +116,11 @@ export function ExpedientePage() {
   );
   const [selectedPacienteId, setSelectedPacienteId] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('soap');
+
+  // Médico y organización son datos reales: se usan para mostrar quién firma cada nota/receta
+  // (NOM-004) y para los datos del establecimiento en el PDF.
+  const [medicos, setMedicos] = useState<Medico[]>([]);
+  const [organizacion, setOrganizacion] = useState<Organizacion | null>(null);
 
   const [soapNotes, setSoapNotes] = useState<SoapNote[]>([]);
   const [diagnosticos, setDiagnosticos] = useState<Diagnostico[]>([]);
@@ -134,6 +145,24 @@ export function ExpedientePage() {
       })
       .finally(() => setIsLoadingPacientes(false));
   }, [rutaPacientes]);
+
+  useEffect(() => {
+    if (!rutaMedicos) return;
+    api
+      .get<Medico[]>(rutaMedicos)
+      .then((res) => setMedicos(res.data))
+      .catch((err) => console.error('Error al cargar médicos:', resumenDeErrorHttp(err)));
+  }, [rutaMedicos]);
+
+  useEffect(() => {
+    if (!rutaOrganizacion) return;
+    api
+      .get<Organizacion>(rutaOrganizacion)
+      .then((res) => setOrganizacion(res.data))
+      .catch((err) => console.error('Error al cargar la organización:', resumenDeErrorHttp(err)));
+  }, [rutaOrganizacion]);
+
+  const medicosPorId = useMemo(() => new Map(medicos.map((m) => [m.id, m])), [medicos]);
 
   const loadExpediente = (pacienteId: string) => {
     return Promise.all([
@@ -371,6 +400,28 @@ export function ExpedientePage() {
     }
   };
 
+  const handleDescargarReceta = (prescripcion: Prescription) => {
+    if (!organizacion || !pacienteSeleccionado) return;
+    descargarRecetaPdf({
+      organizacion,
+      medico: medicosPorId.get(prescripcion.medico_id),
+      paciente: pacienteSeleccionado,
+      prescripcion,
+    });
+  };
+
+  const handleDescargarExpediente = () => {
+    if (!organizacion || !pacienteSeleccionado) return;
+    descargarExpedientePdf({
+      organizacion,
+      paciente: pacienteSeleccionado,
+      medicosPorId,
+      soapNotes,
+      diagnosticos,
+      prescripciones,
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -421,27 +472,38 @@ export function ExpedientePage() {
           {/* ─────────────────────────────────────────
               PESTAÑAS
               ───────────────────────────────────────── */}
-          <div className="flex items-center gap-1 border-b border-[#E2E8F0]">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors',
-                    isActive
-                      ? 'border-[#0A4D68] text-[#0A4D68]'
-                      : 'border-transparent text-[#64748B] hover:text-[#0B1C30]',
-                  )}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  {tab.label}
-                </button>
-              );
-            })}
+          <div className="flex items-center justify-between border-b border-[#E2E8F0]">
+            <div className="flex items-center gap-1">
+              {TABS.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setActiveTab(tab.key)}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors',
+                      isActive
+                        ? 'border-[#0A4D68] text-[#0A4D68]'
+                        : 'border-transparent text-[#64748B] hover:text-[#0B1C30]',
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDescargarExpediente}
+              disabled={!organizacion}
+              leftIcon={<Download className="w-3.5 h-3.5" />}
+            >
+              Descargar expediente (PDF)
+            </Button>
           </div>
 
           {expedienteError ? (
@@ -496,9 +558,17 @@ export function ExpedientePage() {
                       <Card key={n.id}>
                         <CardContent className="p-5 space-y-3">
                           <div className="flex items-center justify-between">
-                            <span className="text-xs text-[#64748B]">
-                              {new Date(n.created_at).toLocaleString('es-MX')}
-                            </span>
+                            <div>
+                              <span className="text-xs text-[#64748B] block">
+                                {new Date(n.created_at).toLocaleString('es-MX')}
+                              </span>
+                              {/* NOM-004: toda nota identifica al médico que la generó. */}
+                              <span className="text-[11px] text-[#0A4D68] font-semibold">
+                                {medicosPorId.get(n.medico_id)?.nombre || 'Médico no identificado'}
+                                {medicosPorId.get(n.medico_id)?.cedula &&
+                                  ` · Céd. ${medicosPorId.get(n.medico_id)?.cedula}`}
+                              </span>
+                            </div>
                             <div className="flex items-center gap-2">
                               <Badge variant={n.inmutable ? 'default' : 'success'} showDot>
                                 {n.inmutable ? 'Cerrada' : 'Abierta'}
@@ -588,7 +658,8 @@ export function ExpedientePage() {
                               {n.correcciones.map((c) => (
                                 <p key={c.id} className="text-xs text-[#41484D]">
                                   <span className="text-[#94A3B8]">
-                                    {new Date(c.created_at).toLocaleString('es-MX')}:
+                                    {new Date(c.created_at).toLocaleString('es-MX')} ·{' '}
+                                    {medicosPorId.get(c.medico_id)?.nombre || 'Médico no identificado'}:
                                   </span>{' '}
                                   {c.texto}
                                 </p>
@@ -689,8 +760,9 @@ export function ExpedientePage() {
                         <TableHead>Medicamento</TableHead>
                         <TableHead>Dosis</TableHead>
                         <TableHead>Frecuencia / Duración</TableHead>
+                        <TableHead>Médico</TableHead>
                         <TableHead>Estado</TableHead>
-                        {puedeRegistrar && <TableHead className="text-right">Acciones</TableHead>}
+                        <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -719,13 +791,27 @@ export function ExpedientePage() {
                               </span>
                             </TableCell>
                             <TableCell>
+                              <span className="text-xs text-[#41484D]">
+                                {medicosPorId.get(p.medico_id)?.nombre || 'No identificado'}
+                              </span>
+                            </TableCell>
+                            <TableCell>
                               <Badge variant={p.activo ? 'success' : 'default'} showDot>
                                 {p.activo ? 'Activa' : 'Suspendida'}
                               </Badge>
                             </TableCell>
-                            {puedeRegistrar && (
-                              <TableCell className="text-right">
-                                {p.activo && (
+                            <TableCell className="text-right">
+                              <div className="inline-flex items-center gap-1.5">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDescargarReceta(p)}
+                                  disabled={!organizacion}
+                                  leftIcon={<Download className="w-3.5 h-3.5" />}
+                                >
+                                  Receta
+                                </Button>
+                                {puedeRegistrar && p.activo && (
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -736,13 +822,13 @@ export function ExpedientePage() {
                                     Suspender
                                   </Button>
                                 )}
-                              </TableCell>
-                            )}
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={puedeRegistrar ? 5 : 4} className="text-center py-8 text-[#94A3B8]">
+                          <TableCell colSpan={6} className="text-center py-8 text-[#94A3B8]">
                             Este paciente todavía no tiene prescripciones registradas.
                           </TableCell>
                         </TableRow>

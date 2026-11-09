@@ -11,6 +11,7 @@ import {
   mockCie10Catalog,
   mockDiagnoses,
   mockPrescriptions,
+  mockOrganization,
 } from './mockData';
 import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
@@ -100,6 +101,36 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
           accessToken: fakeToken,
           user: fakePayload,
         },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // ORGANIZACIÓN (contrato real: GET /organizaciones/{id})
+    // ─────────────────────────────────────────
+    // Ruta plana y exacta: no debe atrapar las rutas anidadas de abajo (marca, pacientes,
+    // consultorios, médicos) que también cuelgan de `/organizaciones/{id}/...`.
+    const organizacionPorId = url.match(/^\/organizaciones\/([^/]+)\/?$/);
+
+    if (organizacionPorId && method === 'get') {
+      await delay();
+      const id = organizacionPorId[1];
+      if (id !== mockOrganization.id) {
+        config.adapter = async () => ({
+          data: { message: 'Organización no encontrada' },
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+      config.adapter = async () => ({
+        data: mockOrganization,
         status: 200,
         statusText: 'OK',
         headers: {},

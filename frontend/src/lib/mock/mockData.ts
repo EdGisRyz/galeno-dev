@@ -13,7 +13,7 @@ export const mockOrganization: Organizacion = {
   nombre: 'Clínica Médica San Rafael',
   plan: 'CLINICA',
   activo: true,
-  created_at: new Date('2026-01-01').toISOString(),
+  createdAt: new Date('2026-01-01').toISOString(),
 };
 
 export const mockUsers: Usuario[] = [
