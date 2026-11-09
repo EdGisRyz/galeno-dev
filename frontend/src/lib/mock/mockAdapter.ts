@@ -16,7 +16,8 @@ import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { Medico, HorarioMedico } from '@/features/medicos/medicos.types';
-import type { MarcaClinica, PatientIdentification, SoapNote } from '@/types/futuro.types';
+import type { Diagnostico } from '@/features/expediente/expediente.types';
+import type { MarcaClinica, PatientIdentification, SoapNote, Prescription } from '@/types/futuro.types';
 
 type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 type MedicoMock = Medico & { duracionConsultaMin?: number };
@@ -55,6 +56,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   const horarios: HorarioMedico[] = [...mockDoctorSchedules];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
+  const diagnosticos: Diagnostico[] = [...mockDiagnoses];
+  const prescripciones: Prescription[] = [...mockPrescriptions];
   // Marca por organización: sin contrato real, cada tenant parte de los mismos valores por
   // defecto hasta que el admin los personalice (no existe fila en ninguna tabla real).
   const marcasPorOrganizacion = new Map<string, MarcaClinica>();
@@ -710,12 +713,21 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // ─────────────────────────────────────────
-    // EXPEDIENTE CLINICO & SOAP
+    // EXPEDIENTE CLINICO & SOAP (sin contrato real: NOM-004/NOM-024, declarado fuera de alcance de
+    // V1 — ver `futuro.types.ts`. Las rutas filtran por `paciente_id` en query string porque la
+    // pantalla siempre entra desde un paciente elegido, nunca lista notas de toda la clínica.)
     // ─────────────────────────────────────────
-    if (url.includes('/expediente/notas') && method === 'get') {
+    if (
+      url.includes('/expediente/notas') &&
+      method === 'get' &&
+      !url.includes('/cerrar') &&
+      !url.includes('/correccion')
+    ) {
       await delay();
+      const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
+      const filtradas = pacienteId ? soapNotes.filter((n) => n.paciente_id === pacienteId) : soapNotes;
       config.adapter = async () => ({
-        data: [...soapNotes],
+        data: [...filtradas],
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -828,11 +840,17 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    // Diagnósticos y Prescripciones
+    // ─────────────────────────────────────────
+    // DIAGNÓSTICOS (sin contrato real, mismo alcance que Notas SOAP)
+    // ─────────────────────────────────────────
     if (url.includes('/expediente/diagnosticos') && method === 'get') {
       await delay();
+      const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
+      const filtrados = pacienteId
+        ? diagnosticos.filter((d) => d.paciente_id === pacienteId)
+        : diagnosticos;
       config.adapter = async () => ({
-        data: mockDiagnoses,
+        data: [...filtrados],
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -841,10 +859,82 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/expediente/prescripciones') && method === 'get') {
+    if (url.includes('/expediente/diagnosticos') && method === 'post') {
       await delay();
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const newDiagnostico: Diagnostico = {
+        id: `diag-${Date.now()}`,
+        estado: 'ACTIVO',
+        ...body,
+        created_at: new Date().toISOString(),
+      };
+      diagnosticos.unshift(newDiagnostico);
       config.adapter = async () => ({
-        data: mockPrescriptions,
+        data: newDiagnostico,
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // PRESCRIPCIONES (sin contrato real, mismo alcance que Notas SOAP)
+    // ─────────────────────────────────────────
+    if (
+      url.includes('/expediente/prescripciones') &&
+      method === 'get' &&
+      !url.includes('/desactivar')
+    ) {
+      await delay();
+      const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
+      const filtradas = pacienteId
+        ? prescripciones.filter((p) => p.paciente_id === pacienteId)
+        : prescripciones;
+      config.adapter = async () => ({
+        data: [...filtradas],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (
+      url.includes('/expediente/prescripciones') &&
+      method === 'post' &&
+      !url.includes('/desactivar')
+    ) {
+      await delay();
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const newPrescripcion: Prescription = {
+        id: `rx-${Date.now()}`,
+        activo: true,
+        ...body,
+        created_at: new Date().toISOString(),
+      };
+      prescripciones.unshift(newPrescripcion);
+      config.adapter = async () => ({
+        data: newPrescripcion,
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (url.includes('/expediente/prescripciones/') && url.includes('/desactivar') && method === 'post') {
+      await delay();
+      const match = url.match(/\/expediente\/prescripciones\/([^/]+)\/desactivar/);
+      const id = match ? match[1] : '';
+      const idx = prescripciones.findIndex((p) => p.id === id);
+      if (idx !== -1) prescripciones[idx] = { ...prescripciones[idx], activo: false };
+
+      config.adapter = async () => ({
+        data: prescripciones[idx],
         status: 200,
         statusText: 'OK',
         headers: {},
