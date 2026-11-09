@@ -25,11 +25,27 @@ interface JsPdfConUltimaTabla extends jsPDF {
   lastAutoTable?: { finalY: number };
 }
 
+function nombreYEspecialidad(medico: Medico | undefined): string {
+  if (!medico) return 'Médico no identificado';
+  return medico.especialidad ? `${medico.nombre} · ${medico.especialidad}` : medico.nombre;
+}
+
 function identificacionMedico(medico: Medico | undefined): string {
   if (!medico) return 'Médico no identificado';
-  const especialidad = medico.especialidad ? ` · ${medico.especialidad}` : '';
   const cedula = medico.cedula ? ` · Céd. Prof. ${medico.cedula}` : '';
-  return `${medico.nombre}${especialidad}${cedula}`;
+  return `${nombreYEspecialidad(medico)}${cedula}`;
+}
+
+function calcularEdad(fechaNacimiento?: string | null): string {
+  if (!fechaNacimiento) return '—';
+  const nacimiento = new Date(fechaNacimiento);
+  const hoy = new Date();
+  let edad = hoy.getFullYear() - nacimiento.getFullYear();
+  const diasAunNoCumplidos =
+    hoy.getMonth() < nacimiento.getMonth() ||
+    (hoy.getMonth() === nacimiento.getMonth() && hoy.getDate() < nacimiento.getDate());
+  if (diasAunNoCumplidos) edad -= 1;
+  return `${edad} años`;
 }
 
 function encabezadoEstablecimiento(doc: jsPDF, organizacion: Organizacion, titulo: string) {
@@ -70,65 +86,121 @@ export interface DatosReceta {
   prescripcion: Prescription;
 }
 
-/** Genera y descarga la receta de una prescripción individual (NOM-004: contenido mínimo). */
+const ANCHO_PAGINA = 210;
+const COLOR_PRIMARIO: [number, number, number] = [10, 77, 104]; // #0A4D68
+const COLOR_ACENTO: [number, number, number] = [6, 182, 212]; // #06B6D4
+const COLOR_ACENTO_CLARO: [number, number, number] = [136, 189, 220]; // #88BDDC
+
+/**
+ * Genera y descarga la receta de una prescripción individual con formato de documento clínico
+ * (encabezado del establecimiento, datos del paciente, cuerpo de la prescripción y firma del
+ * médico — NOM-004: contenido mínimo). No incluye franja de contacto (teléfono/domicilio/redes):
+ * la organización real no tiene esos campos en el backend y no se inventan (plan sección 2,
+ * guardarraíl 4).
+ */
 export function descargarRecetaPdf({ organizacion, medico, paciente, prescripcion }: DatosReceta) {
   const doc = new jsPDF();
-  encabezadoEstablecimiento(doc, organizacion, 'Receta médica');
 
-  let y = 40;
-  doc.setFontSize(10);
-  doc.text(`Paciente: ${paciente.nombre}`, MARGEN, y);
-  y += 6;
-  if (paciente.fechaNacimiento) {
-    doc.text(`Fecha de nacimiento: ${paciente.fechaNacimiento}`, MARGEN, y);
-    y += 6;
-  }
-  doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-MX')}`, MARGEN, y);
-  y += 10;
+  // Encabezado: franja de color con el establecimiento, el médico y su cédula.
+  doc.setFillColor(...COLOR_PRIMARIO);
+  doc.rect(0, 0, ANCHO_PAGINA, 34, 'F');
+  doc.setFillColor(...COLOR_ACENTO);
+  doc.rect(0, 34, ANCHO_PAGINA, 3, 'F');
 
-  doc.setDrawColor(226, 232, 240);
-  doc.line(MARGEN, y, MARGEN + ANCHO_UTIL, y);
-  y += 8;
-
-  doc.setFontSize(12);
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text(prescripcion.medicamento, MARGEN, y);
+  doc.text(organizacion.nombre, MARGEN, 15);
+
+  doc.setTextColor(...COLOR_ACENTO_CLARO);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(nombreYEspecialidad(medico), MARGEN, 23);
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9);
+  const textoCedula = `Cédula Profesional: ${medico?.cedula || '—'}`;
+  doc.text(textoCedula, ANCHO_PAGINA - MARGEN - doc.getTextWidth(textoCedula), 13);
+
+  doc.setTextColor(0, 0, 0);
+
+  // Datos del paciente, a dos columnas (igual que el resto de la ficha: nunca se deja un campo en
+  // blanco esperando que alguien lo complete a mano, se imprime lo que ya se conoce).
+  let y = 50;
+  const colDerecha = MARGEN + ANCHO_UTIL / 2 + 6;
+
+  const campo = (label: string, valor: string, x: number, yPos: number) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(label, x, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(valor, x + doc.getTextWidth(label) + 3, yPos);
+  };
+
+  campo('Paciente:', paciente.nombre, MARGEN, y);
+  campo('Edad:', calcularEdad(paciente.fechaNacimiento), colDerecha, y);
+  y += 8;
+  campo('Diagnóstico:', '—', MARGEN, y);
+  campo('Fecha:', new Date().toLocaleDateString('es-MX'), colDerecha, y);
+  y += 6;
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(MARGEN, y, MARGEN + ANCHO_UTIL, y);
+  y += 14;
+
+  // Cuerpo de la receta: el espacio que en un talonario queda en blanco para escribir a mano.
+  // "Rx" en texto plano: las fuentes estándar de jsPDF (WinAnsi) no incluyen el glifo ℞ y lo
+  // sustituyen por un carácter de reemplazo.
+  const SANGRIA = 14;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('Rx', MARGEN, y);
+  doc.text(prescripcion.medicamento, MARGEN + SANGRIA, y);
   if (prescripcion.nombre_comercial) {
-    // El ancho se mide con la fuente aún en negritas/12pt: medirlo después de cambiar a
-    // cursiva/10pt subestima el espacio real que ocupó "medicamento" y monta el texto encima.
     const anchoMedicamento = doc.getTextWidth(prescripcion.medicamento);
     doc.setFont('helvetica', 'italic');
-    doc.setFontSize(10);
-    doc.text(`(${prescripcion.nombre_comercial})`, MARGEN + anchoMedicamento + 3, y);
+    doc.setFontSize(11);
+    doc.text(`(${prescripcion.nombre_comercial})`, MARGEN + SANGRIA + anchoMedicamento + 3, y);
   }
-  y += 8;
+  y += 10;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(`Dosis: ${prescripcion.dosis}`, MARGEN, y);
+  doc.text(`Dosis: ${prescripcion.dosis}`, MARGEN + SANGRIA, y);
   y += 6;
   if (prescripcion.via_administracion) {
-    doc.text(`Vía de administración: ${prescripcion.via_administracion}`, MARGEN, y);
+    doc.text(`Vía de administración: ${prescripcion.via_administracion}`, MARGEN + SANGRIA, y);
     y += 6;
   }
-  doc.text(`Frecuencia: ${prescripcion.frecuencia}`, MARGEN, y);
+  doc.text(`Frecuencia: ${prescripcion.frecuencia}`, MARGEN + SANGRIA, y);
   y += 6;
-  doc.text(`Duración del tratamiento: ${prescripcion.duracion}`, MARGEN, y);
+  doc.text(`Duración del tratamiento: ${prescripcion.duracion}`, MARGEN + SANGRIA, y);
   y += 6;
 
   if (prescripcion.instrucciones) {
-    escribirParrafo(doc, 'Instrucciones', prescripcion.instrucciones, y + 4);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Instrucciones', MARGEN + SANGRIA, y + 4);
+    doc.setFont('helvetica', 'normal');
+    const lineas = doc.splitTextToSize(prescripcion.instrucciones, ANCHO_UTIL - SANGRIA);
+    doc.text(lineas, MARGEN + SANGRIA, y + 9);
   }
 
   // Firma e identificación del médico (NOM-004): nunca al pie como texto suelto, siempre sobre
   // una línea de firma explícita.
-  const yFirma = doc.internal.pageSize.getHeight() - 40;
+  const yFirma = doc.internal.pageSize.getHeight() - 30;
   doc.setDrawColor(11, 28, 48);
   doc.line(MARGEN, yFirma, MARGEN + 80, yFirma);
   doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
   doc.text('Firma del médico', MARGEN, yFirma + 5);
   doc.setFont('helvetica', 'bold');
   doc.text(identificacionMedico(medico), MARGEN, yFirma + 12);
+
+  // Franja inferior de cierre, puramente decorativa (sin datos de contacto inventados).
+  doc.setFillColor(...COLOR_ACENTO_CLARO);
+  const altoPagina = doc.internal.pageSize.getHeight();
+  doc.rect(0, altoPagina - 8, ANCHO_PAGINA, 8, 'F');
 
   doc.save(`receta-${paciente.nombre.replace(/\s+/g, '-')}-${prescripcion.id}.pdf`);
 }
@@ -208,8 +280,7 @@ export function descargarExpedientePdf({
       y += 5;
       doc.setFont('helvetica', 'normal');
       for (const c of nota.correcciones) {
-        const texto = `${new Date(c.created_at).toLocaleDateString('es-MX')} (${identificacionMedico(medicosPorId.get(c.medico_id))}): ${c.texto}`;
-        const lineas = doc.splitTextToSize(texto, ANCHO_UTIL);
+        const lineas = doc.splitTextToSize(`Aclaración: ${c.texto}`, ANCHO_UTIL);
         doc.text(lineas, MARGEN, y);
         y += lineas.length * 4.5;
       }
