@@ -169,11 +169,11 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       await delay();
       const id = medicosPublicos[1];
       const medicos = mockDoctors
-        .filter((m) => m.organizacion_id === id && m.activo)
+        .filter((m) => m.organizacionId === id && m.activo)
         .map((m) => ({
           ...m,
-          horarios: mockDoctorSchedules.filter((h) => h.medico_id === m.id),
-          consultorio: mockClinicRooms.find((c) => c.id === m.consultorio_id)?.nombre,
+          horarios: mockDoctorSchedules.filter((h) => h.medicoId === m.id),
+          consultorio: mockClinicRooms.find((c) => c.id === m.consultorioId)?.nombre,
         }));
       config.adapter = async () => ({
         data: medicos,

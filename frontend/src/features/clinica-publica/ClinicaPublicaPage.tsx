@@ -33,21 +33,21 @@ function iniciales(nombre: string): string {
 
 /** Agrupa horarios consecutivos con el mismo rango de hora en un solo renglón ("Lunes a Viernes"). */
 function agruparHorarios(horarios: HorarioMedico[]): string[] {
-  const ordenados = [...horarios].sort((a, b) => a.dia_semana - b.dia_semana);
+  const ordenados = [...horarios].sort((a, b) => a.diaSemana - b.diaSemana);
   const grupos: { dias: number[]; inicio: string; fin: string }[] = [];
 
   for (const h of ordenados) {
     const ultimo = grupos[grupos.length - 1];
     const esConsecutivo =
       ultimo &&
-      ultimo.inicio === h.hora_inicio &&
-      ultimo.fin === h.hora_fin &&
-      h.dia_semana === ultimo.dias[ultimo.dias.length - 1] + 1;
+      ultimo.inicio === h.horaInicio &&
+      ultimo.fin === h.horaFin &&
+      h.diaSemana === ultimo.dias[ultimo.dias.length - 1] + 1;
 
     if (esConsecutivo) {
-      ultimo.dias.push(h.dia_semana);
+      ultimo.dias.push(h.diaSemana);
     } else {
-      grupos.push({ dias: [h.dia_semana], inicio: h.hora_inicio, fin: h.hora_fin });
+      grupos.push({ dias: [h.diaSemana], inicio: h.horaInicio, fin: h.horaFin });
     }
   }
 
