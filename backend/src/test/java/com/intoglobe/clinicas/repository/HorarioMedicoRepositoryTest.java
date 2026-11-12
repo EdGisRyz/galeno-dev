@@ -286,30 +286,27 @@ class HorarioMedicoRepositoryTest {
     }
 
     /**
-     * V1 <em>no</em> valida que {@code hora_inicio < hora_fin}: el único CHECK del
-     * rango horario es la duración y el día. El test documenta que un rango
-     * invertido se guarda tal cual, y que por tanto la validación pertenece a la
-     * capa de aplicación (servicio/DTO) y no al esquema.
+     * V5 agregó `horario_medico_rango_check`, así que un bloque invertido ya no puede existir ni
+     * escribiendo por fuera del servicio.
+     *
+     * Antes de esa migración esta prueba fijaba lo contrario: que la fila se guardaba tal cual y
+     * que la validación pertenecía solo a la capa de aplicación. El motivo de fondo es que un rango
+     * invertido no se superpone con ningún otro bloque y desactivaría la validación de
+     * solapamientos, que es la regla siguiente en importancia.
      */
     @Test
-    @DisplayName("la base acepta un rango invertido: la validación es de aplicación, no de esquema")
-    void save_shouldStoreInvertedRangeBecauseSchemaDoesNotValidateIt() {
+    @DisplayName("la base rechaza un rango invertido: el CHECK vive en el esquema")
+    void save_shouldRejectInvertedRangeBecauseSchemaValidatesIt() {
         var medico = persistirMedico("Dr. Rango Invertido");
         var invertido = new HorarioMedico(medico, LUNES, LocalTime.of(15, 0), LocalTime.of(9, 0),
                 TREINTA_MINUTOS);
 
         entityManager.persist(invertido);
-        entityManager.flush();
-        UUID id = invertido.getId();
-        entityManager.clear();
 
-        var encontrado = horarioMedicoRepository.findById(id);
-
-        assertThat(encontrado)
-                .as("sin CHECK de rango horario en V1, la fila invertida debe persistirse")
-                .isPresent();
-        assertThat(encontrado.orElseThrow().getHoraInicio()).isEqualTo(LocalTime.of(15, 0));
-        assertThat(encontrado.orElseThrow().getHoraFin()).isEqualTo(LocalTime.of(9, 0));
+        assertThatThrownBy(() -> entityManager.flush())
+                .as("horario_medico_rango_check impide un bloque invertido")
+                .isInstanceOf(jakarta.persistence.PersistenceException.class)
+                .hasMessageContaining("horario_medico_rango_check");
     }
 
     /**
