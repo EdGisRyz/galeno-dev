@@ -192,6 +192,29 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // ─────────────────────────────────────────
+    // ONBOARDING · REGISTRO PÚBLICO DE CLÍNICA
+    // ─────────────────────────────────────────
+    // Sin contrato real: `POST /api/v1/organizaciones` del backend está bloqueado a propósito
+    // (exige un token ya autenticado y aun así responde 403 hasta el onboarding de Sprint 2 —
+    // ver `OrganizacionController`). Esta ruta es exclusiva del mock para poder dibujar la
+    // pantalla; no existe en el backend real y nunca debe confundirse con la colección.
+    if (url === '/onboarding/registro-clinica' && method === 'post') {
+      await delay(400);
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      config.adapter = async () => ({
+        data: {
+          organizacionId: `org-${Date.now()}`,
+          nombreClinica: body.nombreClinica,
+        },
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
     // PACIENTES
     // ─────────────────────────────────────────
     // Las rutas replican el contrato del backend: la colección cuelga de la organización dueña y
