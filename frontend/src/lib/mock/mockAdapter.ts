@@ -5,6 +5,7 @@ import {
   mockDoctors,
   mockDoctorSchedules,
   mockClinicRooms,
+  mockOrganization,
   mockAppointments,
   mockPayments,
   mockSoapNotes,
@@ -16,7 +17,8 @@ import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { Medico, HorarioMedico } from '@/features/medicos/medicos.types';
-import type { MarcaClinica, PatientIdentification, SoapNote } from '@/types/futuro.types';
+import type { Diagnostico } from '@/features/expediente/expediente.types';
+import type { MarcaClinica, PatientIdentification, SoapNote, Prescription } from '@/types/futuro.types';
 
 type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 type MedicoMock = Medico & { duracionConsultaMin?: number };
@@ -55,6 +57,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   const horarios: HorarioMedico[] = [...mockDoctorSchedules];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
+  const diagnosticos: Diagnostico[] = [...mockDiagnoses];
+  const prescripciones: Prescription[] = [...mockPrescriptions];
   // Marca por organización: sin contrato real, cada tenant parte de los mismos valores por
   // defecto hasta que el admin los personalice (no existe fila en ninguna tabla real).
   const marcasPorOrganizacion = new Map<string, MarcaClinica>();
@@ -106,6 +110,82 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // ─────────────────────────────────────────
+    // ORGANIZACIÓN (contrato real: GET /organizaciones/{id})
+    // ─────────────────────────────────────────
+    // Ruta plana y exacta: no debe atrapar las rutas anidadas de abajo (marca, pacientes,
+    // consultorios, médicos) que también cuelgan de `/organizaciones/{id}/...`.
+    const organizacionPorId = url.match(/^\/organizaciones\/([^/]+)\/?$/);
+
+    if (organizacionPorId && method === 'get') {
+      await delay();
+      const id = organizacionPorId[1];
+      if (id !== mockOrganization.id) {
+        config.adapter = async () => ({
+          data: { message: 'Organización no encontrada' },
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+      config.adapter = async () => ({
+        data: mockOrganization,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // DIRECTORIO PÚBLICO DE CLÍNICA
+    // ─────────────────────────────────────────
+    // Sin contrato real: ningún GET de organizaciones o médicos es público en el backend (toda
+    // la cadena de filtros exige un token válido, igual que /organizaciones). El prefijo
+    // /publico/ distingue estas rutas de sus equivalentes reales autenticadas; no existen en el
+    // backend y no deben confundirse con la colección de /organizaciones/{id}/medicos.
+    const clinicaPublica = url.match(/^\/publico\/clinicas\/([^/]+)\/?$/);
+    const medicosPublicos = url.match(/^\/publico\/clinicas\/([^/]+)\/medicos\/?$/);
+
+    if (clinicaPublica && method === 'get') {
+      await delay();
+      const id = clinicaPublica[1];
+      const organizacion = id === mockOrganization.id ? mockOrganization : null;
+      config.adapter = async () =>
+        organizacion
+          ? { data: organizacion, status: 200, statusText: 'OK', headers: {}, config }
+          : {
+              data: { mensaje: 'Clínica no encontrada' },
+              status: 404,
+              statusText: 'Not Found',
+              headers: {},
+              config,
+            };
+      return config;
+    }
+
+    if (medicosPublicos && method === 'get') {
+      await delay();
+      const id = medicosPublicos[1];
+      const medicos = mockDoctors
+        .filter((m) => m.organizacionId === id && m.activo)
+        .map((m) => ({
+          ...m,
+          horarios: mockDoctorSchedules.filter((h) => h.medicoId === m.id),
+          consultorio: mockClinicRooms.find((c) => c.id === m.consultorioId)?.nombre,
+        }));
+      config.adapter = async () => ({
+        data: medicos,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
     // MARCA DE LA CLÍNICA (personalización, panel de administración)
     // ─────────────────────────────────────────
     // Sin contrato real: `configuracion_tenant` no tiene columnas de marca y ningún GET/PUT de
@@ -144,6 +224,29 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
         data: actualizada,
         status: 200,
         statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // ONBOARDING · REGISTRO PÚBLICO DE CLÍNICA
+    // ─────────────────────────────────────────
+    // Sin contrato real: `POST /api/v1/organizaciones` del backend está bloqueado a propósito
+    // (exige un token ya autenticado y aun así responde 403 hasta el onboarding de Sprint 2 —
+    // ver `OrganizacionController`). Esta ruta es exclusiva del mock para poder dibujar la
+    // pantalla; no existe en el backend real y nunca debe confundirse con la colección.
+    if (url === '/onboarding/registro-clinica' && method === 'post') {
+      await delay(400);
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      config.adapter = async () => ({
+        data: {
+          organizacionId: `org-${Date.now()}`,
+          nombreClinica: body.nombreClinica,
+        },
+        status: 201,
+        statusText: 'Created',
         headers: {},
         config,
       });
@@ -710,12 +813,21 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // ─────────────────────────────────────────
-    // EXPEDIENTE CLINICO & SOAP
+    // EXPEDIENTE CLINICO & SOAP (sin contrato real: NOM-004/NOM-024, declarado fuera de alcance de
+    // V1 — ver `futuro.types.ts`. Las rutas filtran por `paciente_id` en query string porque la
+    // pantalla siempre entra desde un paciente elegido, nunca lista notas de toda la clínica.)
     // ─────────────────────────────────────────
-    if (url.includes('/expediente/notas') && method === 'get') {
+    if (
+      url.includes('/expediente/notas') &&
+      method === 'get' &&
+      !url.includes('/cerrar') &&
+      !url.includes('/correccion')
+    ) {
       await delay();
+      const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
+      const filtradas = pacienteId ? soapNotes.filter((n) => n.paciente_id === pacienteId) : soapNotes;
       config.adapter = async () => ({
-        data: [...soapNotes],
+        data: [...filtradas],
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -828,11 +940,17 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    // Diagnósticos y Prescripciones
+    // ─────────────────────────────────────────
+    // DIAGNÓSTICOS (sin contrato real, mismo alcance que Notas SOAP)
+    // ─────────────────────────────────────────
     if (url.includes('/expediente/diagnosticos') && method === 'get') {
       await delay();
+      const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
+      const filtrados = pacienteId
+        ? diagnosticos.filter((d) => d.paciente_id === pacienteId)
+        : diagnosticos;
       config.adapter = async () => ({
-        data: mockDiagnoses,
+        data: [...filtrados],
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -841,10 +959,82 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/expediente/prescripciones') && method === 'get') {
+    if (url.includes('/expediente/diagnosticos') && method === 'post') {
       await delay();
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const newDiagnostico: Diagnostico = {
+        id: `diag-${Date.now()}`,
+        estado: 'ACTIVO',
+        ...body,
+        created_at: new Date().toISOString(),
+      };
+      diagnosticos.unshift(newDiagnostico);
       config.adapter = async () => ({
-        data: mockPrescriptions,
+        data: newDiagnostico,
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // PRESCRIPCIONES (sin contrato real, mismo alcance que Notas SOAP)
+    // ─────────────────────────────────────────
+    if (
+      url.includes('/expediente/prescripciones') &&
+      method === 'get' &&
+      !url.includes('/desactivar')
+    ) {
+      await delay();
+      const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
+      const filtradas = pacienteId
+        ? prescripciones.filter((p) => p.paciente_id === pacienteId)
+        : prescripciones;
+      config.adapter = async () => ({
+        data: [...filtradas],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (
+      url.includes('/expediente/prescripciones') &&
+      method === 'post' &&
+      !url.includes('/desactivar')
+    ) {
+      await delay();
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const newPrescripcion: Prescription = {
+        id: `rx-${Date.now()}`,
+        activo: true,
+        ...body,
+        created_at: new Date().toISOString(),
+      };
+      prescripciones.unshift(newPrescripcion);
+      config.adapter = async () => ({
+        data: newPrescripcion,
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (url.includes('/expediente/prescripciones/') && url.includes('/desactivar') && method === 'post') {
+      await delay();
+      const match = url.match(/\/expediente\/prescripciones\/([^/]+)\/desactivar/);
+      const id = match ? match[1] : '';
+      const idx = prescripciones.findIndex((p) => p.id === id);
+      if (idx !== -1) prescripciones[idx] = { ...prescripciones[idx], activo: false };
+
+      config.adapter = async () => ({
+        data: prescripciones[idx],
         status: 200,
         statusText: 'OK',
         headers: {},

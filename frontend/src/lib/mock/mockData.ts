@@ -13,7 +13,7 @@ export const mockOrganization: Organizacion = {
   nombre: 'Clínica Médica San Rafael',
   plan: 'CLINICA',
   activo: true,
-  created_at: new Date('2026-01-01').toISOString(),
+  createdAt: new Date('2026-01-01').toISOString(),
 };
 
 export const mockUsers: Usuario[] = [
@@ -282,7 +282,7 @@ export const mockSoapNotes: SoapNote[] = [
         id: 'corr-001',
         nota_evolucion_id: 'note-001',
         medico_id: 'med-001',
-        texto: 'Aclaración: Se indicó no exceder 3 gramos de paracetamol al día.',
+        texto: 'Se indicó no exceder 3 gramos de paracetamol al día.',
         created_at: new Date(Date.now() - 86400000 * 4).toISOString(),
       },
     ],
