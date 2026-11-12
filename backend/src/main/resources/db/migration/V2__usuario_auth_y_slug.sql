@@ -11,14 +11,17 @@
 --      fuente de la que derivar un identificador para filas anteriores. La migración falla si hay
 --      filas, que es el comportamiento correcto: inventar el dato sería peor que detenerse.
 --      Verificado el 2026-11-11: 0 filas en desarrollo y en la base local del equipo.
---      En PostgreSQL el DDL es transaccional, así que un fallo revierte la migración completa.
---      En H2 no lo es: la sentencia que falla deja las anteriores aplicadas y hay que recrear el
---      esquema antes de reintentar. Por eso la precondición se comprueba antes de ejecutarla.
+--      La comprobación no es automática: es una verificación previa (`SELECT count(*) FROM usuario`).
+--      Por eso la primera sentencia es la que puede fallar: si la tabla tiene filas, la migración
+--      se detiene sin haber modificado nada. En PostgreSQL el DDL es transaccional, así que un
+--      fallo revierte todo; en H2 no lo es, y por eso el orden importa: lo que falla va primero.
 
--- 1. Fuera la contraseña, dentro el identificador del servicio de autenticación.
-ALTER TABLE usuario DROP COLUMN password_hash;
-
+-- 1. Dentro el identificador del servicio de autenticación, fuera la contraseña.
+-- El ADD va primero a propósito: es la sentencia que falla si hay filas, así que un fallo no deja
+-- la tabla a medio migrar.
 ALTER TABLE usuario ADD COLUMN auth_user_id UUID NOT NULL;
+
+ALTER TABLE usuario DROP COLUMN password_hash;
 
 -- Único dentro de cada organización, no global: el mismo identificador no se repite en dos
 -- clínicas, pero cada clínica conserva su propio espacio.
@@ -31,7 +34,7 @@ ALTER TABLE usuario ADD CONSTRAINT usuario_auth_user_id_key
 -- global lo impediría sin motivo y obligaría a inventar correos distintos por clínica.
 ALTER TABLE usuario DROP CONSTRAINT usuario_email_key;
 
-ALTER TABLE usuario ADD CONSTRAINT usuario_correo_organizacion_key
+ALTER TABLE usuario ADD CONSTRAINT usuario_organizacion_id_email_key
     UNIQUE (organizacion_id, email);
 
 -- 3. El rol admite al personal de recepción.
