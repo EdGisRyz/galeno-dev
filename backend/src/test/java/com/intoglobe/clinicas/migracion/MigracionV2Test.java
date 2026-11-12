@@ -130,7 +130,7 @@ class MigracionV2Test {
                 .as("el mismo correo en otra clínica es otra cuenta: así lo identifica el servicio")
                 .doesNotThrowAnyException();
 
-        assertThatThrownBy(() -> ejecutar(conexion, insertarUsuario(primera, "compartido@correo.mx", "MEDICO")))
+        assertThatThrownBy(() -> ejecutar(conexion, insertarUsuario(primera, "compartido@correo.mx", "PACIENTE")))
                 .as("repetido dentro de la misma organización es un error")
                 .isInstanceOf(SQLException.class)
                 .satisfies(error -> assertThat(codigoSql(error)).isEqualTo("23505"));
@@ -147,10 +147,10 @@ class MigracionV2Test {
         String segunda = crearOrganizacion(null);
         String identificador = UUID.randomUUID().toString();
 
-        ejecutar(conexion, insertarUsuario(primera, "uno@correo.mx", "ADMIN", identificador));
-        ejecutar(conexion, insertarUsuario(segunda, "dos@correo.mx", "ADMIN", identificador));
+        ejecutar(conexion, insertarUsuario(primera, "uno@correo.mx", "ADMIN", null, identificador));
+        ejecutar(conexion, insertarUsuario(segunda, "dos@correo.mx", "ADMIN", null, identificador));
 
-        assertThatThrownBy(() -> ejecutar(conexion, insertarUsuario(primera, "tres@correo.mx", "ADMIN", identificador)))
+        assertThatThrownBy(() -> ejecutar(conexion, insertarUsuario(primera, "tres@correo.mx", "ADMIN", null, identificador)))
                 .isInstanceOf(SQLException.class)
                 .satisfies(error -> assertThat(codigoSql(error)).isEqualTo("23505"));
     }
@@ -163,15 +163,18 @@ class MigracionV2Test {
     @DisplayName("admite los cuatro roles y sigue rechazando uno inventado")
     void rolDeRecepcionEsAditivo() throws SQLException {
         String organizacion = crearOrganizacion(null);
+        // Desde V3, un usuario con rol MEDICO tiene que apuntar a un médico de su organización.
+        String medico = crearMedico(organizacion, crearConsultorio(organizacion));
 
         for (String rol : List.of("ADMIN", "MEDICO", "PACIENTE", "RECEPCIONISTA")) {
             String correo = rol.toLowerCase() + "@correo.mx";
-            assertThatCode(() -> ejecutar(conexion, insertarUsuario(organizacion, correo, rol)))
+            String medicoId = "MEDICO".equals(rol) ? medico : null;
+            assertThatCode(() -> ejecutar(conexion, insertarUsuario(organizacion, correo, rol, medicoId)))
                     .as("el rol %s tiene que estar admitido", rol)
                     .doesNotThrowAnyException();
         }
 
-        assertThatThrownBy(() -> ejecutar(conexion, insertarUsuario(organizacion, "otro@correo.mx", "BOGUS")))
+        assertThatThrownBy(() -> ejecutar(conexion, insertarUsuario(organizacion, "otro@correo.mx", "BOGUS", null)))
                 .as("la lista de roles sigue siendo cerrada")
                 .isInstanceOf(SQLException.class)
                 .satisfies(error -> assertThat(codigoSql(error)).isEqualTo("23513"));
@@ -247,12 +250,32 @@ class MigracionV2Test {
     }
 
     private String insertarUsuario(String organizacionId, String correo, String rol) {
-        return insertarUsuario(organizacionId, correo, rol, UUID.randomUUID().toString());
+        return insertarUsuario(organizacionId, correo, rol, null, UUID.randomUUID().toString());
     }
 
-    private String insertarUsuario(String organizacionId, String correo, String rol, String authUserId) {
-        return "INSERT INTO usuario (organizacion_id, email, rol, auth_user_id) VALUES ('"
-                + organizacionId + "', '" + correo + "', '" + rol + "', '" + authUserId + "')";
+    private String insertarUsuario(String organizacionId, String correo, String rol, String medicoId) {
+        return insertarUsuario(organizacionId, correo, rol, medicoId, UUID.randomUUID().toString());
+    }
+
+    private String insertarUsuario(String organizacionId, String correo, String rol, String medicoId, String authUserId) {
+        return "INSERT INTO usuario (organizacion_id, email, rol, medico_id, auth_user_id) VALUES ('"
+                + organizacionId + "', '" + correo + "', '" + rol + "', "
+                + (medicoId == null ? "NULL" : "'" + medicoId + "'")
+                + ", '" + authUserId + "')";
+    }
+
+    private String crearConsultorio(String organizacionId) throws SQLException {
+        String id = UUID.randomUUID().toString();
+        ejecutar(conexion, "INSERT INTO consultorio (id, organizacion_id, nombre) VALUES ('"
+                + id + "', '" + organizacionId + "', 'Consultorio de prueba')");
+        return id;
+    }
+
+    private String crearMedico(String organizacionId, String consultorioId) throws SQLException {
+        String id = UUID.randomUUID().toString();
+        ejecutar(conexion, "INSERT INTO medico (id, organizacion_id, consultorio_id, nombre) VALUES ('"
+                + id + "', '" + organizacionId + "', '" + consultorioId + "', 'Médico de prueba')");
+        return id;
     }
 
     private static void ejecutar(Connection conexion, String sql) throws SQLException {
