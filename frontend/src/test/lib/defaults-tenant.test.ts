@@ -12,6 +12,11 @@ import appSource from '@/App.tsx?raw';
  * reaparecer en el store ni en el layout. Los datos de `src/lib/mock/mockData.ts` quedan fuera a
  * propósito: son fixtures del mock (una clínica de ejemplo), no un default que suplante un claim
  * ausente.
+ *
+ * "Vitalix" pasó a ser el nombre público de la plataforma (landing en `/`), así que el patrón de
+ * ese literal se acotó al *fallback* real (`|| 'vitalix'`) en vez de prohibir la palabra entera:
+ * un blanket ban rompería cualquier mención legítima de la marca en estos mismos archivos
+ * (por ejemplo, el import de `VitalixHomePage` en `App.tsx`).
  */
 
 const FUENTES_DE_PRODUCCION: [string, string][] = [
@@ -24,7 +29,7 @@ const FUENTES_DE_PRODUCCION: [string, string][] = [
 const LITERALES_INVENTADOS: [string, RegExp][] = [
   ["'org-001'", /org-001/],
   ["'sanrafael'", /sanrafael/i],
-  ["'vitalix'", /vitalix/i],
+  ["|| 'vitalix' (fallback de tenant)", /\|\|\s*['"]vitalix['"]/i],
 ];
 
 describe('código de producción · sin tenants inventados', () => {
