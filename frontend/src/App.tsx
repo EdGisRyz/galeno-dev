@@ -5,6 +5,7 @@ import { AuthLayout } from './layouts/AuthLayout';
 import { LoginForm } from './features/auth/LoginForm';
 import { AgendaPage } from './features/agenda/AgendaPage';
 import { PacientesPage } from './features/pacientes/PacientesPage';
+import { ClinicaPublicaPage } from './features/clinica-publica/ClinicaPublicaPage';
 import { VitalixHomePage } from './features/home/VitalixHomePage';
 import { RegistroClinicaPage } from './features/registro/RegistroClinicaPage';
 import { MarcaClinicaPage } from './features/administracion/MarcaClinicaPage';
@@ -24,12 +25,16 @@ function App() {
 
   return (
     <Routes>
-      {/* Landing pública de la plataforma: visible con o sin sesión (plan §2, cambio de alcance). */}
+      {/* Landing pública de la plataforma: visible con o sin sesión (plan sección 2, cambio de alcance). */}
       <Route path="/" element={<VitalixHomePage />} />
 
       {/* Registro público de clínicas (onboarding). Solo habla con el mock: el backend real
           bloquea POST /organizaciones a propósito hasta que exista el flujo de Sprint 2. */}
       <Route path="/registro" element={<RegistroClinicaPage />} />
+
+      {/* Directorio público de una clínica (sin login). Solo habla con el mock: ningún GET de
+          organizaciones o médicos es público en el backend real todavía. */}
+      <Route path="/clinica/:organizacionId" element={<ClinicaPublicaPage />} />
 
       {/* Rutas públicas de autenticación */}
       <Route element={<AuthLayout />}>
