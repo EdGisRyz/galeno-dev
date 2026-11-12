@@ -63,13 +63,18 @@ export function MainLayout() {
       description: 'Ingresos y métodos de pago',
     },
     {
-      to: '/administracion',
+      to: '/administracion/marca',
       label: 'Administración',
       icon: Settings,
       description: 'Médicos, horarios y ajustes',
       adminOnly: true,
     },
   ];
+
+  // `adminOnly` solo era una etiqueta hasta ahora: no filtraba nada y un MEDICO veía
+  // Administración en el menú aunque la ruta lo rechace. Se filtra aquí para que el menú
+  // coincida con lo que el rol realmente puede abrir.
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || user?.role === 'ADMIN');
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row text-[#0B1C30]">
@@ -115,10 +120,11 @@ export function MainLayout() {
           <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
             Módulos Clínicos
           </div>
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive =
               location.pathname === item.to ||
+              location.pathname.startsWith(`${item.to}/`) ||
               (item.to === '/agenda' && location.pathname === '/');
 
             return (

@@ -7,6 +7,7 @@ import { AgendaPage } from './features/agenda/AgendaPage';
 import { PacientesPage } from './features/pacientes/PacientesPage';
 import { VitalixHomePage } from './features/home/VitalixHomePage';
 import { RegistroClinicaPage } from './features/registro/RegistroClinicaPage';
+import { MarcaClinicaPage } from './features/administracion/MarcaClinicaPage';
 import { ProtectedRoute } from './components/navigation/ProtectedRoute';
 import { useAuthStore } from './store/auth.store';
 
@@ -42,7 +43,14 @@ function App() {
         <Route element={<MainLayout />}>
           <Route path="/agenda" element={<AgendaPage />} />
           <Route path="/pacientes" element={<PacientesPage />} />
-          {/* Próximos módulos: /expediente, /cobros, /administracion */}
+
+          {/* Marca de la clínica: solo ADMIN. ProtectedRoute anidado porque el grupo exterior ya
+              admite ADMIN y MEDICO; aquí se acota más. */}
+          <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
+            <Route path="/administracion/marca" element={<MarcaClinicaPage />} />
+          </Route>
+
+          {/* Próximos módulos: /expediente, /cobros */}
           <Route path="*" element={<Navigate to="/agenda" replace />} />
         </Route>
       </Route>
