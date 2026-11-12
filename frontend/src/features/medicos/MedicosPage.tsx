@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api } from '@/lib/axios';
 import { resumenDeErrorHttp } from '@/lib/apiError';
 import {
@@ -42,6 +42,8 @@ const MENSAJE_ERROR_BAJA =
   'No fue posible desactivar el médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_HORARIOS =
   'No fue posible obtener los horarios de este médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
+const MENSAJE_ERROR_HORARIO_BAJA =
+  'No fue posible eliminar el bloque de disponibilidad. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_HORARIO_GUARDADO =
   'No fue posible guardar el bloque de disponibilidad. Revisa que la hora de inicio sea anterior a la de fin y que la duración sea válida.';
 
@@ -80,9 +82,11 @@ export function MedicosPage() {
    * guardarraíl 4).
    */
   const organizacionId = useAuthStore((state) => state.user?.tenantId ?? '');
-  // Alta, edición y baja son de ADMIN en el backend (MedicoController); MEDICO solo lee. La UI
-  // oculta las acciones de escritura para no ofrecer un botón que el backend va a rechazar.
-  const puedeEditar = useAuthStore((state) => state.user?.role === 'ADMIN');
+  const rolDeSesion = useAuthStore((state) => state.user?.role);
+  const medicoIdDeSesion = useAuthStore((state) => state.user?.medicoId ?? null);
+  // Alta, edición y baja de médico son de ADMIN en el backend (MedicoController); MEDICO solo lee.
+  // La UI oculta las acciones de escritura para no ofrecer un botón que el backend va a rechazar.
+  const puedeEditarMedicos = rolDeSesion === 'ADMIN';
 
   const rutaColeccion = organizacionId ? `/organizaciones/${organizacionId}/medicos` : null;
   const rutaConsultorios = organizacionId ? `/organizaciones/${organizacionId}/consultorios` : null;
@@ -114,8 +118,17 @@ export function MedicosPage() {
   const [editingHorarioId, setEditingHorarioId] = useState<string | null>(null);
   const [isSavingHorario, setIsSavingHorario] = useState(false);
   const [horarioFormError, setHorarioFormError] = useState<string | null>(null);
+  const [horarioAEliminar, setHorarioAEliminar] = useState<string | null>(null);
 
-  const loadData = (ruta: string, rutaConsultorios: string | null) => {
+  // Los horarios sí son del médico: el backend permite a MEDICO crear, editar y borrar bloques de
+  // **su propia** agenda, y responde 403 con la de otro. La UI replica esa regla con el claim
+  // `medicoId` de la sesión en lugar de esconder el panel entero.
+  const puedeGestionarHorarios =
+    rolDeSesion === 'ADMIN' || (rolDeSesion === 'MEDICO' && medicoIdDeSesion === horariosDeId);
+
+  // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
+  // render, el efecto se dispararía en bucle.
+  const loadData = useCallback((ruta: string, rutaConsultorios: string | null) => {
     return Promise.all([
       api.get<Medico[]>(ruta),
       rutaConsultorios ? api.get<Consultorio[]>(rutaConsultorios) : null,
@@ -131,11 +144,27 @@ export function MedicosPage() {
         setLoadError(MENSAJE_ERROR_CARGA);
       })
       .finally(() => setIsLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
     if (rutaColeccion) loadData(rutaColeccion, rutaConsultorios);
-  }, [rutaColeccion, rutaConsultorios]);
+  }, [rutaColeccion, rutaConsultorios, loadData]);
+
+  /**
+   * Los avisos de éxito se ocultan solos. El temporizador se guarda en una referencia para poder
+   * cancelarlo: uno pendiente intentaría escribir el estado de un componente ya desmontado.
+   */
+  const avisoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const programarOcultarAviso = () => {
+    if (avisoRef.current) clearTimeout(avisoRef.current);
+    avisoRef.current = setTimeout(() => setAlertNotice(null), 3500);
+  };
+  useEffect(
+    () => () => {
+      if (avisoRef.current) clearTimeout(avisoRef.current);
+    },
+    [],
+  );
 
   const handleRetry = () => {
     if (!rutaColeccion) return;
@@ -196,7 +225,7 @@ export function MedicosPage() {
         setAlertNotice('Médico registrado correctamente.');
       }
       setIsModalOpen(false);
-      setTimeout(() => setAlertNotice(null), 3500);
+      programarOcultarAviso();
     } catch (err) {
       console.error('Error al guardar médico:', resumenDeErrorHttp(err));
       setSaveError(MENSAJE_ERROR_GUARDADO);
@@ -216,7 +245,7 @@ export function MedicosPage() {
         prev.map((m) => (m.id === deactivatingId ? { ...m, activo: false } : m)),
       );
       setAlertNotice('Médico desactivado correctamente.');
-      setTimeout(() => setAlertNotice(null), 3500);
+      programarOcultarAviso();
     } catch (err) {
       console.error('Error al desactivar médico:', resumenDeErrorHttp(err));
       setAlertNotice(null);
@@ -275,7 +304,13 @@ export function MedicosPage() {
         setHorarios((prev) => prev.map((h) => (h.id === editingHorarioId ? res.data : h)));
       } else {
         const res = await api.post<HorarioMedico>(`/medicos/${horariosDeId}/horarios`, payload);
-        setHorarios((prev) => [...prev, res.data]);
+        // El listado del backend viene ordenado por día y hora; agregar al final rompería ese
+        // orden hasta recargar, así que se reinserta respetando el contrato.
+        setHorarios((prev) =>
+          [...prev, res.data].sort(
+            (a, b) => a.diaSemana - b.diaSemana || a.horaInicio.localeCompare(b.horaInicio),
+          ),
+        );
       }
       setHorarioForm(EMPTY_HORARIO_FORM);
       setEditingHorarioId(null);
@@ -287,14 +322,17 @@ export function MedicosPage() {
     }
   };
 
-  const handleDeleteHorario = async (id: string) => {
+  const handleDeleteHorario = async () => {
+    if (!horarioAEliminar) return;
     try {
-      await api.delete(`/horarios/${id}`);
+      await api.delete(`/horarios/${horarioAEliminar}`);
       // Borrado físico (no baja lógica): `horario_medico` no tiene columna `activo`.
-      setHorarios((prev) => prev.filter((h) => h.id !== id));
+      setHorarios((prev) => prev.filter((h) => h.id !== horarioAEliminar));
     } catch (err) {
       console.error('Error al eliminar horario:', resumenDeErrorHttp(err));
-      setHorariosError(MENSAJE_ERROR_HORARIOS);
+      setHorariosError(MENSAJE_ERROR_HORARIO_BAJA);
+    } finally {
+      setHorarioAEliminar(null);
     }
   };
 
@@ -309,16 +347,19 @@ export function MedicosPage() {
     );
   }, [medicos, search]);
 
+  // El servicio solo devuelve médicos activos, así que un conteo de inactivos siempre daría 0:
+  // la segunda métrica se deriva de lo que sí llegó.
   const stats = useMemo(() => {
     const total = medicos.length;
-    const activos = medicos.filter((m) => m.activo).length;
-    return { total, activos };
+    const conCedula = medicos.filter((m) => (m.cedula || '').trim() !== '').length;
+    return { total, conCedula };
   }, [medicos]);
 
   const metrica = (valor: number): string | number => (isLoading || loadError ? '—' : valor);
 
   const medicoADesactivar = medicos.find((m) => m.id === deactivatingId);
   const medicoDeHorarios = medicos.find((m) => m.id === horariosDeId);
+  const horarioAEliminarDatos = horarios.find((h) => h.id === horarioAEliminar);
 
   return (
     <div className="space-y-6">
@@ -332,7 +373,7 @@ export function MedicosPage() {
           </p>
         </div>
 
-        {puedeEditar && (
+        {puedeEditarMedicos && (
           <Button
             variant="primary"
             size="sm"
@@ -377,10 +418,10 @@ export function MedicosPage() {
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-[#047857]">
-                Activos
+                Con cédula
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#047857] mt-1 tnum">
-                {metrica(stats.activos)}
+                {metrica(stats.conCedula)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center">
@@ -509,7 +550,7 @@ export function MedicosPage() {
                         <CalendarClock className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Horarios</span>
                       </button>
-                      {puedeEditar && (
+                      {puedeEditarMedicos && (
                         <>
                           <button
                             type="button"
@@ -550,7 +591,7 @@ export function MedicosPage() {
                         <Stethoscope className="w-4 h-4 text-[#64748B]" />
                         Aún no hay médicos registrados
                       </p>
-                      {puedeEditar && (
+                      {puedeEditarMedicos && (
                         <p className="text-[#94A3B8]">
                           {consultorios.length === 0
                             ? 'Da de alta un consultorio primero: un médico siempre necesita uno asignado.'
@@ -676,6 +717,47 @@ export function MedicosPage() {
       </Modal>
 
       {/* ─────────────────────────────────────────
+          MODAL DE CONFIRMACIÓN DE BORRADO DE BLOQUE
+          ───────────────────────────────────────── */}
+      {/* El borrado de un bloque es físico: `horario_medico` no tiene baja lógica, así que
+          confirmarlo es la única barrera antes de una pérdida irreversible. */}
+      <Modal
+        isOpen={horarioAEliminar !== null}
+        onClose={() => setHorarioAEliminar(null)}
+        title="Eliminar bloque de disponibilidad"
+        description="El bloque se elimina de forma definitiva: no se puede recuperar."
+        maxWidth="sm"
+      >
+        <p className="text-sm text-[#41484D]">
+          {horarioAEliminarDatos ? (
+            <>
+              ¿Eliminar el bloque del{' '}
+              <strong>
+                {DIAS_SEMANA.find((d) => d.value === horarioAEliminarDatos.diaSemana)?.label}
+              </strong>{' '}
+              de {horarioAEliminarDatos.horaInicio.slice(0, 5)} a{' '}
+              {horarioAEliminarDatos.horaFin.slice(0, 5)}? No se puede deshacer.
+            </>
+          ) : (
+            '¿Eliminar este bloque? No se puede deshacer.'
+          )}
+        </p>
+        <div className="flex justify-end gap-2 pt-5">
+          <Button type="button" variant="outline" onClick={() => setHorarioAEliminar(null)}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={handleDeleteHorario}
+            leftIcon={<Trash2 className="w-4 h-4" />}
+          >
+            Eliminar bloque
+          </Button>
+        </div>
+      </Modal>
+
+      {/* ─────────────────────────────────────────
           PANEL DE HORARIOS DE DISPONIBILIDAD
           ───────────────────────────────────────── */}
       <Modal
@@ -716,7 +798,7 @@ export function MedicosPage() {
                     {h.horaInicio.slice(0, 5)}–{h.horaFin.slice(0, 5)} · citas de{' '}
                     {h.duracionConsulta} min
                   </span>
-                  {puedeEditar && (
+                  {puedeGestionarHorarios && (
                     <div className="inline-flex items-center gap-1">
                       <button
                         type="button"
@@ -728,7 +810,7 @@ export function MedicosPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDeleteHorario(h.id)}
+                        onClick={() => setHorarioAEliminar(h.id)}
                         className="p-1.5 rounded-md text-[#E11D48] hover:bg-[#FEF2F2]"
                         title="Eliminar bloque"
                       >
@@ -745,7 +827,7 @@ export function MedicosPage() {
             </p>
           )}
 
-          {puedeEditar && (
+          {puedeGestionarHorarios && (
             <form
               onSubmit={handleHorarioSubmit}
               className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-[#F1F5F9] items-end"
