@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api } from '@/lib/axios';
 import { resumenDeErrorHttp } from '@/lib/apiError';
 import {
@@ -28,8 +28,6 @@ import {
   Trash2,
   Loader2,
   RefreshCw,
-  DoorClosed,
-  DoorOpen,
 } from 'lucide-react';
 
 /** Mensaje único del estado de error de carga: el detalle técnico solo va a la consola. */
@@ -80,7 +78,9 @@ export function ConsultoriosPage() {
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [isDeactivating, setIsDeactivating] = useState(false);
 
-  const loadData = (ruta: string) => {
+  // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
+  // render, el efecto se dispararía en bucle.
+  const loadData = useCallback((ruta: string) => {
     return api
       .get<Consultorio[]>(ruta)
       .then((res) => {
@@ -95,12 +95,28 @@ export function ConsultoriosPage() {
         setLoadError(MENSAJE_ERROR_CARGA);
       })
       .finally(() => setIsLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
     // Solo se pide lo que existe: sin organización no hay colección y el estado inicial ya lo dice.
     if (rutaColeccion) loadData(rutaColeccion);
-  }, [rutaColeccion]);
+  }, [rutaColeccion, loadData]);
+
+  /**
+   * Los avisos de éxito se ocultan solos. El temporizador se guarda en una referencia para poder
+   * cancelarlo: uno pendiente intentaría escribir el estado de un componente ya desmontado.
+   */
+  const avisoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const programarOcultarAviso = () => {
+    if (avisoRef.current) clearTimeout(avisoRef.current);
+    avisoRef.current = setTimeout(() => setAlertNotice(null), 3500);
+  };
+  useEffect(
+    () => () => {
+      if (avisoRef.current) clearTimeout(avisoRef.current);
+    },
+    [],
+  );
 
   // Refresco manual: el loader y la limpieza del error se marcan aquí y no dentro de `loadData`,
   // para que el efecto inicial no encienda estados antes de que responda la petición.
@@ -157,7 +173,7 @@ export function ConsultoriosPage() {
         setAlertNotice('Consultorio registrado correctamente.');
       }
       setIsModalOpen(false);
-      setTimeout(() => setAlertNotice(null), 3500);
+      programarOcultarAviso();
     } catch (err) {
       console.error('Error al guardar consultorio:', resumenDeErrorHttp(err));
       setSaveError(MENSAJE_ERROR_GUARDADO);
@@ -181,7 +197,7 @@ export function ConsultoriosPage() {
         prev.map((c) => (c.id === deactivatingId ? { ...c, activo: false } : c)),
       );
       setAlertNotice('Consultorio desactivado correctamente.');
-      setTimeout(() => setAlertNotice(null), 3500);
+      programarOcultarAviso();
     } catch (err) {
       console.error('Error al desactivar consultorio:', resumenDeErrorHttp(err));
       setAlertNotice(null);
@@ -202,11 +218,13 @@ export function ConsultoriosPage() {
     );
   }, [consultorios, search]);
 
+  // El servicio solo devuelve consultorios activos, así que no existe un conteo de inactivos que
+  // mostrar: las métricas se derivan de lo que sí llegó.
   const stats = useMemo(() => {
     const total = consultorios.length;
-    const activos = consultorios.filter((c) => c.activo).length;
-    const inactivos = total - activos;
-    return { total, activos, inactivos };
+    const conDireccion = consultorios.filter((c) => (c.direccion || '').trim() !== '').length;
+    const conTelefono = consultorios.filter((c) => (c.telefono || '').trim() !== '').length;
+    return { total, conDireccion, conTelefono };
   }, [consultorios]);
 
   /**
@@ -279,14 +297,14 @@ export function ConsultoriosPage() {
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-[#047857]">
-                Activos
+                Con dirección
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#047857] mt-1 tnum">
-                {metrica(stats.activos)}
+                {metrica(stats.conDireccion)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center">
-              <DoorOpen className="w-5 h-5" />
+              <MapPin className="w-5 h-5" />
             </div>
           </CardContent>
         </Card>
@@ -295,14 +313,14 @@ export function ConsultoriosPage() {
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
-                Inactivos
+                Con teléfono
               </p>
               <h3 className="text-2xl font-bold font-heading text-[#41484D] mt-1 tnum">
-                {metrica(stats.inactivos)}
+                {metrica(stats.conTelefono)}
               </h3>
             </div>
             <div className="w-10 h-10 rounded-xl bg-[#F1F5F9] text-[#64748B] flex items-center justify-center">
-              <DoorClosed className="w-5 h-5" />
+              <Phone className="w-5 h-5" />
             </div>
           </CardContent>
         </Card>
