@@ -7,6 +7,7 @@ import { AgendaPage } from './features/agenda/AgendaPage';
 import { PacientesPage } from './features/pacientes/PacientesPage';
 import { ConsultoriosPage } from './features/consultorios/ConsultoriosPage';
 import { MedicosPage } from './features/medicos/MedicosPage';
+import { ExpedientePage } from './features/expediente/ExpedientePage';
 import { ClinicaPublicaPage } from './features/clinica-publica/ClinicaPublicaPage';
 import { VitalixHomePage } from './features/home/VitalixHomePage';
 import { RegistroClinicaPage } from './features/registro/RegistroClinicaPage';
@@ -52,6 +53,7 @@ function App() {
           <Route path="/pacientes" element={<PacientesPage />} />
           <Route path="/consultorios" element={<ConsultoriosPage />} />
           <Route path="/medicos" element={<MedicosPage />} />
+          <Route path="/expediente" element={<ExpedientePage />} />
 
           {/* Marca de la clínica: solo ADMIN. ProtectedRoute anidado porque el grupo exterior ya
               admite ADMIN y MEDICO; aquí se acota más. */}
@@ -59,7 +61,7 @@ function App() {
             <Route path="/administracion/marca" element={<MarcaClinicaPage />} />
           </Route>
 
-          {/* Próximos módulos: /expediente, /cobros */}
+          {/* Próximos módulos: /cobros */}
           <Route path="*" element={<Navigate to="/agenda" replace />} />
         </Route>
       </Route>

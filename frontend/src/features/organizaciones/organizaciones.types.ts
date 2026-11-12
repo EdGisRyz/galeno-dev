@@ -1,5 +1,6 @@
 // Tipos TypeScript del dominio Organización.
-// Reflejo tipado de las tablas `organizacion` y `configuracion_tenant` del esquema V1.
+// `Organizacion` refleja `OrganizacionResponse` (backend), en camelCase, igual que `Paciente`
+// (ver pacientes.types.ts). `ConfiguracionTenant` sigue en cuarentena: no tiene controller real.
 
 export type PlanSaaS = 'SOLO' | 'CLINICA' | 'ENTERPRISE';
 
@@ -7,10 +8,10 @@ export interface Organizacion {
   id: string;
   nombre: string;
   plan: PlanSaaS;
-  subscription_id?: string | null;
-  trial_hasta?: string | null;
+  subscriptionId?: string | null;
+  trialHasta?: string | null;
   activo: boolean;
-  created_at: string;
+  createdAt: string;
 }
 
 export interface ConfiguracionTenant {
