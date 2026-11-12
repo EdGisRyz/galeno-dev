@@ -10,7 +10,7 @@ export function AuthLayout() {
           <Stethoscope className="w-6 h-6 text-[#88BDDC]" />
         </div>
         <h2 className="text-2xl font-bold font-heading text-[#0B1C30] tracking-tight">
-          Galeno SaaS
+          Vitalix SaaS
         </h2>
         <p className="mt-1 text-xs text-[#64748B]">
           Sistema de Gestión Clínica y Expediente Electrónico NOM-004
