@@ -46,7 +46,7 @@ const MENSAJE_ERROR_CARGA =
 const EMPTY_FORM = {
   nombre: '',
   telefono: '',
-  fecha_nacimiento: '',
+  fechaNacimiento: '',
   sexo: '' as 'M' | 'F' | 'O' | '',
   email: '',
   notas: '',
@@ -134,7 +134,7 @@ export function PacientesPage() {
     setForm({
       nombre: patient.nombre,
       telefono: patient.telefono || '',
-      fecha_nacimiento: patient.fecha_nacimiento || '',
+      fechaNacimiento: patient.fechaNacimiento || '',
       sexo: patient.sexo || '',
       email: patient.email || '',
       notas: patient.notas || '',
@@ -154,7 +154,7 @@ export function PacientesPage() {
     const payload = {
       nombre: form.nombre,
       telefono: form.telefono || null,
-      fecha_nacimiento: form.fecha_nacimiento || null,
+      fechaNacimiento: form.fechaNacimiento || null,
       sexo: form.sexo || null,
       email: form.email || null,
       notas: form.notas || null,
@@ -207,7 +207,7 @@ export function PacientesPage() {
     const total = patients.length;
     const activos = patients.filter((p) => p.activo).length;
     const pediatricos = patients.filter(
-      (p) => p.fecha_nacimiento && differenceInYears(new Date(), new Date(p.fecha_nacimiento)) < 18
+      (p) => p.fechaNacimiento && differenceInYears(new Date(), new Date(p.fechaNacimiento)) < 18
     ).length;
     const conNotas = patients.filter((p) => p.notas).length;
     return { total, activos, pediatricos, conNotas };
@@ -402,9 +402,9 @@ export function PacientesPage() {
                   </TableCell>
 
                   <TableCell>
-                    <span className="text-xs text-[#41484D] block">{calcularEdad(p.fecha_nacimiento)}</span>
+                    <span className="text-xs text-[#41484D] block">{calcularEdad(p.fechaNacimiento)}</span>
                     <span className="text-[11px] text-[#94A3B8] block mt-0.5">
-                      {p.fecha_nacimiento || 'Sin fecha'}
+                      {p.fechaNacimiento || 'Sin fecha'}
                     </span>
                   </TableCell>
 
@@ -519,8 +519,8 @@ export function PacientesPage() {
               <Input
                 label="Fecha de Nacimiento"
                 type="date"
-                value={form.fecha_nacimiento}
-                onChange={(e) => setForm((f) => ({ ...f, fecha_nacimiento: e.target.value }))}
+                value={form.fechaNacimiento}
+                onChange={(e) => setForm((f) => ({ ...f, fechaNacimiento: e.target.value }))}
               />
               <Input
                 label="Correo Electrónico"

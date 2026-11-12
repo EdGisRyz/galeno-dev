@@ -1,24 +1,26 @@
 // Tipos TypeScript del dominio Médico.
-// Reflejo tipado de las tablas `medico` y `horario_medico` del esquema V1.
+// Reflejo tipado de `MedicoResponse` y `HorarioMedicoResponse` (backend), en camelCase, igual que
+// `Paciente` y `Consultorio` (ver pacientes.types.ts) — Jackson serializa los records del backend
+// en camelCase por defecto. `MedicoResponse` no incluye `createdAt` (la tabla `medico` de V1 no
+// tiene esa columna) ni una duración de consulta propia: eso vive por bloque en `HorarioMedico`.
 
 export interface Medico {
   id: string;
-  organizacion_id: string;
-  consultorio_id: string;
+  organizacionId: string;
+  consultorioId: string;
   nombre: string;
   especialidad?: string | null;
   cedula?: string | null;
   telefono?: string | null;
-  tarifa_base?: number | null;
-  duracion_consulta_min?: number;
+  tarifaBase?: number | null;
   activo: boolean;
 }
 
 export interface HorarioMedico {
   id: string;
-  medico_id: string;
-  dia_semana: number; // 0=Domingo, 1=Lunes, ..., 6=Sábado
-  hora_inicio: string; // HH:mm:ss
-  hora_fin: string; // HH:mm:ss
-  duracion_consulta: 20 | 30 | 45 | 60;
+  medicoId: string;
+  diaSemana: number; // 0=Domingo, 1=Lunes, ..., 6=Sábado (convención Date.getDay())
+  horaInicio: string; // HH:mm:ss
+  horaFin: string; // HH:mm:ss
+  duracionConsulta: 20 | 30 | 45 | 60;
 }

@@ -5,6 +5,8 @@ import { AuthLayout } from './layouts/AuthLayout';
 import { LoginForm } from './features/auth/LoginForm';
 import { AgendaPage } from './features/agenda/AgendaPage';
 import { PacientesPage } from './features/pacientes/PacientesPage';
+import { ConsultoriosPage } from './features/consultorios/ConsultoriosPage';
+import { MedicosPage } from './features/medicos/MedicosPage';
 import { ClinicaPublicaPage } from './features/clinica-publica/ClinicaPublicaPage';
 import { VitalixHomePage } from './features/home/VitalixHomePage';
 import { RegistroClinicaPage } from './features/registro/RegistroClinicaPage';
@@ -48,6 +50,8 @@ function App() {
         <Route element={<MainLayout />}>
           <Route path="/agenda" element={<AgendaPage />} />
           <Route path="/pacientes" element={<PacientesPage />} />
+          <Route path="/consultorios" element={<ConsultoriosPage />} />
+          <Route path="/medicos" element={<MedicosPage />} />
 
           {/* Marca de la clínica: solo ADMIN. ProtectedRoute anidado porque el grupo exterior ya
               admite ADMIN y MEDICO; aquí se acota más. */}

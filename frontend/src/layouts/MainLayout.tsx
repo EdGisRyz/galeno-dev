@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui';
 import {
   Calendar,
   Users,
+  Building2,
   FileText,
   CreditCard,
   Settings,
@@ -51,6 +52,18 @@ export function MainLayout() {
       description: 'Directorio y ficha NOM-004',
     },
     {
+      to: '/consultorios',
+      label: 'Consultorios',
+      icon: Building2,
+      description: 'Espacios físicos de la clínica',
+    },
+    {
+      to: '/medicos',
+      label: 'Médicos',
+      icon: Stethoscope,
+      description: 'Directorio y horarios de disponibilidad',
+    },
+    {
       to: '/expediente',
       label: 'Expediente Clínico',
       icon: FileText,
@@ -66,7 +79,7 @@ export function MainLayout() {
       to: '/administracion/marca',
       label: 'Administración',
       icon: Settings,
-      description: 'Médicos, horarios y ajustes',
+      description: 'Marca de la clínica y ajustes',
       adminOnly: true,
     },
   ];
