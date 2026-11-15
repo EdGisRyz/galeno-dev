@@ -36,4 +36,19 @@ public interface PacienteRepository extends JpaRepository<Paciente, UUID> {
      */
     @Query("SELECT p FROM Paciente p WHERE p.organizacion.id = :orgId AND p.activo = true ORDER BY p.nombre")
     List<Paciente> listarActivosPorOrganizacion(@Param("orgId") UUID organizacionId);
+
+    /**
+     * Lista todos los pacientes de una organización —activos e inactivos—, con el mismo orden que
+     * la consulta anterior.
+     *
+     * <p>Existe porque la baja es lógica: si el listado ocultara siempre a los inactivos, un
+     * paciente dado de baja desaparecería de la pantalla y la única acción visible sería volver a
+     * darlo de alta, que es exactamente cómo se duplicaba un historial. Con esta consulta la
+     * pantalla puede ofrecer la reactivación.</p>
+     *
+     * @param organizacionId organización dueña de los pacientes
+     * @return todos los pacientes de esa organización, ordenados por nombre
+     */
+    @Query("SELECT p FROM Paciente p WHERE p.organizacion.id = :orgId ORDER BY p.nombre")
+    List<Paciente> listarPorOrganizacion(@Param("orgId") UUID organizacionId);
 }

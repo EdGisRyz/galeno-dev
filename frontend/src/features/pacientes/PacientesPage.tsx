@@ -30,6 +30,7 @@ import {
   IdCard,
   Home,
   UserCheck,
+  UserX,
   Pencil,
   Baby,
   FileText,
@@ -42,6 +43,15 @@ type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 /** Mensaje único del estado de error de carga: el detalle técnico solo va a la consola. */
 const MENSAJE_ERROR_CARGA =
   'No fue posible obtener el directorio de pacientes. Revisa la conexión con el servicio e inténtalo de nuevo.';
+
+/**
+ * Fallo propio de la reactivación: el mensaje de carga habla de leer el directorio y confundiría
+ * al usuario sobre qué acción no se completó.
+ */
+const MENSAJE_ERROR_BAJA =
+  'No fue posible desactivar al paciente. Revisa la conexión con el servicio e inténtalo de nuevo.';
+const MENSAJE_ERROR_REACTIVAR =
+  'No fue posible reactivar al paciente. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -91,10 +101,15 @@ export function PacientesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
+  const [reactivarError, setReactivarError] = useState<string | null>(null);
+  const [bajaError, setBajaError] = useState<string | null>(null);
 
   const loadData = (ruta: string) => {
+    // Se piden también los inactivos: la baja es lógica y el historial se conserva, así que ocultarlos
+    // dejaría al usuario sin otra salida que volver a dar de alta al paciente, que es cómo se
+    // duplicaba. El servicio los devuelve solo si se lo piden; sin el parámetro, el contrato no cambia.
     return api
-      .get<PacienteConFicha[]>(ruta)
+      .get<PacienteConFicha[]>(`${ruta}?incluirInactivos=true`)
       .then((res) => {
         setPatients(res.data);
         setLoadError(null);
@@ -192,6 +207,48 @@ export function PacientesPage() {
     }
   };
 
+  /**
+   * Reactivación de una baja lógica (S5): `POST /pacientes/{id}/activar` responde 204 sin cuerpo,
+   * así que la fila se marca activa en el estado local y no se vuelve a pedir el directorio.
+   * El listado incluye a los inactivos gracias al parámetro `incluirInactivos`, así que la fila
+   * sigue visible después de recargar y la reactivación no obliga a un alta nueva.
+   */
+  const handleReactivar = async (paciente: PacienteConFicha) => {
+    setReactivarError(null);
+    try {
+      await api.post(`/pacientes/${paciente.id}/activar`);
+      setPatients((prev) =>
+        prev.map((p) => (p.id === paciente.id ? { ...p, activo: true } : p)),
+      );
+      setAlertNotice('Paciente reactivado correctamente.');
+      setTimeout(() => setAlertNotice(null), 3500);
+    } catch (err) {
+      console.error('Error al reactivar paciente:', resumenDeErrorHttp(err));
+      setReactivarError(MENSAJE_ERROR_REACTIVAR);
+    }
+  };
+
+  /**
+   * Baja lógica del paciente: `DELETE /pacientes/{id}` responde 204 sin cuerpo y el servicio solo
+   * apaga el registro, así que la fila se marca inactiva en el estado local y aparece la acción
+   * para reactivarla. No se pide confirmación: la baja es reversible en un clic y el historial se
+   * conserva, que es justamente el motivo de que sea lógica.
+   */
+  const handleDesactivar = async (paciente: PacienteConFicha) => {
+    setBajaError(null);
+    try {
+      await api.delete(`/pacientes/${paciente.id}`);
+      setPatients((prev) =>
+        prev.map((p) => (p.id === paciente.id ? { ...p, activo: false } : p)),
+      );
+      setAlertNotice('Paciente desactivado correctamente.');
+      setTimeout(() => setAlertNotice(null), 3500);
+    } catch (err) {
+      console.error('Error al desactivar paciente:', resumenDeErrorHttp(err));
+      setBajaError(MENSAJE_ERROR_BAJA);
+    }
+  };
+
   const filteredPatients = useMemo(() => {
     const term = search.toLowerCase();
     return patients.filter(
@@ -247,6 +304,18 @@ export function PacientesPage() {
       {alertNotice && (
         <Alert variant="success" title="Notificación">
           {alertNotice}
+        </Alert>
+      )}
+
+      {reactivarError && (
+        <Alert variant="error" title="No se pudo reactivar al paciente">
+          {reactivarError}
+        </Alert>
+      )}
+
+      {bajaError && (
+        <Alert variant="error" title="No se pudo desactivar al paciente">
+          {bajaError}
         </Alert>
       )}
 
@@ -440,15 +509,42 @@ export function PacientesPage() {
                   </TableCell>
 
                   <TableCell className="text-right">
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(p)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0A4D68] text-white hover:bg-[#00354a] text-xs font-medium transition-all shadow-2xs"
-                      title="Editar ficha del paciente"
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-[#88BDDC]" />
-                      <span className="hidden sm:inline">Ficha</span>
-                    </button>
+                    <div className="inline-flex items-center justify-end gap-2">
+                      {/* La baja es lógica, así que una fila inactiva se puede reactivar sin
+                          duplicar al paciente. Mismo tamaño y forma que el resto de acciones de
+                          la tabla, con el color positivo de los estados activos. */}
+                      {!p.activo && (
+                        <button
+                          type="button"
+                          onClick={() => handleReactivar(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#059669] text-white hover:bg-[#047857] text-xs font-medium transition-all shadow-2xs"
+                          title="Reactivar al paciente dado de baja"
+                        >
+                          <UserCheck className="w-3.5 h-3.5 text-[#D1FAE5]" />
+                          <span className="hidden sm:inline">Reactivar</span>
+                        </button>
+                      )}
+                      {p.activo && (
+                        <button
+                          type="button"
+                          onClick={() => handleDesactivar(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#FCA5A5] text-[#E11D48] hover:bg-[#FEF2F2] text-xs font-medium transition-all"
+                          title="Dar de baja al paciente"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Desactivar</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(p)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0A4D68] text-white hover:bg-[#00354a] text-xs font-medium transition-all shadow-2xs"
+                        title="Editar ficha del paciente"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-[#88BDDC]" />
+                        <span className="hidden sm:inline">Ficha</span>
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

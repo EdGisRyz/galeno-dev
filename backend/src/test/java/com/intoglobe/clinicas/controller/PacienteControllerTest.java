@@ -178,7 +178,7 @@ class PacienteControllerTest {
     @Test
     @DisplayName("GET anidado devuelve 200 con el arreglo de pacientes activos en el orden del contrato")
     void listarPorOrganizacion_shouldReturn200WithArray() throws Exception {
-        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID)).thenReturn(List.of(
+        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID, false)).thenReturn(List.of(
                 respuesta(PACIENTE_ID, "Ana Beltrán", true),
                 respuesta(OTRO_PACIENTE_ID, "María López Ramírez", true)));
 
@@ -190,7 +190,25 @@ class PacienteControllerTest {
                 .andExpect(jsonPath("$[1].nombre").value("María López Ramírez"))
                 .andExpect(jsonPath("$[*].activo",
                         org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(true))));
-        verify(pacienteService).listarPorOrganizacion(TENANT_ID, TENANT_ID);
+        verify(pacienteService).listarPorOrganizacion(TENANT_ID, TENANT_ID, false);
+    }
+
+    @Test
+    @DisplayName("GET anidado con «incluirInactivos» devuelve también los pacientes dados de baja")
+    void listarPorOrganizacion_shouldIncludeInactive_whenParamIsTrue() throws Exception {
+        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID, true)).thenReturn(List.of(
+                respuesta(PACIENTE_ID, "Ana Beltrán", true),
+                respuesta(OTRO_PACIENTE_ID, "María López Ramírez", false)));
+
+        perform(get("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                .param("incluirInactivos", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[1].activo").value(false));
+
+        // El parámetro tiene que llegar al servicio. Si se ignorara, el listado devolvería solo
+        // activos y la pantalla no podría ofrecer la reactivación después de recargar.
+        verify(pacienteService).listarPorOrganizacion(TENANT_ID, TENANT_ID, true);
     }
 
     @Test
@@ -233,7 +251,7 @@ class PacienteControllerTest {
     @Test
     @DisplayName("GET anidado con organización inexistente devuelve 404 con ErrorResponse")
     void listarPorOrganizacion_shouldReturn404_whenOrganizacionIsMissing() throws Exception {
-        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID))
+        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID, false))
                 .thenThrow(new ResourceNotFoundException("Organizacion", TENANT_ID));
 
         perform(get("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID))
@@ -457,7 +475,7 @@ class PacienteControllerTest {
     @Test
     @DisplayName("MEDICO recibe 200 en las dos lecturas y el tenant del claim llega al service")
     void lecturas_shouldReturn200_whenActorIsMedico() throws Exception {
-        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID)).thenReturn(List.of(
+        when(pacienteService.listarPorOrganizacion(TENANT_ID, TENANT_ID, false)).thenReturn(List.of(
                 respuesta(PACIENTE_ID, "María López Ramírez", true)));
         when(pacienteService.buscarPorId(PACIENTE_ID, TENANT_ID))
                 .thenReturn(respuesta(PACIENTE_ID, "María López Ramírez", true));
@@ -471,7 +489,7 @@ class PacienteControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(PACIENTE_ID.toString()));
 
-        verify(pacienteService).listarPorOrganizacion(TENANT_ID, TENANT_ID);
+        verify(pacienteService).listarPorOrganizacion(TENANT_ID, TENANT_ID, false);
         verify(pacienteService).buscarPorId(PACIENTE_ID, TENANT_ID);
     }
 
