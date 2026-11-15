@@ -40,7 +40,16 @@ function respuestaCon<T>(data: T): AxiosResponse<T> {
 const ORGANIZACION_ID = 'org-001';
 
 /** Colección del contrato anidado: `GET/POST /organizaciones/{organizacionId}/pacientes`. */
+/**
+ * Colección del contrato anidado: `GET/POST /organizaciones/{organizacionId}/pacientes`.
+ *
+ * El alta se hace contra la colección tal cual; el listado pide además los inactivos, porque la
+ * baja es lógica y sin verlos el usuario solo podría volver a dar de alta al paciente.
+ */
 const RUTA_COLECCION = `/organizaciones/${ORGANIZACION_ID}/pacientes`;
+
+/** Listado con los dados de baja incluidos: `GET ...?incluirInactivos=true`. */
+const RUTA_LISTADO = `${RUTA_COLECCION}?incluirInactivos=true`;
 
 /** Ítem del contrato plano: `PUT /pacientes/{id}`. */
 const RUTA_ITEM = (id: string) => `/pacientes/${id}`;
@@ -118,12 +127,12 @@ describe('PacientesPage · estado de error (F006)', () => {
 
     const reintentar = await screen.findByRole('button', { name: /reintentar/i });
     expect(getMock).toHaveBeenCalledTimes(1);
-    expect(getMock).toHaveBeenCalledWith(RUTA_COLECCION);
+    expect(getMock).toHaveBeenCalledWith(RUTA_LISTADO);
 
     fireEvent.click(reintentar);
 
     await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
-    expect(getMock).toHaveBeenLastCalledWith(RUTA_COLECCION);
+    expect(getMock).toHaveBeenLastCalledWith(RUTA_LISTADO);
 
     await waitFor(() =>
       expect(screen.queryByText(/no se pudieron cargar los pacientes/i)).not.toBeInTheDocument(),
@@ -199,7 +208,7 @@ describe('PacientesPage · rutas del contrato del backend (colección anidada, �
 
     // Una sola petición y a la ruta anidada: la colección plana ya no existe en el backend.
     expect(getMock).toHaveBeenCalledTimes(1);
-    expect(getMock).toHaveBeenCalledWith(RUTA_COLECCION);
+    expect(getMock).toHaveBeenCalledWith(RUTA_LISTADO);
   });
 
   it('da de alta al paciente en la colección de la organización de la sesión', async () => {

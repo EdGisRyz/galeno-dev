@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.intoglobe.clinicas.dto.request.PacienteRequest;
@@ -135,9 +136,12 @@ public class PacienteController {
     })
     public ResponseEntity<List<PacienteResponse>> listarPorOrganizacion(
             @Parameter(description = "Identificador UUID de la organización cuyos pacientes se listan.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
-            @PathVariable UUID organizacionId) {
+            @PathVariable UUID organizacionId,
+            @Parameter(description = "Incluye también los pacientes dados de baja, para poder reactivarlos.")
+            @RequestParam(name = "incluirInactivos", defaultValue = "false") boolean incluirInactivos) {
         return ResponseEntity.ok(
-                pacienteService.listarPorOrganizacion(organizacionId, tenantAccessGuard.tenantActual()));
+                pacienteService.listarPorOrganizacion(organizacionId, tenantAccessGuard.tenantActual(),
+                        incluirInactivos));
     }
 
     /**

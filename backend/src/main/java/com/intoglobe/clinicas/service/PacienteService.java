@@ -121,11 +121,31 @@ public class PacienteService {
      */
     @Transactional(readOnly = true)
     public List<PacienteResponse> listarPorOrganizacion(UUID organizacionId, UUID tenantId) {
+        return listarPorOrganizacion(organizacionId, tenantId, false);
+    }
+
+    /**
+     * Lista los pacientes de una organización.
+     *
+     * <p>Por omisión devuelve solo los activos, que es el contrato declarado del listado. Con
+     * {@code incluirInactivos} devuelve también los dados de baja, para que la pantalla pueda
+     * ofrecer la reactivación en lugar de obligar a un alta nueva: la baja es lógica y el historial
+     * se conserva, así que volver a registrar duplicaría a la persona.</p>
+     *
+     * <p>Las comprobaciones de acceso son las mismas en los dos casos y no dependen del parámetro:
+     * primero la organización del path contra el claim, después la existencia.</p>
+     */
+    @Transactional(readOnly = true)
+    public List<PacienteResponse> listarPorOrganizacion(UUID organizacionId, UUID tenantId,
+            boolean incluirInactivos) {
         exigirOrganizacionDelTenant(organizacionId, tenantId);
         if (organizacionRepository.findById(organizacionId).isEmpty()) {
             throw new ResourceNotFoundException("Organizacion", organizacionId);
         }
-        return pacienteRepository.listarActivosPorOrganizacion(organizacionId).stream()
+        var pacientes = incluirInactivos
+                ? pacienteRepository.listarPorOrganizacion(organizacionId)
+                : pacienteRepository.listarActivosPorOrganizacion(organizacionId);
+        return pacientes.stream()
                 .map(PacienteMapper::aResponse)
                 .toList();
     }
