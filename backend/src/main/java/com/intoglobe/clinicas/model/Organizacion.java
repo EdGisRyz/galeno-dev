@@ -15,12 +15,13 @@ import jakarta.persistence.Table;
 
 /**
  * Organización (tenant) dueña de los datos clínicos. Espejo columna por columna
- * de la tabla {@code organizacion} definida en la migración V1 (schema congelado).
+ * de la tabla {@code organizacion} (migraciones V1 y V2).
  *
  * <p>Reglas de negocio que materializa este modelo:</p>
  * <ul>
  *   <li>El plan contratado es un {@link PlanTipo}, espejo del CHECK de V1.</li>
- *   <li>{@code subscriptionId} y {@code trialHasta} son opcionales (nullable en BD).</li>
+ *   <li>{@code subscriptionId}, {@code trialHasta} y {@code slug} son opcionales
+ *       (nullable en BD).</li>
  *   <li>La organización no se elimina físicamente: su baja es lógica mediante
  *       {@link #desactivar()}, operación idempotente.</li>
  *   <li>La validación de entrada (nombre, plan, longitudes) vive en el DTO de
@@ -48,6 +49,17 @@ public class Organizacion {
 
     @Column(name = "trial_hasta")
     private OffsetDateTime trialHasta;
+
+    /**
+     * Slug con el que el servicio de autenticación identifica a la organización.
+     *
+     * <p>La columna la agregó la migración V2: es {@code VARCHAR(60)}, <strong>nulable</strong>
+     * y única ({@code organizacion_slug_key}). Se deja nula cuando nadie del emisor la conoce;
+     * una organización sin slug no coincide con ningún texto del token, porque en SQL la
+     * comparación de igualdad nunca es cierta contra un nulo.</p>
+     */
+    @Column(name = "slug", length = 60)
+    private String slug;
 
     @Column(name = "activo", nullable = false)
     private boolean activo = true;
@@ -105,6 +117,18 @@ public class Organizacion {
         this.activo = false;
     }
 
+    /**
+     * Asigna el slug que el servicio de autenticación usa para identificar a la organización.
+     *
+     * <p>Se escribe cuando se conoce el slug del emisor; la unicidad la sostiene la restricción
+     * de la base, no esta entidad. Un {@code null} deja la organización sin slug cargado.</p>
+     *
+     * @param slug slug del emisor (máx. 60 caracteres) o {@code null} para dejarlo sin cargar
+     */
+    public void asignarSlug(String slug) {
+        this.slug = slug;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -123,6 +147,10 @@ public class Organizacion {
 
     public OffsetDateTime getTrialHasta() {
         return trialHasta;
+    }
+
+    public String getSlug() {
+        return slug;
     }
 
     /** Getter JavaBeans para el primitivo {@code activo}. */
