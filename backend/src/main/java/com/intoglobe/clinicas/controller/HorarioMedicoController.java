@@ -38,9 +38,10 @@ import jakarta.validation.Valid;
  * todos por {@code GlobalExceptionHandler} para que el contrato de error sea el mismo que el
  * del resto de los módulos. Eso incluye los cinco {@code 400} que <em>no</em> produce este
  * archivo: rango horario invertido, duración fuera del catálogo y solapamiento los decide el
- * service contra el estado de la base, y el {@code 404} del médico y del horario inexistentes
- * —o de otra organización— y el {@code 403} de un médico que opera sobre la agenda de otro
- * también. Aquí solo se propagan.</p>
+ * service contra el estado de la base, y el {@code 404} del médico, del horario y del consultorio
+ * inexistentes —o de otra organización—, el {@code 403} de un médico que opera sobre la agenda de
+ * otro y el {@code 409} de un consultorio que no está asignado al médico también. Aquí solo se
+ * propagan.</p>
  *
  * <p>La ruta base es {@code /api/v1} porque el módulo repite la convención del módulo 03: las
  * operaciones de colección cuelgan del dueño inmediato
@@ -87,7 +88,9 @@ public class HorarioMedicoController {
      * un bloque no puede cambiar de dueño. El identificador se resuelve antes de mirar el
      * cuerpo, así que un médico inexistente responde {@code 404} y no persiste nada, en lugar
      * de dejar que la clave foránea produzca un {@code 500}. Las tres reglas de negocio del
-     * cuerpo las aplica el service, en un orden que forma parte del contrato.</p>
+     * cuerpo las aplica el service, en un orden que forma parte del contrato, y después el
+     * consultorio: sin {@code consultorioId} el bloque se dicta en el consultorio principal del
+     * médico, y con uno que no esté asignado a ese médico responde {@code 409}.</p>
      *
      * @param medicoId médico dueño de la agenda, tomado del path
      * @param request  datos de entrada validados
@@ -103,7 +106,9 @@ public class HorarioMedicoController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "El token es de un médico y la agenda indicada no es la suya",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "Médico inexistente en la organización del token",
+            @ApiResponse(responseCode = "404", description = "Médico inexistente en la organización del token, o consultorio pedido inexistente en ella",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "El consultorio pedido no está asignado al médico: primero hay que asignarlo y después crear el bloque en él",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<HorarioMedicoResponse> crear(
@@ -188,6 +193,10 @@ public class HorarioMedicoController {
      * {@code 400} en el contrato para que el cliente no los confunda con el de un DTO
      * inválido.</p>
      *
+     * <p>El consultorio sí puede cambiar: sin {@code consultorioId} en el cuerpo el bloque
+     * conserva el que ya tiene, y con uno asignado al médico se mueve a él. Un consultorio no
+     * asignado responde {@code 409}, igual que en el alta.</p>
+     *
      * @param id      identificador del bloque
      * @param request datos de entrada validados
      * @return 200 con el bloque actualizado
@@ -204,7 +213,9 @@ public class HorarioMedicoController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "El token es de un médico y el bloque no es de su agenda",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "Bloque de disponibilidad inexistente en la organización del token",
+            @ApiResponse(responseCode = "404", description = "Bloque de disponibilidad inexistente en la organización del token, o consultorio pedido inexistente en ella",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "El consultorio pedido no está asignado al médico del bloque",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<HorarioMedicoResponse> actualizar(

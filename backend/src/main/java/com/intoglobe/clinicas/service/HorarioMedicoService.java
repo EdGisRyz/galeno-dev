@@ -12,14 +12,18 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.intoglobe.clinicas.dto.request.HorarioMedicoRequest;
 import com.intoglobe.clinicas.dto.response.HorarioMedicoResponse;
+import com.intoglobe.clinicas.exception.ConsultorioNoAsignadoAlMedicoException;
 import com.intoglobe.clinicas.exception.DuracionConsultaInvalidaException;
 import com.intoglobe.clinicas.exception.RangoHorarioInvalidoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.exception.SolapamientoDeHorarioException;
 import com.intoglobe.clinicas.mapper.HorarioMedicoMapper;
+import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.HorarioMedico;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.repository.ConsultorioRepository;
 import com.intoglobe.clinicas.repository.HorarioMedicoRepository;
+import com.intoglobe.clinicas.repository.MedicoConsultorioRepository;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.security.AuthenticatedUser;
 
@@ -46,8 +50,35 @@ import com.intoglobe.clinicas.security.AuthenticatedUser;
  *   <li>rango horario: {@code horaInicio} estrictamente anterior a {@code horaFin},</li>
  *   <li>duración de consulta dentro de {@code {20, 30, 45, 60}},</li>
  *   <li>solapamiento con otro bloque del mismo médico y día,</li>
+ *   <li>consultorio del bloque: inexistente en el tenant (404) o no asignado al médico
+ *       (409),</li>
  *   <li>persistir.</li>
  * </ol>
+ *
+ * <p>El consultorio se resuelve <em>después</em> de las tres reglas del bloque y no antes, a
+ * propósito: esas tres describen el bloque mismo y no dependen de dónde se dicta, así que una
+ * petición con el cuerpo inválido sigue recibiendo el mismo {@code 400} que recibía antes de que
+ * el bloque dijera dónde atiende. Cuando el cuerpo es válido, el bloque no se guarda sin
+ * consultorio: o se usa el pedido —comprobando que esté asignado—, o el principal del médico.</p>
+ *
+ * <h2>El consultorio del bloque</h2>
+ *
+ * <p>{@code consultorioId} es opcional. Si falta se usa el <strong>consultorio principal</strong>
+ * del médico ({@code medico.consultorio_id}): un bloque sin especificar va al consultorio de
+ * siempre, que es lo que la agenda hacía antes de que el bloque dijera dónde atiende. Si viene,
+ * tiene que estar <strong>asignado</strong> a ese médico ({@code medico_consultorio}); si no lo
+ * está se responde {@code 409} con
+ * {@link ConsultorioNoAsignadoAlMedicoException}, porque la petición está bien formada y lo que
+ * falta es el vínculo, no el recurso. La comprobación se hace también para el principal: el alta
+ * del médico deja esa asignación escrita, y si una fila antigua no la tuviera, un {@code 409} que
+ * explica qué hacer es mejor que el error de integridad de la clave
+ * {@code horario_medico_consultorio_asignado_fkey} de la V6.</p>
+ *
+ * <p>En la actualización, un request <strong>sin</strong> {@code consultorioId} conserva el
+ * consultorio que el bloque ya tiene: el {@code PUT} reemplaza día, horas y duración, y mover el
+ * bloque al principal solo porque el cuerpo no menciona el consultorio sería un cambio de datos
+ * silencioso —justo lo contrario de lo que busca el alcance A2, donde el médico puede atender un
+ * día en otro consultorio—. Para moverlo se envía el {@code consultorioId} destino.</p>
  *
  * <p>El solapamiento se comprueba con
  * {@link HorarioMedicoRepository#contarSolapamientos} sobre intervalos semiabiertos, así
@@ -111,11 +142,17 @@ public class HorarioMedicoService {
 
     private final HorarioMedicoRepository horarioMedicoRepository;
     private final MedicoRepository medicoRepository;
+    private final ConsultorioRepository consultorioRepository;
+    private final MedicoConsultorioRepository medicoConsultorioRepository;
 
     public HorarioMedicoService(HorarioMedicoRepository horarioMedicoRepository,
-            MedicoRepository medicoRepository) {
+            MedicoRepository medicoRepository,
+            ConsultorioRepository consultorioRepository,
+            MedicoConsultorioRepository medicoConsultorioRepository) {
         this.horarioMedicoRepository = horarioMedicoRepository;
         this.medicoRepository = medicoRepository;
+        this.consultorioRepository = consultorioRepository;
+        this.medicoConsultorioRepository = medicoConsultorioRepository;
     }
 
     /**
@@ -140,6 +177,10 @@ public class HorarioMedicoService {
      *                                          {@code {20, 30, 45, 60}}
      * @throws SolapamientoDeHorarioException   si el bloque se solapa con otro del mismo
      *                                          médico y día
+     * @throws ResourceNotFoundException        si el {@code consultorioId} del cuerpo no existe
+     *                                          en la organización del token
+     * @throws ConsultorioNoAsignadoAlMedicoException si el consultorio —el pedido o el principal
+     *                                          del médico— no está asignado a ese médico
      */
     @Transactional
     public HorarioMedicoResponse crear(AuthenticatedUser actor, UUID medicoId,
@@ -150,7 +191,9 @@ public class HorarioMedicoService {
         validarDuracion(request.duracionConsulta());
         comprobarSolapamiento(actor, medicoId, request.diaSemana(), request.horaInicio(),
                 request.horaFin(), NINGUN_ID);
-        var guardado = horarioMedicoRepository.save(HorarioMedicoMapper.aEntidad(medico, request));
+        var consultorio = consultorioAsignado(actor, medico, request.consultorioId());
+        var guardado = horarioMedicoRepository.save(
+                HorarioMedicoMapper.aEntidad(medico, consultorio, request));
         return HorarioMedicoMapper.aResponse(guardado);
     }
 
@@ -210,12 +253,18 @@ public class HorarioMedicoService {
      * solapamiento— y esta vez el solapamiento se consulta excluyendo el identificador del
      * propio bloque, para que no cuente como solapado consigo mismo.</p>
      *
+     * <p>El consultorio sí puede cambiar: un bloque de los cuatro días en un consultorio y uno
+     * en otro es el caso que motivó el alcance A2. Sin {@code consultorioId} en el cuerpo el
+     * bloque conserva el que ya tiene; con él, el destino se resuelve y se comprueba igual que en
+     * el alta.</p>
+     *
      * @param actor   usuario autenticado de la petición: tenant y rol del token
      * @param id      identificador del bloque a actualizar
      * @param request datos de entrada validados
      * @return representación del bloque actualizado
      * @throws ResourceNotFoundException        si no existe un bloque con ese id en la
-     *                                          organización del token
+     *                                          organización del token, o el consultorio pedido no
+     *                                          existe en ella
      * @throws AccessDeniedException            si el actor es {@code MEDICO} y el bloque no
      *                                          es de su agenda
      * @throws RangoHorarioInvalidoException    si el rango enviado es inválido
@@ -223,6 +272,8 @@ public class HorarioMedicoService {
      *                                          {@code {20, 30, 45, 60}}
      * @throws SolapamientoDeHorarioException   si el bloque se solapa con otro del mismo
      *                                          médico y día
+     * @throws ConsultorioNoAsignadoAlMedicoException si el consultorio pedido no está asignado
+     *                                          al médico del bloque
      */
     @Transactional
     public HorarioMedicoResponse actualizar(AuthenticatedUser actor, UUID id,
@@ -234,7 +285,10 @@ public class HorarioMedicoService {
         validarDuracion(request.duracionConsulta());
         comprobarSolapamiento(actor, medicoId, request.diaSemana(), request.horaInicio(),
                 request.horaFin(), id);
-        HorarioMedicoMapper.actualizarEntidad(horario, request);
+        var consultorio = request.consultorioId() == null
+                ? horario.getConsultorio()
+                : consultorioAsignado(actor, horario.getMedico(), request.consultorioId());
+        HorarioMedicoMapper.actualizarEntidad(horario, consultorio, request);
         return HorarioMedicoMapper.aResponse(horarioMedicoRepository.save(horario));
     }
 
@@ -256,6 +310,41 @@ public class HorarioMedicoService {
         var horario = buscarEnElTenant(actor, id);
         exigirPropiedadDeLaAgenda(actor, horario.getMedico().getId());
         horarioMedicoRepository.delete(horario);
+    }
+
+    /**
+     * Resuelve el consultorio donde se dictará el bloque y exige que esté asignado al médico.
+     *
+     * <p>Sin {@code consultorioId} devuelve el consultorio principal del médico, que es el
+     * comportamiento que la agenda ya tenía cuando el bloque no decía dónde atiende. Con
+     * {@code consultorioId}, lo resuelve contra el tenant del token: un consultorio de otra
+     * clínica y un UUID al azar producen el mismo 404, para no confirmar que el recurso existe.</p>
+     *
+     * <p>La asignación se comprueba en los dos caminos. Es la regla «primero asignar, después
+     * agendar» del alcance A2 y la que la base vuelve a exigir con
+     * {@code horario_medico_consultorio_asignado_fkey}; comprobarla aquí convierte un error de
+     * integridad en un {@code 409} que dice qué hacer. La consulta de la asignación ya está
+     * acotada por organización, así que el par de otra clínica tampoco puede colarse por esta vía.</p>
+     *
+     * @param actor         usuario autenticado de la petición, del que sale la organización
+     * @param medico        médico dueño del bloque, ya resuelto en el tenant
+     * @param consultorioId consultorio pedido, o {@code null} para el principal del médico
+     * @return el consultorio donde se dictará el bloque
+     * @throws ResourceNotFoundException              si el consultorio pedido no existe en la
+     *                                                organización del token
+     * @throws ConsultorioNoAsignadoAlMedicoException si el consultorio no está asignado al médico
+     */
+    private Consultorio consultorioAsignado(AuthenticatedUser actor, Medico medico, UUID consultorioId) {
+        var consultorio = consultorioId == null
+                ? medico.getConsultorio()
+                : consultorioRepository.buscarPorIdYOrganizacion(consultorioId, actor.tenantId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Consultorio", consultorioId));
+        if (medicoConsultorioRepository
+                .buscarAsignacion(medico.getId(), consultorio.getId(), actor.tenantId()).isEmpty()) {
+            throw ConsultorioNoAsignadoAlMedicoException.porNoEstarAsignado(medico.getId(),
+                    consultorio.getId());
+        }
+        return consultorio;
     }
 
     /**

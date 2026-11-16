@@ -615,23 +615,51 @@ colección cuelga de su dueño inmediato**, el ítem va plano):
 | `PUT` | `/api/v1/medicos/{id}` | 200 |
 | `DELETE` | `/api/v1/medicos/{id}` | 204 (baja lógica, idempotente) |
 
-### Decisión 1 — La baja es lógica porque las TRES FK entrantes lo obligan
+### Decisión 1 — La baja es lógica porque las FK entrantes lo impiden o destruyen datos
 
-**Contexto.** Tres tablas apuntan a `medico`, y **cada una se comporta distinto**:
+**Contexto.** Varias tablas apuntan a `medico`, y **cada una se comporta distinto**:
 
 | Tabla | Columna | `ON DELETE` | Efecto de un borrado físico del médico |
 |---|---|---|---|
-| `horario_medico` | `medico_id` NOT NULL | **CASCADE** | sus horarios se borran **en silencio** |
+| `horario_medico` | `medico_id` NOT NULL | **CASCADE** | sus horarios se borrarían **en silencio** |
+| `medico_consultorio` | `medico_id` NOT NULL (V4) | **CASCADE** | sus asignaciones de consultorio se borrarían |
 | `cita` | `medico_id` NOT NULL | **NO ACTION** | **falla** si tiene citas |
 | `usuario` | `medico_id` (nullable) | **SET NULL** | el usuario sobrevive huérfano |
+
+**Comportamiento real desde la V6.** Un borrado físico de un médico **con bloques de horario
+ya no se completa**: falla con violación de clave foránea. El motivo es que cada bloque apunta
+dos veces a filas del médico —`horario_medico_medico_id_fkey` (CASCADE, desde V1) y
+`horario_medico_consultorio_asignado_fkey` hacia `medico_consultorio (medico_id, consultorio_id)`
+(sin cascada, desde V6)—, y las dos cascadas compiten: la fila de la asignación desaparece antes
+que el bloque que la referencia, así que la base rechaza el `DELETE`. Lo fija
+`HorarioMedicoRepositoryTest#removeMedico_shouldBeRejectedByTheSchema_whenItStillHasHorarios`
+(comprobado sobre H2; en PostgreSQL el orden de los disparadores de integridad es igual de
+incierto, por lo que la conclusión se deriva del mismo esquema y **no** se ejercitó allí).
 
 **Decisión.** `desactivar()` pone `activo = false`, es idempotente, y **no hay endpoint de
 borrado físico**.
 
 **Por qué.** El borrado físico **o está bloqueado o destruye datos sin avisar**. No es una
-preferencia: es el esquema. Es el mismo razonamiento que en `consultorio`, pero aquí con tres
-comportamientos distintos conviviendo, y uno de ellos (CASCADE sobre horarios) es silencioso
-— el peor de los tres.
+preferencia: es el esquema. Es el mismo razonamiento que en `consultorio`, pero aquí con varios
+comportamientos distintos conviviendo, y uno de ellos (CASCADE sobre horarios) es silencioso — el
+peor de todos.
+
+### Decisión 1 bis — La clave de la asignación NO lleva `ON DELETE CASCADE`
+
+**Contexto.** La V6 agregó `horario_medico_consultorio_asignado_fkey`, que exige que el par
+`(medico_id, consultorio_id)` de un bloque exista en `medico_consultorio`. Esa clave podría
+haberse declarado con cascada, y entonces la cascada del médico volvería a completarse.
+
+**Decisión.** Se deja **sin cascada**.
+
+**Por qué.** `ON DELETE CASCADE` sobre esa clave no significa «borrar el médico borra sus
+bloques»: significa que **retirar una asignación borra los bloques** que se dictaban en ese
+consultorio. Retirar una asignación es una operación normal del administrador
+(`DELETE /medicos/{id}/consultorios/{consultorioId}`); con cascada, ese `DELETE` destruiría la
+agenda del médico en silencio. Se prefiere **rechazar antes que destruir**: el servicio comprueba
+los bloques primero y responde `409` diciendo cuáles son, y la clave queda como última línea de
+defensa. La consecuencia aceptada es que el borrado físico del médico ya no se completa, y por eso
+la baja del médico es lógica.
 
 ### Decisión 2 — `tarifaBase` en `BigDecimal`, y el mínimo es una regla de APLICACIÓN
 

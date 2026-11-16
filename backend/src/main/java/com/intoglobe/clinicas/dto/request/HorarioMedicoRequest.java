@@ -1,6 +1,7 @@
 package com.intoglobe.clinicas.dto.request;
 
 import java.time.LocalTime;
+import java.util.UUID;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
@@ -17,11 +18,27 @@ import jakarta.validation.constraints.NotNull;
  * primero sin ese bloque sin avisar. Como el cuerpo no puede expresar un cambio de
  * dueño, un único DTO sirve para ambas operaciones y la validación no diverge.</p>
  *
- * <p>Los cuatro campos son obligatorios. {@code diaSemana} sigue la convención de
+ * <p>Los cuatro primeros campos son obligatorios. {@code diaSemana} sigue la convención de
  * JavaScript {@code Date.getDay()} que ya asume el frontend —{@code 0=Domingo, 1=Lunes,
  * 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado}— y su rango espeja el CHECK de
  * V1 ({@code dia_semana >= 0 AND dia_semana <= 6}); con {@code @Min(0)} y {@code @Max(6)}
  * un valor fuera de rango se convierte en un 400 y no en un error de base de datos.</p>
+ *
+ * <p><strong>{@code consultorioId} es opcional, y su significado depende del verbo.</strong></p>
+ * <ul>
+ *   <li><strong>Alta ({@code POST}).</strong> Si falta, el bloque se dicta en el consultorio
+ *       <em>principal</em> del médico ({@code medico.consultorio_id}): un bloque sin especificar
+ *       va al consultorio de siempre, que es lo que ya hacía la agenda antes de que el bloque
+ *       dijera dónde atiende.</li>
+ *   <li><strong>Edición ({@code PUT}).</strong> Si falta, el bloque <em>conserva</em> el
+ *       consultorio que ya tiene. No vuelve al principal: el {@code PUT} reemplaza día, horas y
+ *       duración, y mover el bloque de consultorio solo porque el cuerpo no lo menciona sería un
+ *       cambio de datos silencioso. Para moverlo se envía el {@code consultorioId} destino.</li>
+ * </ul>
+ *
+ * <p>Lo que <strong>no</strong> cambia entre verbos: si el campo viene, el consultorio tiene que
+ * estar <em>asignado</em> a ese médico, y si no lo está el service responde 409 con el motivo. Esa
+ * comprobación no es expresable con anotaciones: depende del estado de la base, no del cuerpo.</p>
  *
  * <p><strong>Lo que este DTO no puede validar:</strong> que {@code horaInicio} sea
  * estrictamente anterior a {@code horaFin}, que el bloque no se solape con otro del
@@ -51,6 +68,10 @@ import jakarta.validation.constraints.NotNull;
  *                         deserializa como {@code 0} y el service lo rechaza con
  *                         {@code DuracionConsultaInvalidaException} → 400. La
  *                         intercepción ocurre en esa capa, no en esta anotación.
+ * @param consultorioId    consultorio donde se dicta el bloque (opcional). En el alta,
+ *                         {@code null} significa el consultorio principal del médico; en la
+ *                         edición, {@code null} conserva el consultorio actual del bloque. En
+ *                         los dos verbos, un consultorio no asignado a ese médico responde 409.
  */
 public record HorarioMedicoRequest(
 
@@ -73,5 +94,10 @@ public record HorarioMedicoRequest(
         @Schema(description = "Duración de cada cita en minutos; solo se aceptan 20, 30, 45 o 60, si no se responde 400.",
                 example = "30")
         @NotNull
-        short duracionConsulta) {
+        short duracionConsulta,
+
+        @Schema(description = "Consultorio donde se dicta el bloque. Opcional. En el alta, si se omite se usa el consultorio principal del médico; en la edición, si se omite se conserva el consultorio actual del bloque. Si se indica, tiene que estar asignado a ese médico; en caso contrario se responde 409.",
+                example = "e1a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                nullable = true)
+        UUID consultorioId) {
 }

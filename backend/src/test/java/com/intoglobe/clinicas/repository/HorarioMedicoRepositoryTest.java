@@ -20,6 +20,7 @@ import org.springframework.test.context.ActiveProfiles;
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.HorarioMedico;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.model.MedicoConsultorio;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.PlanTipo;
 
@@ -30,19 +31,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Pruebas de integración de {@link HorarioMedicoRepository} y del mapeo de
- * {@link HorarioMedico} contra el schema real de V1.
+ * {@link HorarioMedico} contra el schema real de V1, V6 y V7.
  *
  * <p>El perfil {@code test} mantiene H2 en modo PostgreSQL y Flyway activo, de modo
- * que estas pruebas validan la entidad y las dos consultas contra la tabla
+ * que estas pruebas validan la entidad y las tres consultas contra la tabla
  * realmente migrada: el arranque del contexto falla si Hibernate no puede validar
  * el mapeo (por ejemplo, si la entidad declarara un {@code createdAt} o un
- * {@code activo} que V1 no tiene en {@code horario_medico}).</p>
+ * {@code activo} que V1 no tiene en {@code horario_medico}, o si dejara sin mapear
+ * las columnas de consultorio y organización que la V7 dejó obligatorias).</p>
  *
  * <p>La entidad se puebla siempre con su constructor de negocio y sus métodos de
  * dominio: no se usa reflexión ni setters, porque la entidad no los expone por
  * diseño. Los horarios se crean sobre médicos reales persistidos con el
  * constructor de negocio de {@link Medico}, igual que en
- * {@link MedicoRepositoryTest}.</p>
+ * {@link MedicoRepositoryTest}. Todo médico de estas pruebas queda con su
+ * consultorio principal asignado, como lo deja el alta del médico: sin esa fila, la
+ * clave {@code horario_medico_consultorio_asignado_fkey} de la V6 rechaza el bloque.</p>
  */
 @DataJpaTest
 @ActiveProfiles("test")
@@ -53,6 +57,8 @@ class HorarioMedicoRepositoryTest {
     private static final short LUNES = 1;
     /** Martes. */
     private static final short MARTES = 2;
+    /** Jueves, para el caso del médico que un día atiende en otro consultorio. */
+    private static final short JUEVES = 4;
     /** Duración de consulta permitida por el CHECK de V1. */
     private static final short TREINTA_MINUTOS = 30;
     /**
@@ -82,6 +88,12 @@ class HorarioMedicoRepositoryTest {
 
         assertThat(encontrado.getId()).isEqualTo(id);
         assertThat(encontrado.getMedico().getId()).isEqualTo(medico.getId());
+        assertThat(encontrado.getConsultorio().getId())
+                .as("un bloque siempre dice en qué consultorio se dicta (V7: columna obligatoria)")
+                .isEqualTo(medico.getConsultorio().getId());
+        assertThat(encontrado.getOrganizacion().getId())
+                .as("la organización de la fila es la del médico, y es obligatoria desde la V7")
+                .isEqualTo(medico.getOrganizacion().getId());
         assertThat(encontrado.getDiaSemana()).isEqualTo(LUNES);
         assertThat(encontrado.getHoraInicio()).isEqualTo(LocalTime.of(9, 0));
         assertThat(encontrado.getHoraFin()).isEqualTo(LocalTime.of(13, 30));
@@ -114,6 +126,37 @@ class HorarioMedicoRepositoryTest {
         assertThat(horarios)
                 .extracting(HorarioMedico::getId)
                 .doesNotContain(ajenoId);
+    }
+
+    /**
+     * La agenda semanal se pinta con el nombre del consultorio de cada bloque, así que
+     * {@code listarPorMedico} trae el consultorio en la misma consulta ({@code JOIN FETCH}). Sin
+     * el fetch, Hibernate devolvería un proxy por bloque y el listado haría una consulta extra por
+     * fila: el N+1 clásico. Esta prueba fija el fetch; si alguien lo quita, falla.
+     */
+    @Test
+    @DisplayName("listarPorMedico trae el consultorio ya inicializado: sin una consulta extra por bloque")
+    void listarPorMedico_shouldFetchTheConsultorioToAvoidNPlusOne() {
+        var medico = persistirMedico("Dra. Agenda Sin N+1");
+        UUID medicoId = medico.getId();
+        UUID organizacionId = medico.getOrganizacion().getId();
+        persistirHorario(medico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
+        persistirHorario(medico, MARTES, LocalTime.of(11, 0), LocalTime.of(12, 0));
+        entityManager.clear();
+
+        var horarios = horarioMedicoRepository.listarPorMedico(medicoId, organizacionId);
+
+        assertThat(horarios).hasSize(2);
+        assertThat(horarios)
+                .allSatisfy(horario -> {
+                    assertThat(horario.getConsultorio())
+                            .as("cada bloque debe traer su consultorio asociado")
+                            .isNotNull();
+                    assertThat(Hibernate.isInitialized(horario.getConsultorio()))
+                            .as("con JOIN FETCH el nombre del consultorio no cuesta una consulta por bloque")
+                            .isTrue();
+                    assertThat(horario.getConsultorio().getNombre()).isNotBlank();
+                });
     }
 
     /**
@@ -186,44 +229,65 @@ class HorarioMedicoRepositoryTest {
     }
 
     /**
-     * La FK {@code horario_medico_medico_id_fkey} impone la integridad referencial:
-     * un horario no puede apuntar a un médico inexistente. Se usa
-     * {@code getReference} con un UUID aleatorio para que el proxy aporte el
-     * identificador sin consultar la tabla y sea la base quien rechace el INSERT.
+     * La FK {@code horario_medico_medico_id_fkey} impone la integridad referencial: un horario no
+     * puede apuntar a un médico inexistente.
+     *
+     * <p>Se escribe con SQL nativo porque la entidad ya no se puede construir sobre un proxy
+     * vacío: el constructor deriva la organización del médico y leerla en un {@code getReference}
+     * inexistente lanza {@code EntityNotFoundException} <em>antes</em> de llegar a la base. Aquí
+     * lo que se quiere medir es la clave foránea, no el proxy.</p>
      */
     @Test
-    @DisplayName("un horario huérfano viola la FK de medico y el repositorio traduce el error")
+    @DisplayName("un horario huérfano viola la FK de medico")
     void save_shouldRejectHorarioWithInexistentMedico() {
-        var medicoInexistente = entityManager.getReference(Medico.class, UUID.randomUUID());
-        var huerfano = new HorarioMedico(medicoInexistente, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0),
-                TREINTA_MINUTOS);
+        var existente = persistirMedico("Dra. Consultorio De La Fila Huérfana");
+        UUID organizacionId = existente.getOrganizacion().getId();
+        UUID consultorioId = existente.getConsultorio().getId();
 
-        assertThatThrownBy(() -> horarioMedicoRepository.saveAndFlush(huerfano))
+        assertThatThrownBy(() -> entityManager.createNativeQuery("INSERT INTO horario_medico"
+                        + " (medico_id, organizacion_id, consultorio_id, dia_semana, hora_inicio,"
+                        + " hora_fin, duracion_consulta) VALUES (:medicoId, :organizacionId,"
+                        + " :consultorioId, 1, '09:00:00', '10:00:00', 30)")
+                .setParameter("medicoId", UUID.randomUUID())
+                .setParameter("organizacionId", organizacionId)
+                .setParameter("consultorioId", consultorioId)
+                .executeUpdate())
                 .as("la FK de V1 debe impedir persistir un horario sin médico real")
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(jakarta.persistence.PersistenceException.class);
     }
 
     /**
-     * {@code horario_medico_medico_id_fkey} declara {@code ON DELETE CASCADE}: los
-     * horarios no sobreviven a su médico.
+     * La baja de un médico es <strong>lógica</strong>, y el esquema lo confirma: {@code
+     * horario_medico_medico_id_fkey} declara {@code ON DELETE CASCADE}, pero desde la V6 cada
+     * bloque apunta además a la asignación {@code (medico_id, consultorio_id)} de
+     * {@code medico_consultorio}, cuya clave no tiene cascada. Las dos cascadas compiten y el
+     * borrado termina rechazado: la fila de la asignación desaparece antes que el bloque que la
+     * referencia. Por eso la baja del médico es {@code activo = false} y no un {@code DELETE}.
      */
     @Test
-    void removeMedico_shouldCascadeDeleteHorarios() {
-        var medico = persistirMedico("Dr. Cascada");
+    @DisplayName("un médico con bloques no se puede borrar físicamente: su baja es lógica")
+    void removeMedico_shouldBeRejectedByTheSchema_whenItStillHasHorarios() {
+        var medico = persistirMedico("Dr. Baja Física");
         var primero = persistirHorario(medico, LUNES, LocalTime.of(9, 0), LocalTime.of(10, 0));
         var segundo = persistirHorario(medico, MARTES, LocalTime.of(11, 0), LocalTime.of(14, 0));
         UUID medicoId = medico.getId();
+        UUID primeroId = primero.getId();
+        UUID segundoId = segundo.getId();
         entityManager.clear();
 
         var medicoAdministrado = entityManager.find(Medico.class, medicoId);
-        entityManager.remove(medicoAdministrado);
-        entityManager.flush();
-        entityManager.clear();
 
-        assertThat(horarioMedicoRepository.findById(primero.getId()))
-                .as("la FK ON DELETE CASCADE debe eliminar los horarios con el médico")
-                .isEmpty();
-        assertThat(horarioMedicoRepository.findById(segundo.getId())).isEmpty();
+        assertThatThrownBy(() -> {
+            entityManager.remove(medicoAdministrado);
+            entityManager.flush();
+        })
+                .as("horario_medico_consultorio_asignado_fkey impide el borrado en cascada del médico")
+                .isInstanceOf(jakarta.persistence.PersistenceException.class);
+        entityManager.clear();
+        assertThat(horarioMedicoRepository.findById(primeroId))
+                .as("nada se borró: el borrado físico del médico no es el camino de la baja")
+                .isPresent();
+        assertThat(horarioMedicoRepository.findById(segundoId)).isPresent();
     }
 
     @Test
@@ -396,6 +460,71 @@ class HorarioMedicoRepositoryTest {
     }
 
     /**
+     * {@code listarBloquesEnConsultorio} es la consulta que el servicio usa antes de retirar un
+     * consultorio, y desde el mapeo de las columnas es JPQL: mismo nombre, mismos parámetros y
+     * mismo orden que cuando era nativa. El orden importa porque el {@code 409} enumera los
+     * bloques tal como llegan.
+     */
+    @Test
+    @DisplayName("listarBloquesEnConsultorio filtra por consultorio del médico y ordena por día y hora")
+    void listarBloquesEnConsultorio_shouldFilterByConsultorioAndSort() {
+        var organizacion = new Organizacion("Clínica Bloques Por Consultorio", PlanTipo.SOLO, null);
+        entityManager.persist(organizacion);
+        entityManager.flush();
+        var principal = persistirConsultorio(organizacion, "Consultorio Principal");
+        var secundario = persistirConsultorio(organizacion, "Consultorio Norte");
+        var medico = persistirMedico(organizacion, principal, "Dr. Bloques Por Consultorio");
+        var otroMedico = persistirMedico(organizacion, principal, "Dra. Bloques Ajenos");
+        UUID medicoId = medico.getId();
+        asignar(medico, secundario);
+        asignar(otroMedico, secundario);
+        // En desorden a propósito: jueves por la tarde antes que lunes por la mañana.
+        var juevesEnElNorte = persistirHorario(medico, secundario, JUEVES,
+                LocalTime.of(15, 0), LocalTime.of(19, 0));
+        var lunesEnElNorte = persistirHorario(medico, secundario, LUNES,
+                LocalTime.of(9, 0), LocalTime.of(13, 0));
+        var lunesEnElPrincipal = persistirHorario(medico, principal, LUNES,
+                LocalTime.of(13, 0), LocalTime.of(15, 0));
+        var delOtroMedico = persistirHorario(otroMedico, secundario, LUNES,
+                LocalTime.of(9, 0), LocalTime.of(13, 0));
+        UUID principalId = lunesEnElPrincipal.getId();
+        UUID ajenoId = delOtroMedico.getId();
+        UUID secundarioId = secundario.getId();
+        entityManager.clear();
+
+        var bloques = horarioMedicoRepository.listarBloquesEnConsultorio(medicoId, secundarioId);
+
+        assertThat(bloques)
+                .extracting(HorarioMedico::getId)
+                .containsExactly(lunesEnElNorte.getId(), juevesEnElNorte.getId());
+        assertThat(bloques)
+                .extracting(HorarioMedico::getConsultorio)
+                .allSatisfy(consultorio -> assertThat(consultorio.getId()).isEqualTo(secundarioId));
+        assertThat(bloques)
+                .extracting(HorarioMedico::getId)
+                .as("los del consultorio principal y los de otro médico no entran")
+                .doesNotContain(principalId, ajenoId);
+    }
+
+    /**
+     * La clave {@code horario_medico_consultorio_asignado_fkey} de la V6 es la última línea de
+     * defensa de la regla «primero asignar, después agendar»: el servicio responde 409 antes,
+     * pero la base tampoco acepta un bloque en un consultorio que el médico no tiene asignado.
+     */
+    @Test
+    @DisplayName("la base rechaza un bloque en un consultorio no asignado al médico")
+    void save_shouldRejectConsultorioNotAssignedToTheMedico() {
+        var medico = persistirMedico("Dr. Consultorio No Asignado");
+        var sinAsignar = persistirConsultorio(medico.getOrganizacion(), "Consultorio Sin Asignar");
+        var bloque = new HorarioMedico(medico, sinAsignar, LUNES, LocalTime.of(9, 0),
+                LocalTime.of(10, 0), TREINTA_MINUTOS);
+
+        assertThatThrownBy(() -> horarioMedicoRepository.saveAndFlush(bloque))
+                .as("el par (medico_id, consultorio_id) tiene que existir en medico_consultorio")
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
      * Persiste y hace flush de un médico con su organización y consultorio, para que
      * tenga identidad antes de asociarle horarios.
      */
@@ -403,22 +532,73 @@ class HorarioMedicoRepositoryTest {
         var organizacion = new Organizacion("Clínica Horarios", PlanTipo.SOLO, null);
         entityManager.persist(organizacion);
         entityManager.flush();
-        var consultorio = new Consultorio(organizacion, "Consultorio Horarios", null, null);
-        entityManager.persist(consultorio);
-        entityManager.flush();
+        return persistirMedico(organizacion, persistirConsultorio(organizacion, "Consultorio Horarios"),
+                nombre);
+    }
+
+    /**
+     * Persiste un médico de la organización indicada, con ese consultorio como principal, y deja
+     * escrita la asignación que el alta del médico crea: sin ella, la clave de la V6 rechaza
+     * cualquier bloque en el consultorio principal.
+     *
+     * @param organizacion organización dueña
+     * @param consultorio  consultorio principal del médico
+     * @param nombre       nombre del médico
+     * @return el médico persistido
+     */
+    private Medico persistirMedico(Organizacion organizacion, Consultorio consultorio, String nombre) {
         var medico = new Medico(organizacion, consultorio, nombre, null, null, null, new BigDecimal("500.00"));
         entityManager.persist(medico);
         entityManager.flush();
+        asignar(medico, consultorio);
         return medico;
     }
 
     /**
-     * Persiste y hace flush de un horario, de modo que tenga identidad y pueda usarse
-     * en las consultas del repositorio.
+     * Persiste y hace flush de un consultorio de la organización indicada.
+     *
+     * @param organizacion organización dueña
+     * @param nombre       nombre del consultorio
+     * @return el consultorio persistido
+     */
+    private Consultorio persistirConsultorio(Organizacion organizacion, String nombre) {
+        var consultorio = new Consultorio(organizacion, nombre, null, null);
+        entityManager.persist(consultorio);
+        entityManager.flush();
+        return consultorio;
+    }
+
+    /**
+     * Persiste la asignación del consultorio al médico, con la organización del médico.
+     *
+     * @param medico      médico al que se asigna
+     * @param consultorio consultorio asignado
+     * @return la asignación persistida
+     */
+    private MedicoConsultorio asignar(Medico medico, Consultorio consultorio) {
+        var asignacion = new MedicoConsultorio(medico, consultorio, medico.getOrganizacion());
+        entityManager.persist(asignacion);
+        entityManager.flush();
+        return asignacion;
+    }
+
+    /**
+     * Persiste y hace flush de un horario en el consultorio principal del médico, de modo que
+     * tenga identidad y pueda usarse en las consultas del repositorio.
      */
     private HorarioMedico persistirHorario(Medico medico, short diaSemana, LocalTime horaInicio,
             LocalTime horaFin) {
-        var horario = new HorarioMedico(medico, diaSemana, horaInicio, horaFin, TREINTA_MINUTOS);
+        return persistirHorario(medico, medico.getConsultorio(), diaSemana, horaInicio, horaFin);
+    }
+
+    /**
+     * Persiste y hace flush de un horario en el consultorio indicado, que tiene que estar
+     * asignado al médico.
+     */
+    private HorarioMedico persistirHorario(Medico medico, Consultorio consultorio, short diaSemana,
+            LocalTime horaInicio, LocalTime horaFin) {
+        var horario = new HorarioMedico(medico, consultorio, diaSemana, horaInicio, horaFin,
+                TREINTA_MINUTOS);
         entityManager.persist(horario);
         entityManager.flush();
         return horario;

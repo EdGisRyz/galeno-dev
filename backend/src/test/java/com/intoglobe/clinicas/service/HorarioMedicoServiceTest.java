@@ -17,6 +17,7 @@ import org.springframework.security.access.AccessDeniedException;
 
 import com.intoglobe.clinicas.dto.request.HorarioMedicoRequest;
 import com.intoglobe.clinicas.dto.response.HorarioMedicoResponse;
+import com.intoglobe.clinicas.exception.ConsultorioNoAsignadoAlMedicoException;
 import com.intoglobe.clinicas.exception.DuracionConsultaInvalidaException;
 import com.intoglobe.clinicas.exception.RangoHorarioInvalidoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
@@ -24,9 +25,12 @@ import com.intoglobe.clinicas.exception.SolapamientoDeHorarioException;
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.HorarioMedico;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.model.MedicoConsultorio;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.PlanTipo;
+import com.intoglobe.clinicas.repository.ConsultorioRepository;
 import com.intoglobe.clinicas.repository.HorarioMedicoRepository;
+import com.intoglobe.clinicas.repository.MedicoConsultorioRepository;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.security.AuthenticatedUser;
 
@@ -37,6 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyShort;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -79,6 +84,7 @@ class HorarioMedicoServiceTest {
     private static final String ROL_ADMIN = "ADMIN";
     private static final String ROL_MEDICO = "MEDICO";
     private static final String CORREO = "ana.torres@clinicasanrafael.test";
+    private static final String CONSULTORIO_PRINCIPAL = "Consultorio Centro";
 
     /**
      * Valor de {@code idExcluido} que el servicio debe enviar al crear: el UUID todo
@@ -92,6 +98,12 @@ class HorarioMedicoServiceTest {
     @Mock
     private MedicoRepository medicoRepository;
 
+    @Mock
+    private ConsultorioRepository consultorioRepository;
+
+    @Mock
+    private MedicoConsultorioRepository medicoConsultorioRepository;
+
     @InjectMocks
     private HorarioMedicoService horarioMedicoService;
 
@@ -102,6 +114,7 @@ class HorarioMedicoServiceTest {
         var medicoId = UUID.randomUUID();
         var medico = medicoEn(organizacionConId(tenantId), medicoId);
         when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        asignarElPrincipal(medico, tenantId);
         when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, NUEVE, DIEZ, NINGUN_ID))
                 .thenReturn(0L);
         when(horarioMedicoRepository.save(any(HorarioMedico.class)))
@@ -111,6 +124,8 @@ class HorarioMedicoServiceTest {
         var respuesta = horarioMedicoService.crear(adminDe(tenantId), medicoId, request);
 
         assertThat(respuesta.medicoId()).isEqualTo(medicoId);
+        assertThat(respuesta.consultorioId()).isEqualTo(medico.getConsultorio().getId());
+        assertThat(respuesta.consultorioNombre()).isEqualTo(CONSULTORIO_PRINCIPAL);
         assertThat(respuesta.diaSemana()).isEqualTo(LUNES);
         assertThat(respuesta.horaInicio()).isEqualTo(NUEVE);
         assertThat(respuesta.horaFin()).isEqualTo(DIEZ);
@@ -119,6 +134,10 @@ class HorarioMedicoServiceTest {
         verify(horarioMedicoRepository).save(captor.capture());
         var guardado = captor.getValue();
         assertThat(guardado.getMedico()).isSameAs(medico);
+        assertThat(guardado.getConsultorio()).isSameAs(medico.getConsultorio());
+        assertThat(guardado.getOrganizacion())
+                .as("la organización de la fila se toma del médico, nunca del cliente")
+                .isSameAs(medico.getOrganizacion());
         assertThat(guardado.getDiaSemana()).isEqualTo(LUNES);
         assertThat(guardado.getHoraInicio()).isEqualTo(NUEVE);
         assertThat(guardado.getHoraFin()).isEqualTo(DIEZ);
@@ -290,6 +309,7 @@ class HorarioMedicoServiceTest {
         var medicoId = UUID.randomUUID();
         var medico = medicoEn(organizacionConId(tenantId), medicoId);
         when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        asignarElPrincipal(medico, tenantId);
         when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, DIEZ, ONCE, NINGUN_ID))
                 .thenReturn(0L);
         when(horarioMedicoRepository.save(any(HorarioMedico.class)))
@@ -309,6 +329,7 @@ class HorarioMedicoServiceTest {
         var medicoId = UUID.randomUUID();
         var medico = medicoEn(organizacionConId(tenantId), medicoId);
         when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        asignarElPrincipal(medico, tenantId);
         when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, NUEVE, DIEZ, NINGUN_ID))
                 .thenReturn(0L);
         when(horarioMedicoRepository.save(any(HorarioMedico.class)))
@@ -742,6 +763,187 @@ class HorarioMedicoServiceTest {
         verify(horarioMedicoRepository, never()).delete(any(HorarioMedico.class));
     }
 
+    @Test
+    @DisplayName("crear con un consultorio explícito asignado guarda el bloque en ese consultorio")
+    void crear_shouldUseTheRequestedConsultorio_whenItIsAssignedToTheMedico() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var solicitado = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        var consultorioId = solicitado.getId();
+        var asignacion = new MedicoConsultorio(medico, solicitado, medico.getOrganizacion());
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, tenantId))
+                .thenReturn(Optional.of(solicitado));
+        when(medicoConsultorioRepository.buscarAsignacion(medicoId, consultorioId, tenantId))
+                .thenReturn(Optional.of(asignacion));
+        when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, NUEVE, DIEZ, NINGUN_ID))
+                .thenReturn(0L);
+        when(horarioMedicoRepository.save(any(HorarioMedico.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA, consultorioId);
+
+        var respuesta = horarioMedicoService.crear(adminDe(tenantId), medicoId, request);
+
+        assertThat(respuesta.consultorioId()).isEqualTo(consultorioId);
+        assertThat(respuesta.consultorioNombre()).isEqualTo("Consultorio Norte");
+        var captor = ArgumentCaptor.forClass(HorarioMedico.class);
+        verify(horarioMedicoRepository).save(captor.capture());
+        assertThat(captor.getValue().getConsultorio())
+                .as("el bloque se dicta en el consultorio pedido, no en el principal")
+                .isSameAs(solicitado);
+    }
+
+    @Test
+    @DisplayName("crear con un consultorio no asignado responde 409 con el motivo y no guarda nada")
+    void crear_shouldThrowConsultorioNoAsignadoAlMedicoExceptionAndNotSave_whenConsultorioIsNotAssigned() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var noAsignado = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        var consultorioId = noAsignado.getId();
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, tenantId))
+                .thenReturn(Optional.of(noAsignado));
+        when(medicoConsultorioRepository.buscarAsignacion(medicoId, consultorioId, tenantId))
+                .thenReturn(Optional.empty());
+        when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, NUEVE, DIEZ, NINGUN_ID))
+                .thenReturn(0L);
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA, consultorioId);
+
+        assertThatThrownBy(() -> horarioMedicoService.crear(adminDe(tenantId), medicoId, request))
+                .isInstanceOf(ConsultorioNoAsignadoAlMedicoException.class)
+                .hasMessageContaining(consultorioId.toString())
+                .hasMessageContaining(medicoId.toString())
+                .hasMessageContaining("asignarlo");
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("crear con un consultorio principal sin asignación falla cerrado con 409 en vez de un error de integridad")
+    void crear_shouldThrowConsultorioNoAsignadoAlMedicoException_whenThePrincipalIsNotAssigned() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var idDelPrincipal = medico.getConsultorio().getId();
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        when(medicoConsultorioRepository.buscarAsignacion(medicoId, idDelPrincipal, tenantId))
+                .thenReturn(Optional.empty());
+        when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, NUEVE, DIEZ, NINGUN_ID))
+                .thenReturn(0L);
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+
+        assertThatThrownBy(() -> horarioMedicoService.crear(adminDe(tenantId), medicoId, request))
+                .isInstanceOf(ConsultorioNoAsignadoAlMedicoException.class)
+                .hasMessageContaining(medicoId.toString());
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("crear con un consultorio de otra organización responde 404 y no guarda nada")
+    void crear_shouldThrowResourceNotFoundExceptionAndNotSave_whenRequestedConsultorioIsNotInTheTenant() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        // El 404 del consultorio gana antes de leer el identificador del médico, así que la
+        // fixture no necesita la identidad simulada.
+        var medico = medicoEn(organizacionConId(tenantId));
+        var consultorioId = UUID.randomUUID();
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, tenantId))
+                .thenReturn(Optional.empty());
+        when(horarioMedicoRepository.contarSolapamientos(medicoId, tenantId, LUNES, NUEVE, DIEZ, NINGUN_ID))
+                .thenReturn(0L);
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA, consultorioId);
+
+        assertThatThrownBy(() -> horarioMedicoService.crear(adminDe(tenantId), medicoId, request))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Consultorio")
+                .hasMessageContaining(consultorioId.toString());
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("actualizar sin consultorioId conserva el consultorio actual del bloque")
+    void actualizar_shouldKeepTheCurrentConsultorio_whenRequestHasNoConsultorioId() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var secundario = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        var horario = horarioConId(medico, secundario, LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+        var idOriginal = horario.getId();
+        when(horarioMedicoRepository.findById(idOriginal)).thenReturn(Optional.of(horario));
+        when(horarioMedicoRepository.contarSolapamientos(any(UUID.class), any(UUID.class), anyShort(),
+                any(LocalTime.class), any(LocalTime.class), any(UUID.class))).thenReturn(0L);
+        when(horarioMedicoRepository.save(any(HorarioMedico.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+        var request = request(MARTES, ONCE, DOCE, DURACION_TREINTA);
+
+        var respuesta = horarioMedicoService.actualizar(adminDe(tenantId), idOriginal, request);
+
+        assertThat(respuesta.consultorioId())
+                .as("un PUT que no nombra el consultorio no puede mover el bloque al principal sin avisar")
+                .isEqualTo(secundario.getId());
+        verify(consultorioRepository, never()).buscarPorIdYOrganizacion(any(UUID.class), any(UUID.class));
+    }
+
+    @Test
+    @DisplayName("actualizar con un consultorio asignado mueve el bloque a ese consultorio")
+    void actualizar_shouldMoveTheBlock_whenRequestedConsultorioIsAssigned() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var principal = medico.getConsultorio();
+        var secundario = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        var consultorioId = secundario.getId();
+        var horario = horarioConId(medico, principal, LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+        var idOriginal = horario.getId();
+        var asignacion = new MedicoConsultorio(medico, secundario, medico.getOrganizacion());
+        when(horarioMedicoRepository.findById(idOriginal)).thenReturn(Optional.of(horario));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, tenantId))
+                .thenReturn(Optional.of(secundario));
+        when(medicoConsultorioRepository.buscarAsignacion(medicoId, consultorioId, tenantId))
+                .thenReturn(Optional.of(asignacion));
+        when(horarioMedicoRepository.contarSolapamientos(any(UUID.class), any(UUID.class), anyShort(),
+                any(LocalTime.class), any(LocalTime.class), any(UUID.class))).thenReturn(0L);
+        when(horarioMedicoRepository.save(any(HorarioMedico.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+        var request = request(MARTES, ONCE, DOCE, DURACION_TREINTA, consultorioId);
+
+        var respuesta = horarioMedicoService.actualizar(adminDe(tenantId), idOriginal, request);
+
+        assertThat(respuesta.consultorioId()).isEqualTo(consultorioId);
+        assertThat(respuesta.consultorioNombre()).isEqualTo("Consultorio Norte");
+        verify(horarioMedicoRepository).save(horario);
+        assertThat(horario.getConsultorio()).isSameAs(secundario);
+    }
+
+    @Test
+    @DisplayName("actualizar con un consultorio no asignado responde 409 y conserva el bloque como estaba")
+    void actualizar_shouldThrowConsultorioNoAsignadoAlMedicoException_whenConsultorioIsNotAssigned() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var principal = medico.getConsultorio();
+        var noAsignado = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        var consultorioId = noAsignado.getId();
+        var horario = horarioConId(medico, principal, LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+        var idOriginal = horario.getId();
+        when(horarioMedicoRepository.findById(idOriginal)).thenReturn(Optional.of(horario));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, tenantId))
+                .thenReturn(Optional.of(noAsignado));
+        when(medicoConsultorioRepository.buscarAsignacion(medicoId, consultorioId, tenantId))
+                .thenReturn(Optional.empty());
+        when(horarioMedicoRepository.contarSolapamientos(any(UUID.class), any(UUID.class), anyShort(),
+                any(LocalTime.class), any(LocalTime.class), any(UUID.class))).thenReturn(0L);
+        var request = request(MARTES, ONCE, DOCE, DURACION_TREINTA, consultorioId);
+
+        assertThatThrownBy(() -> horarioMedicoService.actualizar(adminDe(tenantId), idOriginal, request))
+                .isInstanceOf(ConsultorioNoAsignadoAlMedicoException.class);
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+        assertThat(horario.getConsultorio()).isSameAs(principal);
+        assertThat(horario.getDiaSemana()).isEqualTo(LUNES);
+    }
+
     /**
      * Actor {@code ADMIN} del tenant indicado.
      *
@@ -765,11 +967,35 @@ class HorarioMedicoServiceTest {
     }
 
     /**
-     * Request válido con el bloque indicado.
+     * Request válido con el bloque indicado, en el consultorio principal del médico.
      */
     private static HorarioMedicoRequest request(short diaSemana, LocalTime horaInicio, LocalTime horaFin,
             short duracionConsulta) {
-        return new HorarioMedicoRequest(diaSemana, horaInicio, horaFin, duracionConsulta);
+        return request(diaSemana, horaInicio, horaFin, duracionConsulta, null);
+    }
+
+    /**
+     * Request válido con el bloque indicado y un consultorio explícito.
+     */
+    private static HorarioMedicoRequest request(short diaSemana, LocalTime horaInicio, LocalTime horaFin,
+            short duracionConsulta, UUID consultorioId) {
+        return new HorarioMedicoRequest(diaSemana, horaInicio, horaFin, duracionConsulta, consultorioId);
+    }
+
+    /**
+     * Simula la asignación del consultorio principal al médico, que el alta del médico deja
+     * escrita: sin esa fila, un bloque en el consultorio principal no puede existir.
+     *
+     * @param medico   médico al que se le asigna su principal
+     * @param tenantId organización del token
+     */
+    private void asignarElPrincipal(Medico medico, UUID tenantId) {
+        var principal = medico.getConsultorio();
+        var asignacion = new MedicoConsultorio(medico, principal, medico.getOrganizacion());
+        var idDelMedico = medico.getId();
+        var idDelPrincipal = principal.getId();
+        when(medicoConsultorioRepository.buscarAsignacion(idDelMedico, idDelPrincipal, tenantId))
+                .thenReturn(Optional.of(asignacion));
     }
 
     /**
@@ -793,10 +1019,25 @@ class HorarioMedicoServiceTest {
      * @return el médico transitorio
      */
     private static Medico medicoEn(Organizacion organizacion) {
-        var consultorio = new Consultorio(organizacion, "Consultorio Centro", "Av. Reforma 100, CDMX",
-                "+52 55 5555 1234");
+        var consultorio = consultorioConId(organizacion, CONSULTORIO_PRINCIPAL);
         return new Medico(organizacion, consultorio, "Dra. Ana Torres", "Cardiología", "1234567",
                 "+52 55 1111 2222", new BigDecimal("500.00"));
+    }
+
+    /**
+     * Consultorio con identidad simulada mediante un espía. La identidad importa porque el
+     * servicio resuelve el consultorio del bloque y comprueba su asignación por identificador.
+     *
+     * @param organizacion organización dueña del consultorio
+     * @param nombre       nombre del consultorio
+     * @return el consultorio espía
+     */
+    private static Consultorio consultorioConId(Organizacion organizacion, String nombre) {
+        var consultorio = spy(new Consultorio(organizacion, nombre, null, null));
+        // La identidad solo la lee la prueba que la necesita; el espía se crea siempre para no
+        // bifurcar las fixtures, así que el stub no puede exigirse usado en todas.
+        lenient().doReturn(UUID.randomUUID()).when(consultorio).getId();
+        return consultorio;
     }
 
     /**
@@ -818,7 +1059,16 @@ class HorarioMedicoServiceTest {
      */
     private static HorarioMedico horarioConId(Medico medico, short diaSemana, LocalTime horaInicio,
             LocalTime horaFin, short duracionConsulta) {
-        var horario = spy(new HorarioMedico(medico, diaSemana, horaInicio, horaFin, duracionConsulta));
+        return horarioConId(medico, medico.getConsultorio(), diaSemana, horaInicio, horaFin, duracionConsulta);
+    }
+
+    /**
+     * Bloque de disponibilidad con identidad simulada, dictado en el consultorio indicado.
+     */
+    private static HorarioMedico horarioConId(Medico medico, Consultorio consultorio, short diaSemana,
+            LocalTime horaInicio, LocalTime horaFin, short duracionConsulta) {
+        var horario = spy(new HorarioMedico(medico, consultorio, diaSemana, horaInicio, horaFin,
+                duracionConsulta));
         doReturn(UUID.randomUUID()).when(horario).getId();
         return horario;
     }
