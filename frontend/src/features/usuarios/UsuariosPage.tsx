@@ -22,6 +22,8 @@ import type { Medico } from '@/features/medicos/medicos.types';
 import { useAuthStore } from '@/store/auth.store';
 import {
   UserCog,
+  UserCheck,
+  UserX,
   Plus,
   Search,
   Pencil,
@@ -41,6 +43,13 @@ const MENSAJE_ERROR_ACTIVAR =
   'No fue posible reactivar la cuenta. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
 const ROLES: RolUsuario[] = ['ADMIN', 'MEDICO', 'PACIENTE', 'RECEPCIONISTA'];
+
+const VARIANTE_POR_ROL: Record<RolUsuario, 'primary' | 'secondary' | 'warning' | 'default'> = {
+  ADMIN: 'primary',
+  MEDICO: 'secondary',
+  RECEPCIONISTA: 'warning',
+  PACIENTE: 'default',
+};
 
 const EMPTY_FORM = {
   email: '',
@@ -286,6 +295,9 @@ export function UsuariosPage() {
                 {metrica(stats.activas)}
               </h3>
             </div>
+            <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center">
+              <UserCheck className="w-5 h-5" />
+            </div>
           </CardContent>
         </Card>
 
@@ -298,6 +310,9 @@ export function UsuariosPage() {
               <h3 className="text-2xl font-bold font-heading text-[#41484D] mt-1 tnum">
                 {metrica(stats.inactivas)}
               </h3>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-[#F1F5F9] text-[#64748B] flex items-center justify-center">
+              <UserX className="w-5 h-5" />
             </div>
           </CardContent>
         </Card>
@@ -375,7 +390,9 @@ export function UsuariosPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="default">{u.rol}</Badge>
+                    <Badge variant={VARIANTE_POR_ROL[u.rol]} showDot={false}>
+                      {u.rol}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <span className="text-xs text-[#41484D]">
