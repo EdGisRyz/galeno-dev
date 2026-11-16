@@ -1,4 +1,4 @@
-import type { Usuario } from '@/features/auth/auth.types';
+import type { Usuario } from '@/features/usuarios/usuarios.types';
 import type { Cita } from '@/features/citas/citas.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { Diagnostico } from '@/features/expediente/expediente.types';
@@ -19,29 +19,29 @@ export const mockOrganization: Organizacion = {
 export const mockUsers: Usuario[] = [
   {
     id: 'usr-admin-1',
-    organizacion_id: 'org-001',
+    organizacionId: 'org-001',
     email: 'admin@sanrafael.com',
     rol: 'ADMIN',
     activo: true,
-    created_at: new Date('2026-01-01').toISOString(),
+    createdAt: new Date('2026-01-01').toISOString(),
   },
   {
     id: 'usr-doc-1',
-    organizacion_id: 'org-001',
-    medico_id: 'med-001',
+    organizacionId: 'org-001',
+    medicoId: 'med-001',
     email: 'dra.elena@sanrafael.com',
     rol: 'MEDICO',
     activo: true,
-    created_at: new Date('2026-01-02').toISOString(),
+    createdAt: new Date('2026-01-02').toISOString(),
   },
   {
     id: 'usr-doc-2',
-    organizacion_id: 'org-001',
-    medico_id: 'med-002',
+    organizacionId: 'org-001',
+    medicoId: 'med-002',
     email: 'dr.roberto@sanrafael.com',
     rol: 'MEDICO',
     activo: true,
-    created_at: new Date('2026-01-03').toISOString(),
+    createdAt: new Date('2026-01-03').toISOString(),
   },
 ];
 

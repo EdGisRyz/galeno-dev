@@ -5,17 +5,6 @@
 
 export type UserRole = 'ADMIN' | 'MEDICO' | 'PACIENTE';
 
-// Proyección de la tabla `usuario` del esquema V1.
-export interface Usuario {
-  id: string;
-  organizacion_id: string;
-  medico_id?: string | null;
-  email: string;
-  rol: UserRole;
-  activo: boolean;
-  created_at: string;
-}
-
 // Sesión del cliente: proyección de los claims del token (`sub`, `email`, `role`, `tenantId`,
 // `medicoId`) más los datos de presentación que la UI guarda junto al usuario.
 export interface AuthUser {

@@ -1,4 +1,4 @@
-import type { AxiosInstance } from 'axios';
+import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import {
   mockUsers,
   mockPatients,
@@ -17,6 +17,7 @@ import type { Cita, EstadoCita } from '@/features/citas/citas.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { Medico, HorarioMedico } from '@/features/medicos/medicos.types';
+import type { Usuario } from '@/features/usuarios/usuarios.types';
 import type { Diagnostico } from '@/features/expediente/expediente.types';
 import type { MarcaClinica, PatientIdentification, SoapNote, Prescription } from '@/types/futuro.types';
 
@@ -50,11 +51,31 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   // Simular retraso de red para dar retroalimentación visual realista
   const delay = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  /**
+   * Decodifica el `sub` del token de la sesión desde la cabecera `Authorization`, para las reglas
+   * de "nadie opera sobre su propia cuenta" (R11) de Usuarios. Se llama solo dentro de
+   * `config.adapter`, nunca en el cuerpo del interceptor: este mock se registra antes que el
+   * interceptor que adjunta `Authorization` (ver `lib/axios.ts`), así que la cabecera todavía no
+   * existe cuando el cuerpo del interceptor corre, pero sí cuando Axios por fin invoca el adapter.
+   */
+  const subDeLaSesion = (cfg: InternalAxiosRequestConfig): string | null => {
+    const header = cfg.headers?.get?.('Authorization') as string | undefined;
+    const token = header?.replace(/^Bearer\s+/i, '');
+    const payload = token?.split('.')[1];
+    if (!payload) return null;
+    try {
+      return JSON.parse(atob(payload)).sub ?? null;
+    } catch {
+      return null;
+    }
+  };
+
   // Mutable in-memory store for mocks
   const patients: PacienteConFicha[] = [...mockPatients];
   const consultorios: Consultorio[] = [...mockClinicRooms];
   const medicos: MedicoMock[] = [...mockDoctors];
   const horarios: HorarioMedico[] = [...mockDoctorSchedules];
+  const usuarios: Usuario[] = [...mockUsers];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
   const diagnosticos: Diagnostico[] = [...mockDiagnoses];
@@ -86,8 +107,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
         sub: user.id,
         email: user.email,
         role: user.rol,
-        tenantId: user.organizacion_id,
-        medicoId: user.medico_id,
+        tenantId: user.organizacionId,
+        medicoId: user.medicoId,
         iat,
         exp: iat + VIGENCIA_TOKEN_SEGUNDOS,
       };
@@ -136,6 +157,203 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
         headers: {},
         config,
       });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
+    // USUARIOS (HU14-16, contrato real)
+    // ─────────────────────────────────────────
+    // Mismo contrato que Paciente/Consultorio/Médico: colección anidada a la organización dueña
+    // e ítem plano. Reglas propias (R11, R8) que el mock replica: nadie opera sobre su propia
+    // cuenta (cambio de rol o baja) y la última cuenta ADMIN activa no puede perder ese rol ni
+    // darse de baja.
+    const coleccionDeUsuarios = url.match(/^\/organizaciones\/([^/]+)\/usuarios\/?$/);
+    const usuarioPorId = url.match(/^\/usuarios\/([^/]+)\/?$/);
+    const usuarioActivar = url.match(/^\/usuarios\/([^/]+)\/activar\/?$/);
+
+    if (coleccionDeUsuarios && method === 'get') {
+      await delay();
+      const organizacionId = coleccionDeUsuarios[1];
+      const deLaOrganizacion = usuarios
+        .filter((u) => u.organizacionId === organizacionId)
+        .sort((a, b) => a.email.localeCompare(b.email));
+      config.adapter = async () => ({
+        data: deLaOrganizacion,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (coleccionDeUsuarios && method === 'post') {
+      await delay();
+      const organizacionId = coleccionDeUsuarios[1];
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const email = String(body.email || '').toLowerCase();
+
+      if (body.rol === 'MEDICO' && !body.medicoId) {
+        config.adapter = async () => ({
+          data: { message: 'El rol MEDICO requiere un médico asociado' },
+          status: 400,
+          statusText: 'Bad Request',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+      if (usuarios.some((u) => u.organizacionId === organizacionId && u.email === email)) {
+        config.adapter = async () => ({
+          data: { message: 'El correo ya está en uso dentro de la organización' },
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+
+      const nuevoUsuario: Usuario = {
+        id: `usr-${Date.now()}`,
+        activo: true,
+        createdAt: new Date().toISOString(),
+        ...body,
+        email,
+        organizacionId,
+      };
+      usuarios.push(nuevoUsuario);
+      config.adapter = async () => ({
+        data: nuevoUsuario,
+        status: 201,
+        statusText: 'Created',
+        headers: { Location: `/api/v1/usuarios/${nuevoUsuario.id}` },
+        config,
+      });
+      return config;
+    }
+
+    if (usuarioActivar && method === 'post') {
+      await delay();
+      const id = usuarioActivar[1];
+      const idx = usuarios.findIndex((u) => u.id === id);
+      if (idx !== -1) usuarios[idx] = { ...usuarios[idx], activo: true };
+
+      config.adapter = async () => ({
+        data: undefined,
+        status: 204,
+        statusText: 'No Content',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (usuarioPorId && method === 'get') {
+      await delay();
+      const id = usuarioPorId[1];
+      const found = usuarios.find((u) => u.id === id);
+      config.adapter = async () =>
+        found
+          ? { data: found, status: 200, statusText: 'OK', headers: {}, config }
+          : {
+              data: { message: 'Cuenta no encontrada' },
+              status: 404,
+              statusText: 'Not Found',
+              headers: {},
+              config,
+            };
+      return config;
+    }
+
+    if (usuarioPorId && method === 'put') {
+      await delay();
+      const id = usuarioPorId[1];
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+
+      config.adapter = async () => {
+        const idx = usuarios.findIndex((u) => u.id === id);
+        if (idx === -1) {
+          return { data: { message: 'Cuenta no encontrada' }, status: 404, statusText: 'Not Found', headers: {}, config };
+        }
+        const actual = usuarios[idx];
+        const esUnoMismo = subDeLaSesion(config) === actual.id;
+        if (esUnoMismo && body.rol !== actual.rol) {
+          return {
+            data: { message: 'No puedes cambiarte el rol a ti mismo' },
+            status: 403,
+            statusText: 'Forbidden',
+            headers: {},
+            config,
+          };
+        }
+        const dejariaSinAdmin =
+          actual.rol === 'ADMIN' &&
+          body.rol !== 'ADMIN' &&
+          usuarios.filter((u) => u.organizacionId === actual.organizacionId && u.rol === 'ADMIN' && u.activo)
+            .length <= 1;
+        if (dejariaSinAdmin) {
+          return {
+            data: { message: 'La organización quedaría sin ninguna cuenta ADMIN activa' },
+            status: 409,
+            statusText: 'Conflict',
+            headers: {},
+            config,
+          };
+        }
+        const email = String(body.email || actual.email).toLowerCase();
+        if (usuarios.some((u) => u.id !== id && u.organizacionId === actual.organizacionId && u.email === email)) {
+          return {
+            data: { message: 'El correo ya está en uso dentro de la organización' },
+            status: 409,
+            statusText: 'Conflict',
+            headers: {},
+            config,
+          };
+        }
+        usuarios[idx] = { ...actual, ...body, email, organizacionId: actual.organizacionId };
+        return { data: usuarios[idx], status: 200, statusText: 'OK', headers: {}, config };
+      };
+      return config;
+    }
+
+    if (usuarioPorId && method === 'delete') {
+      await delay();
+      const id = usuarioPorId[1];
+
+      config.adapter = async () => {
+        const idx = usuarios.findIndex((u) => u.id === id);
+        if (idx === -1) {
+          return { data: { message: 'Cuenta no encontrada' }, status: 404, statusText: 'Not Found', headers: {}, config };
+        }
+        const actual = usuarios[idx];
+        if (subDeLaSesion(config) === actual.id) {
+          return {
+            data: { message: 'No puedes darte de baja a ti mismo' },
+            status: 403,
+            statusText: 'Forbidden',
+            headers: {},
+            config,
+          };
+        }
+        const esUltimaAdminActiva =
+          actual.rol === 'ADMIN' &&
+          actual.activo &&
+          usuarios.filter((u) => u.organizacionId === actual.organizacionId && u.rol === 'ADMIN' && u.activo)
+            .length <= 1;
+        if (esUltimaAdminActiva) {
+          return {
+            data: { message: 'Es la última cuenta ADMIN activa de la organización' },
+            status: 409,
+            statusText: 'Conflict',
+            headers: {},
+            config,
+          };
+        }
+        // Baja lógica idempotente: igual que el backend real, repetirla sigue devolviendo 204.
+        usuarios[idx] = { ...actual, activo: false };
+        return { data: undefined, status: 204, statusText: 'No Content', headers: {}, config };
+      };
       return config;
     }
 

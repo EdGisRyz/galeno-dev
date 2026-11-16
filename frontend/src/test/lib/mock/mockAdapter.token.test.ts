@@ -102,7 +102,7 @@ describe('mockAdapter · vigencia del token simulado (ADR-012)', () => {
 
     expect(usuario.email).toBe(usuarioDelMock.email);
     expect(usuario.role).toBe(usuarioDelMock.rol);
-    expect(usuario.tenantId).toBe(usuarioDelMock.organizacion_id);
+    expect(usuario.tenantId).toBe(usuarioDelMock.organizacionId);
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
   });
 });
