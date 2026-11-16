@@ -12,6 +12,7 @@ import com.intoglobe.clinicas.dto.request.UsuarioRequest;
 import com.intoglobe.clinicas.dto.response.UsuarioResponse;
 import com.intoglobe.clinicas.exception.CorreoDuplicadoEnOrganizacionException;
 import com.intoglobe.clinicas.exception.MedicoRequeridoException;
+import com.intoglobe.clinicas.exception.OperacionSobreLaPropiaCuentaException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.exception.UltimaAdministradoraException;
 import com.intoglobe.clinicas.mapper.UsuarioMapper;
@@ -21,6 +22,7 @@ import com.intoglobe.clinicas.model.Usuario;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 import com.intoglobe.clinicas.repository.UsuarioRepository;
+import com.intoglobe.clinicas.security.AuthenticatedUser;
 
 /**
  * Lógica de negocio de las cuentas de usuario.
@@ -56,6 +58,15 @@ import com.intoglobe.clinicas.repository.UsuarioRepository;
  * genera un UUID v4 al crear la cuenta, porque el emisor de desarrollo consulta esta misma tabla
  * para emitir el token. Contra la plataforma real el valor será el {@code sub} del token, que
  * entrará por el mismo parámetro. La cuenta nunca cambia de identidad después.</p>
+ *
+ * <p><strong>Nadie opera sobre su propia cuenta (R11).</strong> Las dos operaciones destructivas
+ * —la baja y el cambio de rol— reciben el {@link AuthenticatedUser} de la sesión, no solo el
+ * tenant: además de acotar la organización, el actor permite rechazar que alguien se dé de baja a sí
+ * mismo o se quite el rol, que es el clic que deja a una administradora fuera del sistema. Esa
+ * comprobación va <strong>antes</strong> que la de la última administradora (R8): si alguien intenta
+ * las dos cosas a la vez, el mensaje útil es el de R11, porque el de R8 sería solo la consecuencia.
+ * Las demás operaciones conservan la firma con {@code tenantId}, porque no pueden perjudicar al
+ * actor.</p>
  */
 @Service
 public class UsuarioService {
@@ -155,10 +166,12 @@ public class UsuarioService {
      * anterior hasta que la persona vuelva a iniciar sesión, que es el comportamiento normal de un
      * token ya emitido.</p>
      *
+     * @param actor    usuario autenticado de la sesión: aporta el tenant y permite rechazar la
+     *                 operación sobre la propia cuenta (R11)
      * @param id       identificador de la cuenta a actualizar
-     * @param tenantId organización del token de la petición
      * @param request  datos de entrada validados
      * @return representación de la cuenta actualizada
+     * @throws OperacionSobreLaPropiaCuentaException si el actor se cambia el rol a sí mismo (403)
      * @throws ResourceNotFoundException  si la cuenta no existe en ese tenant, o si el médico
      *                                    indicado no existe o es de otra organización
      * @throws MedicoRequeridoException   si el rol resultante es {@code MEDICO} y no se indicó
@@ -169,18 +182,13 @@ public class UsuarioService {
      *                                    organización sin administración (409)
      */
     @Transactional
-    public UsuarioResponse actualizar(UUID id, UUID tenantId, UsuarioRequest request) {
-        var usuario = buscarDelTenant(id, tenantId);
+    public UsuarioResponse actualizar(AuthenticatedUser actor, UUID id, UsuarioRequest request) {
+        var usuario = buscarDelTenant(id, actor.tenantId());
+        exigirQueNoSeCambieElRolASiMisma(actor, usuario, request.rol());
         var organizacionId = usuario.getOrganizacion().getId();
         var medico = resolverMedico(organizacionId, request);
         exigirCorreoDisponible(organizacionId, request.email(), usuario);
         exigirAdministracionRestanteAlCambiarElRol(usuario, request.rol());
-        // TODO (R11): cuando el controlador aporte el actor de la sesión, aquí debe rechazarse que
-        // una cuenta se cambie el rol a sí misma: un administrador que se quita el rol se deja
-        // fuera del sistema por un clic, y la operación debe quedar en manos de otra cuenta con
-        // permisos. La comprobación va antes de mutar la entidad. No se agrega el parámetro
-        // todavía porque el actor no existe en esta rebanada y una firma inventada habría que
-        // rehacerla.
         UsuarioMapper.actualizarEntidad(usuario, medico, request);
         return UsuarioMapper.aResponse(usuarioRepository.save(usuario));
     }
@@ -193,20 +201,19 @@ public class UsuarioService {
      * de la organización, y su correo sigue ocupado por la restricción de unicidad, así que volver a
      * crearla para la misma persona obligaría a inventarle otro correo.</p>
      *
+     * @param actor    usuario autenticado de la sesión: aporta el tenant y permite rechazar la baja
+     *                 de la propia cuenta (R11)
      * @param id       identificador de la cuenta a dar de baja
-     * @param tenantId organización del token de la petición
+     * @throws OperacionSobreLaPropiaCuentaException si el actor se da de baja a sí mismo (403)
      * @throws ResourceNotFoundException     si la cuenta no existe en ese tenant
      * @throws UltimaAdministradoraException si es la última cuenta {@code ADMIN} activa de la
      *                                       organización (409): sin ella nadie podría administrar
      *                                       cuentas
      */
     @Transactional
-    public void desactivar(UUID id, UUID tenantId) {
-        var usuario = buscarDelTenant(id, tenantId);
-        // TODO (R11): cuando el controlador aporte el actor de la sesión, aquí debe rechazarse que
-        // una cuenta se dé de baja a sí misma, antes de tocar el estado: es el caso que deja al
-        // administrador fuera del sistema por un clic. El parámetro del actor no se inventa en
-        // esta rebanada.
+    public void desactivar(AuthenticatedUser actor, UUID id) {
+        var usuario = buscarDelTenant(id, actor.tenantId());
+        exigirQueNoSeDeDeBajaASiMisma(actor, usuario);
         exigirAdministracionRestanteAlDarDeBaja(usuario);
         usuario.desactivar();
         usuarioRepository.save(usuario);
@@ -322,6 +329,55 @@ public class UsuarioService {
         if (ocupado) {
             throw new CorreoDuplicadoEnOrganizacionException(normalizado);
         }
+    }
+
+    /**
+     * Exige que el actor no sea el dueño de la cuenta que intenta dar de baja (R11).
+     *
+     * <p>Va antes que {@link #exigirAdministracionRestanteAlDarDeBaja(Usuario)} a propósito: si
+     * alguien intenta darse de baja a sí mismo y además es la última administradora, el mensaje que le
+     * sirve es el de R11 —lo que tiene que hacer es pedirle a otra cuenta que lo haga—, no el de R8,
+     * que sería una consecuencia de su propio intento.</p>
+     *
+     * @param actor   usuario autenticado de la sesión
+     * @param usuario cuenta que se intenta dar de baja
+     * @throws OperacionSobreLaPropiaCuentaException si el actor es el dueño de la cuenta
+     */
+    private static void exigirQueNoSeDeDeBajaASiMisma(AuthenticatedUser actor, Usuario usuario) {
+        if (esLaPropiaCuenta(actor, usuario)) {
+            throw OperacionSobreLaPropiaCuentaException.alDarDeBaja(usuario.getId());
+        }
+    }
+
+    /**
+     * Exige que el actor no se esté cambiando el rol a sí mismo (R11).
+     *
+     * <p>Solo aplica cuando el rol resultante difiere del actual: editar el propio correo, o reenviar
+     * el mismo rol, no deja a nadie fuera del sistema y la regla no lo prohíbe. También aquí la
+     * comprobación precede a R8, por la misma razón que en la baja.</p>
+     *
+     * @param actor     usuario autenticado de la sesión
+     * @param usuario   cuenta que se intenta actualizar
+     * @param nuevoRol  rol que quedaría tras la operación
+     * @throws OperacionSobreLaPropiaCuentaException si el actor es el dueño de la cuenta y el rol
+     *                                               cambia
+     */
+    private static void exigirQueNoSeCambieElRolASiMisma(AuthenticatedUser actor, Usuario usuario,
+            RolUsuario nuevoRol) {
+        if (nuevoRol != usuario.getRol() && esLaPropiaCuenta(actor, usuario)) {
+            throw OperacionSobreLaPropiaCuentaException.alCambiarElRol(usuario.getId());
+        }
+    }
+
+    /**
+     * Indica si la cuenta operada es la del propio actor.
+     *
+     * @param actor   usuario autenticado de la sesión
+     * @param usuario cuenta operada
+     * @return {@code true} si el identificador del actor es el de la cuenta
+     */
+    private static boolean esLaPropiaCuenta(AuthenticatedUser actor, Usuario usuario) {
+        return actor != null && Objects.equals(usuario.getId(), actor.id());
     }
 
     /**

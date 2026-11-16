@@ -18,6 +18,7 @@ import com.intoglobe.clinicas.dto.request.UsuarioRequest;
 import com.intoglobe.clinicas.dto.response.UsuarioResponse;
 import com.intoglobe.clinicas.exception.CorreoDuplicadoEnOrganizacionException;
 import com.intoglobe.clinicas.exception.MedicoRequeridoException;
+import com.intoglobe.clinicas.exception.OperacionSobreLaPropiaCuentaException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.exception.UltimaAdministradoraException;
 import com.intoglobe.clinicas.model.Consultorio;
@@ -29,6 +30,7 @@ import com.intoglobe.clinicas.model.Usuario;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 import com.intoglobe.clinicas.repository.UsuarioRepository;
+import com.intoglobe.clinicas.security.AuthenticatedUser;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -177,7 +179,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
                 .thenReturn(Optional.of(otra));
 
-        assertThatThrownBy(() -> usuarioService.actualizar(cuenta.getId(), organizacionId,
+        assertThatThrownBy(() -> usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
                 requestAdmin(EMAIL)))
                 .isInstanceOf(CorreoDuplicadoEnOrganizacionException.class);
         verify(usuarioRepository, never()).save(any(Usuario.class));
@@ -195,7 +197,7 @@ class UsuarioServiceTest {
                 .thenReturn(Optional.of(cuenta));
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        var respuesta = usuarioService.actualizar(cuenta.getId(), organizacionId,
+        var respuesta = usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
                 requestAdmin("LAURA.MENDEZ@example.com"));
 
         assertThat(respuesta.email()).isEqualTo(EMAIL);
@@ -371,10 +373,10 @@ class UsuarioServiceTest {
         when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        usuarioService.desactivar(cuenta.getId(), organizacionId);
+        usuarioService.desactivar(actor(organizacionId), cuenta.getId());
 
         assertThat(cuenta.isActivo()).isFalse();
-        assertThatCode(() -> usuarioService.desactivar(cuenta.getId(), organizacionId))
+        assertThatCode(() -> usuarioService.desactivar(actor(organizacionId), cuenta.getId()))
                 .as("la baja de una cuenta ya inactiva es una operación válida, no un error")
                 .doesNotThrowAnyException();
         assertThat(cuenta.isActivo()).isFalse();
@@ -413,7 +415,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.contarActivosPorOrganizacionYRol(organizacionId, RolUsuario.ADMIN))
                 .thenReturn(1L);
 
-        assertThatThrownBy(() -> usuarioService.desactivar(cuenta.getId(), organizacionId))
+        assertThatThrownBy(() -> usuarioService.desactivar(actor(organizacionId), cuenta.getId()))
                 .as("sin ninguna administradora activa la organización quedaría inmanejable")
                 .isInstanceOf(UltimaAdministradoraException.class)
                 .hasMessageContaining("última");
@@ -432,7 +434,7 @@ class UsuarioServiceTest {
                 .thenReturn(2L);
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        usuarioService.desactivar(cuenta.getId(), organizacionId);
+        usuarioService.desactivar(actor(organizacionId), cuenta.getId());
 
         assertThat(cuenta.isActivo()).isFalse();
     }
@@ -447,7 +449,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        usuarioService.desactivar(cuenta.getId(), organizacionId);
+        usuarioService.desactivar(actor(organizacionId), cuenta.getId());
 
         assertThat(cuenta.isActivo()).isFalse();
         verify(usuarioRepository, never())
@@ -466,7 +468,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.contarActivosPorOrganizacionYRol(organizacionId, RolUsuario.ADMIN))
                 .thenReturn(1L);
 
-        assertThatThrownBy(() -> usuarioService.actualizar(cuenta.getId(), organizacionId,
+        assertThatThrownBy(() -> usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
                 new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null)))
                 .as("cambiar el rol de la única administradora deja a la organización sin administración")
                 .isInstanceOf(UltimaAdministradoraException.class)
@@ -489,7 +491,7 @@ class UsuarioServiceTest {
                 .thenReturn(2L);
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        var respuesta = usuarioService.actualizar(cuenta.getId(), organizacionId,
+        var respuesta = usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
                 new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null));
 
         assertThat(respuesta.rol()).isEqualTo(RolUsuario.PACIENTE);
@@ -524,10 +526,85 @@ class UsuarioServiceTest {
         var otroTenant = UUID.randomUUID();
         when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
 
-        assertThatThrownBy(() -> usuarioService.desactivar(cuenta.getId(), otroTenant))
+        assertThatThrownBy(() -> usuarioService.desactivar(actor(otroTenant), cuenta.getId()))
                 .isInstanceOf(ResourceNotFoundException.class);
         verify(usuarioRepository, never()).save(any(Usuario.class));
         assertThat(cuenta.isActivo()).isTrue();
+    }
+
+    // ─────────────────────────────────────────
+    // R11 · nadie opera sobre su propia cuenta
+    // ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("R11: una cuenta no puede darse de baja a sí misma y la cuenta sigue activa")
+    void desactivar_shouldThrowOperacionSobreLaPropiaCuenta_whenTheActorIsTheAccount() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, EMAIL, RolUsuario.PACIENTE, UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+
+        assertThatThrownBy(() -> usuarioService.desactivar(actorDe(cuenta, organizacionId), cuenta.getId()))
+                .as("la baja tiene que hacerla otra cuenta con permisos")
+                .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
+                .hasMessageContaining("propia cuenta");
+        verify(usuarioRepository, never()).save(any(Usuario.class));
+        assertThat(cuenta.isActivo()).isTrue();
+    }
+
+    @Test
+    @DisplayName("R11: con la última administradora dándose de baja a sí misma gana el mensaje de R11, no el de R8")
+    void desactivar_shouldThrowR11BeforeR8_whenTheOnlyActiveAdminIsTheActor() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+
+        assertThatThrownBy(() -> usuarioService.desactivar(actorDe(cuenta, organizacionId), cuenta.getId()))
+                .as("lo que desbloquea la operación es que la haga otra cuenta, no nombrar otra administradora")
+                .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
+                .isNotInstanceOf(UltimaAdministradoraException.class);
+        verify(usuarioRepository, never())
+                .contarActivosPorOrganizacionYRol(any(UUID.class), any(RolUsuario.class));
+        verify(usuarioRepository, never()).save(any(Usuario.class));
+        assertThat(cuenta.isActivo()).isTrue();
+    }
+
+    @Test
+    @DisplayName("R11: una cuenta no puede cambiarse el rol a sí misma")
+    void actualizar_shouldThrowOperacionSobreLaPropiaCuenta_whenTheActorChangesItsOwnRole() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+
+        assertThatThrownBy(() -> usuarioService.actualizar(actorDe(cuenta, organizacionId), cuenta.getId(),
+                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null)))
+                .as("un administrador que se quita el rol se deja fuera del sistema por un clic")
+                .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
+                .hasMessageContaining("su propia cuenta");
+        verify(usuarioRepository, never()).save(any(Usuario.class));
+        assertThat(cuenta.getRol()).isEqualTo(RolUsuario.ADMIN);
+    }
+
+    @Test
+    @DisplayName("R11: editar la propia cuenta sin cambiar el rol sí está permitido")
+    void actualizar_shouldAllowEditingItsOwnAccount_whenTheRoleDoesNotChange() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, "propia@example.com", RolUsuario.PACIENTE,
+                UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.empty());
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = usuarioService.actualizar(actorDe(cuenta, organizacionId), cuenta.getId(),
+                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null));
+
+        assertThat(respuesta.email())
+                .as("la regla solo protege la baja y el cambio de rol, no el resto de los datos")
+                .isEqualTo(EMAIL);
     }
 
     // ─────────────────────────────────────────
@@ -575,7 +652,8 @@ class UsuarioServiceTest {
         var cuentaId = UUID.randomUUID();
         when(usuarioRepository.findById(cuentaId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> usuarioService.actualizar(cuentaId, organizacionId, requestAdmin(EMAIL)))
+        assertThatThrownBy(() -> usuarioService.actualizar(actor(organizacionId), cuentaId,
+                requestAdmin(EMAIL)))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Usuario");
         verify(usuarioRepository, never()).save(any(Usuario.class));
@@ -607,6 +685,21 @@ class UsuarioServiceTest {
     /** Request de una cuenta administrativa sin médico asociado. */
     private static UsuarioRequest requestAdmin(String email) {
         return new UsuarioRequest(email, RolUsuario.ADMIN, null);
+    }
+
+    /**
+     * Actor autenticado del tenant indicado, con una cuenta distinta de la que se opera: es el caso
+     * normal, donde la operación la hace otra persona.
+     */
+    private static AuthenticatedUser actor(UUID tenantId) {
+        return new AuthenticatedUser(UUID.randomUUID(), "otra.cuenta@example.com", "ADMIN", tenantId, null);
+    }
+
+    /**
+     * Actor autenticado cuya cuenta es la que se opera: el caso que rechaza R11.
+     */
+    private static AuthenticatedUser actorDe(Usuario cuenta, UUID tenantId) {
+        return new AuthenticatedUser(cuenta.getId(), EMAIL, "ADMIN", tenantId, null);
     }
 
     /** Request de una cuenta de médico con el médico indicado (o sin él). */
