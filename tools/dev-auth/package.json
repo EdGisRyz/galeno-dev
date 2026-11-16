@@ -1,0 +1,18 @@
+{
+  "name": "dev-auth",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Emisor local de tokens RS256 para desarrollo. Resuelve las cuentas contra la tabla usuario de PostgreSQL. No es el AuthService del producto.",
+  "type": "module",
+  "main": "server.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}
