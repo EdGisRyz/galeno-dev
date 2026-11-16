@@ -38,12 +38,21 @@ public interface HorarioMedicoRepository extends JpaRepository<HorarioMedico, UU
      * listado ajeno es una lista vacía, no una fuga de la agenda de otra clínica
      * (R-SEG-04, R-SEG-06).</p>
      *
+     * <p><strong>El {@code JOIN FETCH} es deliberado: no se quite.</strong> La respuesta de un
+     * bloque incluye el identificador y el <em>nombre</em> de su consultorio, así que el mapper
+     * lee {@code h.consultorio.getNombre()}. Sin el fetch, Hibernate resolvería un proxy por
+     * cada bloque y la agenda semanal haría una consulta extra por fila: el N+1 clásico de un
+     * listado. Con el fetch, el consultorio llega en la misma consulta; el orden y el filtro no
+     * cambian. Si algún día el mapper deja de leer el consultorio, el fetch puede revisarse, pero
+     * no al revés: quitarlo con el mapper actual solo agrega consultas.</p>
+     *
      * @param medicoId       médico dueño de la agenda
      * @param organizacionId organización dueña, según el {@code tenantId} del token
      * @return bloques de ese médico en esa organización, ordenados por {@code diaSemana} y
      *         {@code horaInicio}
      */
-    @Query("SELECT h FROM HorarioMedico h WHERE h.medico.id = :medicoId "
+    @Query("SELECT h FROM HorarioMedico h JOIN FETCH h.consultorio "
+            + "WHERE h.medico.id = :medicoId "
             + "AND h.medico.organizacion.id = :organizacionId "
             + "ORDER BY h.diaSemana, h.horaInicio")
     List<HorarioMedico> listarPorMedico(@Param("medicoId") UUID medicoId,
@@ -107,12 +116,12 @@ public interface HorarioMedicoRepository extends JpaRepository<HorarioMedico, UU
      * migración V6 lo rechazaría con un error de integridad, así que el servicio lo detecta antes
      * y responde un {@code 409} que además dice cuáles son los bloques que lo impiden.</p>
      *
-     * <p><strong>Es una consulta nativa, y es temporal.</strong> {@code horario_medico.consultorio_id}
-     * existe en el esquema desde la V6, pero la entidad {@link HorarioMedico} todavía no mapea la
-     * columna: eso lo hace la rebanada de los bloques con consultorio. Hasta entonces JPQL no
-     * puede nombrarla y la consulta baja a SQL. Cuando el mapeo exista, esta misma consulta pasa a
-     * JPQL con la misma forma —mismo nombre, mismos parámetros, mismo orden— y sin tocar al
-     * llamador.</p>
+     * <p><strong>Es JPQL</strong>, igual que las otras dos consultas del repositorio. Cuando la V6
+     * agregó {@code horario_medico.consultorio_id}, la entidad todavía no mapeaba la columna y la
+     * consulta bajó a SQL nativo de forma temporal; con el mapeo de la V7 en su lugar, vuelve a
+     * JPQL conservando la misma forma —mismo nombre, mismos parámetros, mismo orden— y sin tocar
+     * al llamador. Se ordena por {@code diaSemana} y {@code horaInicio} porque el mensaje del
+     * {@code 409} enumera los bloques en ese orden y el administrador los reconoce así.</p>
      *
      * <p>No se acota por organización porque no le hace falta: las dos claves foráneas de la V6
      * exigen que el consultorio y el médico compartan {@code organizacion_id} y que el par esté
@@ -124,9 +133,8 @@ public interface HorarioMedicoRepository extends JpaRepository<HorarioMedico, UU
      * @return bloques de ese médico en ese consultorio, ordenados por {@code diaSemana} y
      *         {@code horaInicio}; vacío si el consultorio no tiene ninguno
      */
-    @Query(value = "SELECT h.* FROM horario_medico h WHERE h.medico_id = :medicoId "
-            + "AND h.consultorio_id = :consultorioId ORDER BY h.dia_semana, h.hora_inicio",
-            nativeQuery = true)
+    @Query("SELECT h FROM HorarioMedico h WHERE h.medico.id = :medicoId "
+            + "AND h.consultorio.id = :consultorioId ORDER BY h.diaSemana, h.horaInicio")
     List<HorarioMedico> listarBloquesEnConsultorio(@Param("medicoId") UUID medicoId,
             @Param("consultorioId") UUID consultorioId);
 }

@@ -12,14 +12,16 @@ import com.intoglobe.clinicas.exception.CambioDeConsultorioNoPermitidoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.mapper.MedicoMapper;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.model.MedicoConsultorio;
 import com.intoglobe.clinicas.repository.ConsultorioRepository;
+import com.intoglobe.clinicas.repository.MedicoConsultorioRepository;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 
 /**
  * Lógica de negocio de médicos.
  *
- * <p>Orquesta los tres repositorios y el {@link MedicoMapper}. Las lecturas son
+ * <p>Orquesta los cuatro repositorios y el {@link MedicoMapper}. Las lecturas son
  * transacciones de solo lectura; las escrituras usan una transacción de lectura y
  * escritura. Un recurso inexistente se traduce a
  * {@link ResourceNotFoundException}, que el handler convierte en 404.</p>
@@ -55,13 +57,16 @@ public class MedicoService {
     private final MedicoRepository medicoRepository;
     private final OrganizacionRepository organizacionRepository;
     private final ConsultorioRepository consultorioRepository;
+    private final MedicoConsultorioRepository medicoConsultorioRepository;
 
     public MedicoService(MedicoRepository medicoRepository,
             OrganizacionRepository organizacionRepository,
-            ConsultorioRepository consultorioRepository) {
+            ConsultorioRepository consultorioRepository,
+            MedicoConsultorioRepository medicoConsultorioRepository) {
         this.medicoRepository = medicoRepository;
         this.organizacionRepository = organizacionRepository;
         this.consultorioRepository = consultorioRepository;
+        this.medicoConsultorioRepository = medicoConsultorioRepository;
     }
 
     /**
@@ -79,6 +84,15 @@ public class MedicoService {
      * creaba una fila cruzada entre organizaciones. Hoy un consultorio de otro tenant y un
      * UUID al azar producen el mismo {@code 404} y no se persiste nada.</p>
      *
+     * <p><strong>El alta asigna el consultorio principal al médico</strong>, en la misma
+     * transacción que lo crea. Es el invariante que sostiene el resto del módulo de horarios: el
+     * consultorio principal ({@code medico.consultorio_id}) es el destino por defecto de un
+     * bloque, y la clave {@code horario_medico_consultorio_asignado_fkey} de la V6 exige que el
+     * par {@code (medico_id, consultorio_id)} exista en {@code medico_consultorio}. Sin esta
+     * fila, el bloque de un médico recién creado por la API no se podría guardar. La asignación se
+     * crea con el mismo constructor de negocio que usa la operación de asignar consultorios, así
+     * que hereda sus invariantes: la organización sale del médico y el par es la clave.</p>
+     *
      * @param organizacionId organización dueña: el tenant del token, ya validado contra el
      *                       path por el controlador
      * @param request        datos de entrada validados
@@ -95,6 +109,7 @@ public class MedicoService {
                 .orElseThrow(() -> new ResourceNotFoundException("Consultorio", request.consultorioId()));
         var medico = MedicoMapper.aEntidad(organizacion, consultorio, request);
         var guardado = medicoRepository.save(medico);
+        medicoConsultorioRepository.save(new MedicoConsultorio(guardado, consultorio, organizacion));
         return MedicoMapper.aResponse(guardado);
     }
 

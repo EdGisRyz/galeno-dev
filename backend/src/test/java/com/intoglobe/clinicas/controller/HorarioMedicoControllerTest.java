@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.intoglobe.clinicas.dto.request.HorarioMedicoRequest;
 import com.intoglobe.clinicas.dto.response.HorarioMedicoResponse;
+import com.intoglobe.clinicas.exception.ConsultorioNoAsignadoAlMedicoException;
 import com.intoglobe.clinicas.exception.DuracionConsultaInvalidaException;
 import com.intoglobe.clinicas.exception.RangoHorarioInvalidoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
@@ -83,6 +84,11 @@ class HorarioMedicoControllerTest {
     private static final UUID HORARIO_ID = UUID.fromString("c1a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d");
     private static final UUID OTRO_HORARIO_ID = UUID.fromString("d1a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d");
     private static final UUID TENANT_ID = UUID.fromString("3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90");
+    private static final UUID CONSULTORIO_ID = UUID.fromString("e1a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d");
+    private static final UUID CONSULTORIO_NORTE_ID =
+            UUID.fromString("e2a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d");
+    private static final String CONSULTORIO_NOMBRE = "Consultorio Centro";
+    private static final String CONSULTORIO_NORTE_NOMBRE = "Consultorio Norte";
 
     private static final String MENSAJE_MEDICO_NO_ENCONTRADO =
             "No se encontró el recurso Medico con id: " + MEDICO_ID;
@@ -97,6 +103,10 @@ class HorarioMedicoControllerTest {
     private static final String MENSAJE_SOLAPAMIENTO =
             "El bloque de 09:00 a 11:00 del día 1 (0=Domingo, 6=Sábado)"
                     + " se solapa con otro bloque ya agendado de este médico";
+    private static final String MENSAJE_CONSULTORIO_NO_ASIGNADO =
+            "El consultorio " + CONSULTORIO_NORTE_ID + " no está asignado al médico " + MEDICO_ID
+                    + ": primero hay que asignarlo al médico y después crear o mover el bloque"
+                    + " de horario a ese consultorio";
     private static final String MENSAJE_CUERPO_MAL_FORMADO =
             "El cuerpo de la petición no es válido o está mal formado";
     private static final String MENSAJE_ID_INVALIDO =
@@ -488,8 +498,71 @@ class HorarioMedicoControllerTest {
 
     private static HorarioMedicoResponse respuesta(UUID id, UUID medicoId, short diaSemana,
             String horaInicio, String horaFin, short duracionConsulta) {
-        return new HorarioMedicoResponse(id, medicoId, diaSemana, LocalTime.parse(horaInicio),
-                LocalTime.parse(horaFin), duracionConsulta);
+        return new HorarioMedicoResponse(id, medicoId, CONSULTORIO_ID, CONSULTORIO_NOMBRE, diaSemana,
+                LocalTime.parse(horaInicio), LocalTime.parse(horaFin), duracionConsulta);
+    }
+
+    @Test
+    @DisplayName("POST sin consultorioId deja que el service elija el principal y devuelve el consultorio en la respuesta")
+    void crear_shouldAcceptRequestsWithoutConsultorioIdAndReturnTheConsultorio() throws Exception {
+        when(horarioMedicoService.crear(any(AuthenticatedUser.class), eq(MEDICO_ID), any(HorarioMedicoRequest.class)))
+                .thenReturn(respuesta(HORARIO_ID, MEDICO_ID, (short) 1, "09:00", "13:00", (short) 30));
+
+        perform(post("/api/v1/medicos/{medicoId}/horarios", MEDICO_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"diaSemana":1,"horaInicio":"09:00:00","horaFin":"13:00:00","duracionConsulta":30}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.consultorioId").value(CONSULTORIO_ID.toString()))
+                .andExpect(jsonPath("$.consultorioNombre").value(CONSULTORIO_NOMBRE));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(HorarioMedicoRequest.class);
+        verify(horarioMedicoService).crear(any(AuthenticatedUser.class), eq(MEDICO_ID), captor.capture());
+        assertThat(captor.getValue().consultorioId())
+                .as("sin consultorio en el cuerpo, el service recibe null y resuelve el principal")
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("POST con consultorioId lo entrega al service y devuelve el nombre de ese consultorio")
+    void crear_shouldPassTheRequestedConsultorioToTheService() throws Exception {
+        when(horarioMedicoService.crear(any(AuthenticatedUser.class), eq(MEDICO_ID), any(HorarioMedicoRequest.class)))
+                .thenReturn(new HorarioMedicoResponse(HORARIO_ID, MEDICO_ID, CONSULTORIO_NORTE_ID,
+                        CONSULTORIO_NORTE_NOMBRE, (short) 4, LocalTime.of(9, 0), LocalTime.of(11, 0),
+                        (short) 30));
+
+        perform(post("/api/v1/medicos/{medicoId}/horarios", MEDICO_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"diaSemana":4,"horaInicio":"09:00:00","horaFin":"11:00:00","duracionConsulta":30,"consultorioId":"e2a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.consultorioId").value(CONSULTORIO_NORTE_ID.toString()))
+                .andExpect(jsonPath("$.consultorioNombre").value(CONSULTORIO_NORTE_NOMBRE));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(HorarioMedicoRequest.class);
+        verify(horarioMedicoService).crear(any(AuthenticatedUser.class), eq(MEDICO_ID), captor.capture());
+        assertThat(captor.getValue().consultorioId()).isEqualTo(CONSULTORIO_NORTE_ID);
+    }
+
+    @Test
+    @DisplayName("POST con un consultorio no asignado devuelve 409 con el motivo en el contrato de error")
+    void crear_shouldReturn409_whenConsultorioIsNotAssignedToTheMedico() throws Exception {
+        when(horarioMedicoService.crear(any(AuthenticatedUser.class), eq(MEDICO_ID), any(HorarioMedicoRequest.class)))
+                .thenThrow(ConsultorioNoAsignadoAlMedicoException.porNoEstarAsignado(MEDICO_ID,
+                        CONSULTORIO_NORTE_ID));
+
+        perform(post("/api/v1/medicos/{medicoId}/horarios", MEDICO_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"diaSemana":4,"horaInicio":"09:00:00","horaFin":"11:00:00","duracionConsulta":30,"consultorioId":"e2a2b3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(MENSAJE_CONSULTORIO_NO_ASIGNADO))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + MEDICO_ID + "/horarios"));
     }
 
     /**

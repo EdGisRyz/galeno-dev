@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.model.MedicoConsultorio;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.Paciente;
 import com.intoglobe.clinicas.model.PlanTipo;
@@ -206,6 +207,11 @@ class AislamientoYMatrizRbacTest {
                 "Cardiología", "11111111", "+52 55 0000 0011", new BigDecimal("500.00")));
         medicoB = medicoRepository.save(new Medico(organizacionB, consultorioB, "Dr. Secreto Beta",
                 "Dermatología", "22222222", "+52 55 0000 0022", new BigDecimal("700.00")));
+        // El sembrado escribe a mano lo que el alta del médico deja en la misma transacción: la
+        // asignación del consultorio principal. Sin ella, ningún bloque del médico puede existir
+        // (clave horario_medico_consultorio_asignado_fkey de la V6).
+        medicoConsultorioRepository.save(new MedicoConsultorio(medicoA, consultorioA, organizacionA));
+        medicoConsultorioRepository.save(new MedicoConsultorio(medicoB, consultorioB, organizacionB));
         pacienteA = pacienteRepository.save(new Paciente(organizacionA, "Paciente Alfa",
                 "+52 55 0000 0031", LocalDate.parse("1985-03-14"), "F",
                 "paciente.alfa@example.com", "Notas Alfa"));
@@ -591,9 +597,12 @@ class AislamientoYMatrizRbacTest {
 
         ejecutar(get(rutaAsignados), tokenAdminA)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
+                // El principal lo dejó el sembrado y el nuevo acaba de asignarse: el listado los
+                // muestra ordenados por nombre, así que "Consultorio Alfa Dos" va primero.
+                .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].id").value(consultorioNuevo.getId().toString()))
-                .andExpect(jsonPath("$[0].organizacionId").value(organizacionA.getId().toString()));
+                .andExpect(jsonPath("$[0].organizacionId").value(organizacionA.getId().toString()))
+                .andExpect(jsonPath("$[1].id").value(consultorioA.getId().toString()));
         assertThat(medicoConsultorioRepository.buscarAsignacion(medicoA.getId(), consultorioNuevo.getId(),
                 organizacionA.getId()))
                 .as("la asignación repetida no debe duplicar la fila del par")
@@ -606,7 +615,8 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(status().isNoContent());
         ejecutar(get(rutaAsignados), tokenAdminA)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(consultorioA.getId().toString()));
 
         ejecutar(delete(rutaAsignados + "/" + consultorioA.getId()), tokenAdminA)
                 .andExpect(status().isConflict())
@@ -696,7 +706,8 @@ class AislamientoYMatrizRbacTest {
 
         ejecutar(get("/api/v1/medicos/" + medicoA.getId() + "/consultorios"), token)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(consultorioA.getId().toString()));
 
         ejecutar(get("/api/v1/medicos/" + otroMedicoDeLaMismaClinica.getId() + "/consultorios"), token)
                 .andExpect(status().isForbidden());

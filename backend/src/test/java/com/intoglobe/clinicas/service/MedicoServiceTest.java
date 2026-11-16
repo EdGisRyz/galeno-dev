@@ -19,9 +19,11 @@ import com.intoglobe.clinicas.exception.CambioDeConsultorioNoPermitidoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.model.MedicoConsultorio;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.PlanTipo;
 import com.intoglobe.clinicas.repository.ConsultorioRepository;
+import com.intoglobe.clinicas.repository.MedicoConsultorioRepository;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 
@@ -66,6 +68,9 @@ class MedicoServiceTest {
     @Mock
     private ConsultorioRepository consultorioRepository;
 
+    @Mock
+    private MedicoConsultorioRepository medicoConsultorioRepository;
+
     @InjectMocks
     private MedicoService medicoService;
 
@@ -93,6 +98,32 @@ class MedicoServiceTest {
         assertThat(respuesta.tarifaBase()).isEqualByComparingTo("500.00");
         assertThat(respuesta.activo()).isTrue();
         verify(medicoRepository).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("crear asigna el consultorio principal del médico, para que todo bloque pueda apuntar a él")
+    void crear_shouldAssignThePrincipalConsultorioInTheSameTransaction() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var consultorioId = UUID.randomUUID();
+        var consultorio = consultorioConId(organizacion, consultorioId);
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(consultorioRepository.buscarPorIdYOrganizacion(consultorioId, organizacionId))
+                .thenReturn(Optional.of(consultorio));
+        when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+        var request = requestCompleto(consultorioId);
+
+        medicoService.crear(organizacionId, request);
+
+        var captor = ArgumentCaptor.forClass(MedicoConsultorio.class);
+        verify(medicoConsultorioRepository).save(captor.capture());
+        var asignacion = captor.getValue();
+        assertThat(asignacion.getConsultorio())
+                .as("sin esta fila, la clave de la V6 rechazaría cualquier bloque en el consultorio principal")
+                .isSameAs(consultorio);
+        assertThat(asignacion.getOrganizacion())
+                .as("la organización del vínculo es la del médico, nunca un dato del cliente")
+                .isSameAs(organizacion);
     }
 
     @Test

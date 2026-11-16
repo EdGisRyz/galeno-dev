@@ -15,7 +15,8 @@ import jakarta.persistence.Table;
 
 /**
  * Bloque de disponibilidad semanal de un médico. Espejo columna por columna de la
- * tabla {@code horario_medico} definida en la migración V1 (schema congelado).
+ * tabla {@code horario_medico}: las columnas base vienen de la migración V1 y las de
+ * consultorio y organización, de las migraciones V6 y V7.
  *
  * <p>Reglas de negocio que materializa este modelo:</p>
  * <ul>
@@ -24,6 +25,17 @@ import jakarta.persistence.Table;
  *       asociación es unidireccional: {@link Medico} no se modifica para navegar la
  *       relación inversa, y cargar la colección desde el médico produciría un N+1
  *       en cualquier listado.</li>
+ *   <li>Un horario se dicta en <strong>un consultorio</strong>, elegido entre los
+ *       asignados al médico ({@code medico_consultorio}). La columna
+ *       {@code consultorio_id} la agregó la V6 y la V7 la cerró como obligatoria:
+ *       desde entonces todo bloque dice dónde atiende el médico, y la agenda puede
+ *       responder a qué consultorio va un paciente. La relación no tiene
+ *       {@code ON DELETE}: un consultorio con bloques no se borra, se desactiva.</li>
+ *   <li>{@link #organizacion} se repite en la fila aunque sea deducible del médico y
+ *       del consultorio. No es redundancia por comodidad: las claves compuestas de la
+ *       V6 ({@code (medico_id, organizacion_id)} y {@code (consultorio_id,
+ *       organizacion_id)}) la necesitan para garantizar que médico y consultorio sean
+ *       de la misma clínica. El valor se toma siempre del médico, nunca del cliente.</li>
  *   <li>V1 <strong>no</strong> declara ningún índice sobre {@code horario_medico}:
  *       el listado por médico filtra por {@code medico_id} sin índice y hoy lo hace
  *       sobre una tabla pequeña. Agregarlo es un pendiente declarado del V2; este
@@ -67,6 +79,24 @@ public class HorarioMedico {
     private Medico medico;
 
     /**
+     * Consultorio donde se dicta el bloque, uno de los asignados al médico. La clave
+     * {@code horario_medico_consultorio_asignado_fkey} de la V6 lo exige en la base; el
+     * servicio responde {@code 409} antes de que el error de integridad llegue al cliente.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "consultorio_id", nullable = false)
+    private Consultorio consultorio;
+
+    /**
+     * Organización dueña del médico y del consultorio. Se duplica en la fila porque las
+     * dos claves foráneas compuestas de la V6 la comparten: es lo que impide que un
+     * bloque cruce dos clínicas. Se toma del médico y es inmutable.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "organizacion_id", nullable = false)
+    private Organizacion organizacion;
+
+    /**
      * Día de la semana con la convención de JavaScript {@code Date.getDay()}:
      * {@code 0=Domingo, 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes,
      * 6=Sábado}. El rango {@code 0..6} lo impone el CHECK de V1.
@@ -96,7 +126,12 @@ public class HorarioMedico {
     }
 
     /**
-     * Crea un bloque de disponibilidad para un médico.
+     * Crea un bloque de disponibilidad para un médico en su consultorio principal.
+     *
+     * <p>Es el atajo del caso más común: un bloque que no elige consultorio se dicta en el
+     * consultorio principal del médico ({@code medico.consultorio_id}), que el alta del
+     * médico deja asignado. Para un bloque en otro consultorio asignado, use
+     * {@link #HorarioMedico(Medico, Consultorio, short, LocalTime, LocalTime, short)}.</p>
      *
      * <p>No valida el rango del día ni la duración permitida: esos límites son
      * CHECK de V1 y se manifiestan como {@code DataIntegrityViolationException} al
@@ -112,7 +147,34 @@ public class HorarioMedico {
      */
     public HorarioMedico(Medico medico, short diaSemana, LocalTime horaInicio, LocalTime horaFin,
             short duracionConsulta) {
+        this(medico, medico.getConsultorio(), diaSemana, horaInicio, horaFin, duracionConsulta);
+    }
+
+    /**
+     * Crea un bloque de disponibilidad para un médico en un consultorio concreto.
+     *
+     * <p>La organización de la fila se toma del <strong>médico</strong>, no del consultorio
+     * ni del cliente: es la mitad de las dos claves foráneas compuestas que garantizan que
+     * médico y consultorio pertenezcan a la misma clínica. Que el consultorio esté asignado
+     * al médico lo comprueba el servicio antes de llamar aquí y lo garantiza, además, la
+     * clave {@code horario_medico_consultorio_asignado_fkey} de la V6.</p>
+     *
+     * <p>No valida el rango del día ni la duración permitida, por la misma razón que el
+     * constructor del consultorio principal.</p>
+     *
+     * @param medico           médico dueño del bloque (obligatorio)
+     * @param consultorio      consultorio donde se dicta, asignado a ese médico (obligatorio)
+     * @param diaSemana        día de la semana, {@code 0=Domingo .. 6=Sábado}
+     * @param horaInicio       hora local de inicio del bloque (obligatoria)
+     * @param horaFin          hora local de fin del bloque (obligatoria)
+     * @param duracionConsulta duración de cada cita en minutos, uno de
+     *                         {@code {20, 30, 45, 60}}
+     */
+    public HorarioMedico(Medico medico, Consultorio consultorio, short diaSemana,
+            LocalTime horaInicio, LocalTime horaFin, short duracionConsulta) {
         this.medico = medico;
+        this.consultorio = consultorio;
+        this.organizacion = medico.getOrganizacion();
         this.diaSemana = diaSemana;
         this.horaInicio = horaInicio;
         this.horaFin = horaFin;
@@ -140,12 +202,34 @@ public class HorarioMedico {
         this.duracionConsulta = duracionConsulta;
     }
 
+    /**
+     * Mueve el bloque a otro consultorio del mismo médico.
+     *
+     * <p>No cambia la organización ni el médico: el consultorio destino tiene que estar
+     * asignado a ese médico y pertenecer a su clínica, condiciones que el servicio comprueba
+     * antes y que las claves de la V6 vuelven a exigir en la base. No valida el solapamiento
+     * resultante, por la misma razón que el constructor: esa regla es del servicio.</p>
+     *
+     * @param consultorio consultorio destino, asignado al médico del bloque
+     */
+    public void cambiarConsultorio(Consultorio consultorio) {
+        this.consultorio = consultorio;
+    }
+
     public UUID getId() {
         return id;
     }
 
     public Medico getMedico() {
         return medico;
+    }
+
+    public Consultorio getConsultorio() {
+        return consultorio;
+    }
+
+    public Organizacion getOrganizacion() {
+        return organizacion;
     }
 
     public short getDiaSemana() {
@@ -195,10 +279,10 @@ public class HorarioMedico {
     }
 
     /**
-     * Representación legible que omite deliberadamente el médico: leerlo forzaría la
-     * inicialización de la asociación perezosa y podría lanzar
-     * {@code LazyInitializationException} al registrar la entidad fuera de una
-     * transacción.
+     * Representación legible que omite deliberadamente las asociaciones —médico,
+     * consultorio y organización—: leerlas forzaría la inicialización de la carga perezosa
+     * y podría lanzar {@code LazyInitializationException} al registrar la entidad fuera de
+     * una transacción.
      */
     @Override
     public String toString() {

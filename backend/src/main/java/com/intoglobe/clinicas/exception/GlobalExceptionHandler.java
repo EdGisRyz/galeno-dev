@@ -147,6 +147,26 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Responde 409 cuando el bloque de horario apunta a un consultorio que no está asignado al
+     * médico.
+     *
+     * <p>Es la regla «primero asignar, después agendar»: la petición está bien formada y el
+     * consultorio puede existir en la organización, pero el vínculo con ese médico todavía no
+     * existe. La clave {@code horario_medico_consultorio_asignado_fkey} de la V6 lo impediría
+     * con un error de integridad, que llegaría al cliente como 500; el servicio lo detecta antes
+     * y el mensaje explica qué hacer: asignar el consultorio al médico.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(ConsultorioNoAsignadoAlMedicoException.class)
+    public ResponseEntity<ErrorResponse> manejarConsultorioNoAsignadoAlMedico(
+            ConsultorioNoAsignadoAlMedicoException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
      * Responde 400 cuando la actualización intenta reasignar el consultorio de un
      * médico a otro distinto del actual.
      *

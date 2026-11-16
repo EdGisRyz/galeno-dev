@@ -41,10 +41,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * segunda es la razón por la que el servicio comprueba los bloques <em>antes</em> de borrar.</p>
  *
  * <p>Las entidades se pueblan siempre con sus constructores de negocio: no se usa reflexión ni
- * setters, porque las entidades no los exponen por diseño. El {@code consultorio_id} de un bloque
- * se escribe con una actualización nativa porque la entidad {@code HorarioMedico} todavía no mapea
- * esa columna; es la misma razón por la que el repositorio de horarios usa una consulta nativa para
- * listarlos por consultorio.</p>
+ * setters, porque las entidades no los exponen por diseño. El bloque se crea ya en su consultorio,
+ * porque desde el mapeo de la V7 la columna es obligatoria y la consulta que los lista por
+ * consultorio es JPQL.</p>
  */
 @DataJpaTest
 @ActiveProfiles("test")
@@ -227,7 +226,7 @@ class MedicoConsultorioRepositoryTest {
     }
 
     @Test
-    @DisplayName("el listado nativo devuelve solo los bloques de ese médico en ese consultorio")
+    @DisplayName("el listado por consultorio devuelve solo los bloques de ese médico en ese consultorio")
     void listarBloquesEnConsultorio_shouldReturnOnlyThatMedicoAndConsultorio() {
         var organizacion = persistirOrganizacion("Clínica Bloques");
         var principal = persistirConsultorio(organizacion, "Consultorio Principal");
@@ -240,14 +239,10 @@ class MedicoConsultorioRepositoryTest {
         asignar(medico, segundo);
         asignar(otroMedico, segundo);
         // Se insertan en desorden: primero el jueves por la tarde, después el lunes por la mañana.
-        var jueves = persistirBloque(medico, JUEVES, QUINCE, DIECINUEVE);
-        var lunes = persistirBloque(medico, LUNES, NUEVE, TRECE);
-        var enElPrincipal = persistirBloque(medico, LUNES, TRECE, QUINCE);
-        var delOtroMedico = persistirBloque(otroMedico, LUNES, NUEVE, TRECE);
-        moverAlConsultorio(jueves, medico, segundo);
-        moverAlConsultorio(lunes, medico, segundo);
-        moverAlConsultorio(enElPrincipal, medico, principal);
-        moverAlConsultorio(delOtroMedico, otroMedico, segundo);
+        persistirBloque(medico, segundo, JUEVES, QUINCE, DIECINUEVE);
+        persistirBloque(medico, segundo, LUNES, NUEVE, TRECE);
+        var enElPrincipal = persistirBloque(medico, principal, LUNES, TRECE, QUINCE);
+        var delOtroMedico = persistirBloque(otroMedico, segundo, LUNES, NUEVE, TRECE);
         UUID enElPrincipalId = enElPrincipal.getId();
         UUID delOtroMedicoId = delOtroMedico.getId();
         entityManager.clear();
@@ -276,8 +271,7 @@ class MedicoConsultorioRepositoryTest {
         UUID medicoId = medico.getId();
         UUID segundoId = segundo.getId();
         var asignacion = asignar(medico, segundo);
-        var bloque = persistirBloque(medico, LUNES, NUEVE, TRECE);
-        moverAlConsultorio(bloque, medico, segundo);
+        persistirBloque(medico, segundo, LUNES, NUEVE, TRECE);
         entityManager.clear();
 
         var gestionada = entityManager.find(MedicoConsultorio.class,
@@ -350,41 +344,23 @@ class MedicoConsultorioRepositoryTest {
     }
 
     /**
-     * Persiste un bloque de disponibilidad del médico, todavía sin consultorio.
+     * Persiste un bloque de disponibilidad del médico en el consultorio indicado, que tiene que
+     * estar asignado a ese médico.
      *
-     * @param medico     médico dueño del bloque
-     * @param diaSemana  día de la semana
-     * @param horaInicio hora de inicio
-     * @param horaFin    hora de fin
+     * @param medico      médico dueño del bloque
+     * @param consultorio consultorio donde se dicta el bloque
+     * @param diaSemana   día de la semana
+     * @param horaInicio  hora de inicio
+     * @param horaFin     hora de fin
      * @return el bloque persistido
      */
-    private HorarioMedico persistirBloque(Medico medico, short diaSemana, LocalTime horaInicio,
-            LocalTime horaFin) {
-        var bloque = new HorarioMedico(medico, diaSemana, horaInicio, horaFin, DURACION_TREINTA);
+    private HorarioMedico persistirBloque(Medico medico, Consultorio consultorio, short diaSemana,
+            LocalTime horaInicio, LocalTime horaFin) {
+        var bloque = new HorarioMedico(medico, consultorio, diaSemana, horaInicio, horaFin,
+                DURACION_TREINTA);
         entityManager.persist(bloque);
         entityManager.flush();
         return bloque;
     }
 
-    /**
-     * Escribe el consultorio de un bloque con una actualización nativa.
-     *
-     * <p>La entidad {@link HorarioMedico} todavía no mapea {@code consultorio_id}: escribir la
-     * columna por SQL es la única forma de sembrar un bloque con consultorio sin adelantar el
-     * mapeo, que pertenece a otra rebanada.</p>
-     *
-     * @param bloque      bloque a mover
-     * @param medico      médico dueño, del que se toma la organización
-     * @param consultorio consultorio destino, ya asignado al médico
-     */
-    private void moverAlConsultorio(HorarioMedico bloque, Medico medico, Consultorio consultorio) {
-        entityManager.createNativeQuery("UPDATE horario_medico SET organizacion_id = :organizacionId, "
-                        + "consultorio_id = :consultorioId WHERE id = :id")
-                .setParameter("organizacionId", medico.getOrganizacion().getId())
-                .setParameter("consultorioId", consultorio.getId())
-                .setParameter("id", bloque.getId())
-                .executeUpdate();
-        entityManager.flush();
-        entityManager.clear();
-    }
 }
