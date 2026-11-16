@@ -145,6 +145,37 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
+    // El refresco y el cierre de sesión dependen de la cookie `httpOnly` que pone el emisor real:
+    // el login simulado de arriba nunca la pone, así que no hay nada que leer aquí. Si estas dos
+    // rutas no se interceptan, Axios las deja pasar a la red real (`VITE_AUTH_URL`) y, si ese
+    // emisor sigue corriendo con una cookie de una sesión real anterior, reabre esa sesión real
+    // por encima de lo que se acaba de hacer con el mock — sin aviso y sin relación con el correo
+    // que se usó para entrar. Interceptarlas aquí, aunque sea para fallar, es lo que mantiene el
+    // modo mock aislado de la red real.
+    if (url.includes('/auth/refresh') && method === 'post') {
+      await delay(150);
+      config.adapter = async () => ({
+        data: { mensaje: 'No hay una sesión que refrescar en el mock.' },
+        status: 401,
+        statusText: 'Unauthorized',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (url.includes('/auth/logout') && method === 'post') {
+      await delay(100);
+      config.adapter = async () => ({
+        data: undefined,
+        status: 204,
+        statusText: 'No Content',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
     // ─────────────────────────────────────────
     // ORGANIZACIÓN (contrato real: GET /organizaciones/{id})
     // ─────────────────────────────────────────
