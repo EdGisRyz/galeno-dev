@@ -198,11 +198,22 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("Un token con tenantId que no es UUID responde 401")
-    void tenantIdQueNoEsUuidResponde401() throws Exception {
-        String token = ClaveRsaDePrueba.token().conInquilino("no-es-uuid").compactar();
+    @DisplayName("Un token con tenantId en forma de slug que no resuelve responde 403")
+    void tenantIdConSlugQueNoResuelveResponde403() throws Exception {
+        // El claim dejó de tener que ser un UUID (S3, S11): el emisor de la plataforma manda
+        // el slug de la organización. Lo que no cambia es que una organización desconocida no
+        // deja pasar la petición; ahora el rechazo es 403 —acceso denegado, el mismo contrato
+        // que el resto de la seguridad— y no el 401 del token inválido.
+        String token = ClaveRsaDePrueba.token().conInquilino("organizacion-inexistente").compactar();
 
-        esperarNoAutorizado(sonda("Bearer " + token), MENSAJE_TOKEN_INVALIDO);
+        sonda("Bearer " + token)
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.codigo").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.mensaje").value(SecurityErrorResponder.MENSAJE_ACCESO_DENEGADO))
+                .andExpect(jsonPath("$.ruta").value(RUTA_SONDA))
+                .andExpect(jsonPath("$.marcaTemporal").exists());
     }
 
     @Test

@@ -36,4 +36,27 @@ public interface OrganizacionRepository extends JpaRepository<Organizacion, UUID
      */
     @Query("SELECT o FROM Organizacion o WHERE o.id = :orgId AND o.activo = true")
     Optional<Organizacion> buscarActivaPorId(@Param("orgId") UUID organizacionId);
+
+    /**
+     * Resuelve la organización a partir de su slug.
+     *
+     * <p>Es la traducción del claim {@code tenantId} cuando el emisor de tokens manda el
+     * slug en lugar del UUID (S3, S11). La aplicación sigue trabajando con UUID; el texto
+     * solo se usa como clave de búsqueda, una vez por petición y únicamente cuando el claim
+     * no es ya un UUID.</p>
+     *
+     * <p>La columna {@code slug} es <strong>nulable</strong>, y una organización sin slug no
+     * coincide con ningún texto: la comparación de igualdad de JPQL nunca es cierta contra un
+     * valor nulo, así que no hace falta una condición adicional.</p>
+     *
+     * <p>No se filtra por {@code activo} a propósito: aquí se traduce una identidad, y qué se
+     * puede hacer con ella lo decide la autorización, no el filtro. El camino que trae el UUID
+     * tampoco comprueba que la organización exista: las dos formas son asimétricas por diseño.
+     * </p>
+     *
+     * @param slug valor del claim {@code tenantId} cuando no es un UUID
+     * @return la organización con ese slug, o vacío si no existe
+     */
+    @Query("SELECT o FROM Organizacion o WHERE o.slug = :slug")
+    Optional<Organizacion> buscarPorSlug(@Param("slug") String slug);
 }

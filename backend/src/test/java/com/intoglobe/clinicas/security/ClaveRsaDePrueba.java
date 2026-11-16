@@ -186,6 +186,7 @@ public final class ClaveRsaDePrueba {
         private String correo = EMAIL;
         private String rol = "ADMIN";
         private String inquilino = TENANT_ID;
+        private Object inquilinoDeTipoImposible;
         private String medico;
         private String emisor = EMISOR;
         private String audiencia = AUDIENCIA;
@@ -209,6 +210,22 @@ public final class ClaveRsaDePrueba {
 
         Token conInquilino(String valor) {
             this.inquilino = valor;
+            return this;
+        }
+
+        /**
+         * Emite el claim {@code tenantId} con un valor que no es texto (por ejemplo un
+         * número).
+         *
+         * <p>Sirve para comprobar que un claim de un tipo imposible se rechaza igual que
+         * antes: el filtro solo admite texto, que después interpreta como UUID o como slug.
+         * jjwt falla al leerlo como {@code String} y el filtro responde {@code 401}.</p>
+         *
+         * @param valor valor no textual del claim
+         * @return este constructor
+         */
+        Token conInquilinoDeTipoImposible(Object valor) {
+            this.inquilinoDeTipoImposible = valor;
             return this;
         }
 
@@ -287,7 +304,9 @@ public final class ClaveRsaDePrueba {
             if (rol != null) {
                 constructor.claim("role", rol);
             }
-            if (inquilino != null) {
+            if (inquilinoDeTipoImposible != null) {
+                constructor.claim("tenantId", inquilinoDeTipoImposible);
+            } else if (inquilino != null) {
                 constructor.claim("tenantId", inquilino);
             }
             if (medico != null) {

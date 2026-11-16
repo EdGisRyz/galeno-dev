@@ -14,17 +14,23 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
  * verdad de {@code tenantId} y {@code role} de una petición: el path nunca la
  * sustituye (R-SEG-06).</p>
  *
- * <p><strong>Los identificadores son {@link UUID}, no {@code String}.</strong> El claim
- * llega como texto, pero se valida y se convierte en el límite: el filtro responde
- * {@code 401} si no es un UUID bien formado. La razón es que {@code usuario.id} y
- * {@code organizacion_id} son columnas UUID, así que un valor con forma inválida acabaría
- * reventando como error interno ({@code 500}) en la capa de persistencia en lugar de ser
- * rechazado como credencial inválida.</p>
+ * <p><strong>Los identificadores son {@link UUID}, no {@code String}.</strong> El claim llega
+ * como texto, pero se convierte en el límite: {@code sub} y {@code medicoId} tienen que ser
+ * UUID canónicos y, si no lo son, el filtro responde {@code 401}. La razón es que
+ * {@code usuario.id} y {@code organizacion_id} son columnas UUID, así que un valor con forma
+ * inválida acabaría reventando como error interno ({@code 500}) en la capa de persistencia en
+ * lugar de ser rechazado como credencial inválida.</p>
+ *
+ * <p>El {@code tenantId} admite además el slug de la organización, porque es lo que emite la
+ * plataforma (S3, S11). Esa forma no llega hasta aquí tal cual: el filtro la resuelve a UUID
+ * antes de construir el principal, y si no corresponde a ninguna organización rechaza la
+ * petición con {@code 403}. Para el resto de la aplicación el tenant siempre es un UUID.</p>
  *
  * @param id       claim {@code sub}: identificador UUID del usuario
  * @param email    claim {@code email}; puede faltar en el token
  * @param role     claim {@code role}: {@code ADMIN}, {@code MEDICO} o {@code PACIENTE}
- * @param tenantId claim {@code tenantId}: UUID de la organización a la que pertenece el usuario
+ * @param tenantId claim {@code tenantId}: UUID de la organización a la que pertenece el
+ *                 usuario, ya resuelto desde el slug si el token lo traía así
  * @param medicoId claim {@code medicoId}: UUID opcional, solo presente para usuarios médicos
  */
 public record AuthenticatedUser(

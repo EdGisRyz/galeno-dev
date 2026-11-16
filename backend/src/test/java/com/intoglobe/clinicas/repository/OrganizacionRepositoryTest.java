@@ -219,6 +219,50 @@ class OrganizacionRepositoryTest {
     }
 
     @Test
+    void buscarPorSlug_shouldResolveTheOrganizationThatOwnsTheSlug() {
+        var organizacion = new Organizacion("Clínica con slug", PlanTipo.CLINICA, null);
+        organizacion.asignarSlug("acme");
+        entityManager.persist(organizacion);
+        entityManager.flush();
+        UUID id = organizacion.getId();
+
+        assertThat(organizacionRepository.buscarPorSlug("acme").map(Organizacion::getId))
+                .as("el slug del claim tiene que resolverse al UUID de su organización")
+                .contains(id);
+    }
+
+    @Test
+    void buscarPorSlug_shouldReturnEmptyWhenNoOrganizationUsesThatSlug() {
+        var organizacion = new Organizacion("Clínica sin slug", PlanTipo.SOLO, null);
+        organizacion.asignarSlug("otra-clinica");
+        entityManager.persist(organizacion);
+        entityManager.flush();
+
+        assertThat(organizacionRepository.buscarPorSlug("acme").map(Organizacion::getId))
+                .as("un slug desconocido no puede resolver a ninguna organización")
+                .isEmpty();
+    }
+
+    @Test
+    void buscarPorSlug_shouldNeverMatchAnOrganizationWithoutSlug() {
+        var sinSlug = new Organizacion("Clínica sin slug cargado", PlanTipo.SOLO, null);
+        entityManager.persist(sinSlug);
+        entityManager.flush();
+        UUID idSinSlug = sinSlug.getId();
+
+        // La columna es nulable: el token de un texto cualquiera no puede caer en una
+        // organización que nunca cargó su slug, ni siquiera con un texto vacío.
+        assertThat(organizacionRepository.buscarPorSlug("acme").map(Organizacion::getId)).isEmpty();
+        assertThat(organizacionRepository.buscarPorSlug("").map(Organizacion::getId)).isEmpty();
+        assertThat(organizacionRepository.buscarPorSlug("null").map(Organizacion::getId))
+                .as("un slug nulo no puede coincidir con el texto \"null\"")
+                .isEmpty();
+        assertThat(organizacionRepository.findById(idSinSlug))
+                .as("la organización sin slug sigue existiendo: no coincide con nada, no desaparece")
+                .isPresent();
+    }
+
+    @Test
     void effectiveConfiguration_shouldKeepFlywayEnabledAndHibernateValidate() {
         assertThat(environment.getProperty("spring.flyway.enabled", Boolean.class)).isTrue();
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");

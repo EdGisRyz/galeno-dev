@@ -2,6 +2,7 @@ package com.intoglobe.clinicas.security;
 
 import java.io.IOException;
 import java.security.interfaces.RSAPublicKey;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -58,11 +59,28 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>{@code exp} es obligatorio: un token sin {@code exp} no caduca nunca y
  *       contradiría el TTL de 30 minutos (D7) y la ventana de inactividad HIPAA, así que
  *       se rechaza aquí aunque jjwt lo acepte.</li>
- *   <li>{@code sub}, {@code tenantId} y {@code medicoId} deben ser UUID bien formados: se
- *       convierten a {@link UUID} en el límite porque las columnas contra las que se
- *       comparan son UUID y un texto arbitrario saldría como {@code 500} en vez de
- *       {@code 401}.</li>
+ *   <li>{@code sub} y {@code medicoId} deben ser UUID bien formados: se convierten a
+ *       {@link UUID} en el límite porque las columnas contra las que se comparan son UUID y
+ *       un texto arbitrario saldría como {@code 500} en vez de {@code 401}.</li>
+ *   <li><strong>Excepción declarada: {@code tenantId} también admite el slug de la
+ *       organización.</strong> El emisor de la plataforma identifica la organización por su
+ *       slug ({@code "acme"}) y el de desarrollo por su UUID (S3, S11), así que el claim
+ *       tiene dos formas válidas: un UUID se usa directo, sin consultar nada; un texto se
+ *       resuelve <em>una sola vez</em> contra {@code organizacion.slug} al final de la
+ *       validación. El resto de los claims se valida primero, de modo que un claim ausente o
+ *       de un tipo imposible sigue respondiendo {@code 401} aunque el tenant venga como
+ *       texto.</li>
  * </ul>
+ *
+ * <p><strong>Un slug que no resuelve responde {@code 403} antes de la cadena de
+ * autorización</strong> (nunca llega al controlador), con el mismo {@code ErrorResponse} de
+ * acceso denegado que usa el resto de la seguridad: un token legítimo de una organización
+ * desconocida no es un token inválido, y la respuesta no revela si el slug existe. Si el
+ * resolutor no está disponible —contextos sin JPA— el filtro falla cerrado y rechaza igual
+ * cualquier claim con forma de slug. Un <strong>fallo del resolutor</strong> (la base de datos
+ * caída, por ejemplo) se trata exactamente igual: sin tenant verificado no se autentica a
+ * nadie, y la puerta de entrada responde {@code 403} en lugar de convertir el fallo en un
+ * {@code 500}.</p>
  *
  * <p>El filtro falla cerrado: si no hay clave pública válida disponible rechaza cualquier
  * petición con credenciales en lugar de dejarla pasar. En un arranque real esa situación
@@ -96,7 +114,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     /**
      * Forma canónica de un UUID (8-4-4-4-12 hexadecimal). Se exige explícitamente porque
      * {@link UUID#fromString(String)} acepta formas abreviadas como {@code 1-1-1-1-1} y un
-     * identificador abreviado no es lo que el AuthService emite.
+     * identificador abreviado no es lo que el AuthService emite: el claim {@code tenantId}
+     * que no cumple esta forma se trata como slug, nunca como UUID.
      */
     private static final Pattern UUID_BIEN_FORMADO =
             Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
@@ -107,18 +126,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JsonMapper jsonMapper;
 
     /**
+     * Traductor del claim {@code tenantId} cuando llega como slug. Puede ser {@code null} en
+     * contextos que no levantan JPA (rebanadas MVC que importan
+     * {@link SecurityConfig}); en ese caso un claim de texto se rechaza cerrado.
+     */
+    private final ResolutorDeTenant resolutorDeTenant;
+
+    /**
      * Crea el filtro a partir de la configuración de la aplicación.
      *
      * @param clavePublicaBase64 {@code auth.public.key}: Base64 DER (SPKI) de la clave pública
      * @param issuer             {@code auth.issuer}: emisor exigido; si está en blanco se omite
      * @param audience           {@code auth.audience}: audiencia exigida; si está en blanco se omite
      * @param jsonMapper         serializador con el que se escribe el {@link ErrorResponse} del 401
+     * @param resolutorDeTenant  traductor de slug a UUID, o {@code null} si el contexto no
+     *                           tiene acceso a la tabla de organizaciones
      */
-    public JwtAuthenticationFilter(String clavePublicaBase64, String issuer, String audience, JsonMapper jsonMapper) {
+    public JwtAuthenticationFilter(String clavePublicaBase64, String issuer, String audience, JsonMapper jsonMapper,
+            ResolutorDeTenant resolutorDeTenant) {
         this.clavePublica = leerClave(clavePublicaBase64);
         this.issuer = issuer;
         this.audience = audience;
         this.jsonMapper = jsonMapper;
+        this.resolutorDeTenant = resolutorDeTenant;
     }
 
     @Override
@@ -148,6 +178,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             AuthenticatedUser usuario;
             try {
                 usuario = verificarToken(token);
+            } catch (TenantNoResueltoException excepcion) {
+                // El token verifica y sus claims son válidos: lo que no se puede es ubicar su
+                // organización. Se rechaza cerrado antes de la cadena y sin repetir el slug
+                // en la respuesta ni en el registro.
+                REGISTRO.warn("Token con un tenant que no se puede resolver en {} {}: se rechaza la petición",
+                        peticion.getMethod(), peticion.getRequestURI());
+                responderAccesoDenegado(peticion, respuesta);
+                return;
             } catch (JwtException | IllegalArgumentException excepcion) {
                 REGISTRO.warn("Token rechazado en {} {}: {}", peticion.getMethod(), peticion.getRequestURI(),
                         excepcion.getClass().getSimpleName());
@@ -217,12 +255,59 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throw new MalformedJwtException("Rol fuera del contrato de claims: " + rol);
         }
 
-        return new AuthenticatedUser(
-                claimUuidObligatorio(claims.getSubject(), Claims.SUBJECT),
-                claims.get(CLAIM_EMAIL, String.class),
-                rol,
-                claimUuidObligatorio(claims.get(CLAIM_INQUILINO, String.class), CLAIM_INQUILINO),
-                claimUuidOpcional(claims.get(CLAIM_MEDICO, String.class), CLAIM_MEDICO));
+        // El tenant se resuelve al final y por separado: es el único paso que puede producir un
+        // 403, así que cualquier otro claim inválido del token conserva la precedencia del 401.
+        UUID identificador = claimUuidObligatorio(claims.getSubject(), Claims.SUBJECT);
+        String correo = claims.get(CLAIM_EMAIL, String.class);
+        UUID medico = claimUuidOpcional(claims.get(CLAIM_MEDICO, String.class), CLAIM_MEDICO);
+        UUID inquilino = tenantDe(claimObligatorio(claims.get(CLAIM_INQUILINO, String.class), CLAIM_INQUILINO));
+
+        return new AuthenticatedUser(identificador, correo, rol, inquilino, medico);
+    }
+
+    /**
+     * Traduce el claim {@code tenantId} al UUID de la organización.
+     *
+     * <p>Las dos formas del contrato conviven sin cambiar el camino que ya funcionaba: un
+     * UUID canónico se usa tal cual y <strong>no consulta nada</strong>; cualquier otro texto
+     * se considera un slug y se resuelve una única vez contra la tabla de organizaciones. El
+     * texto que no corresponde a ninguna organización interrumpe la petición con
+     * {@link TenantNoResueltoException}, que el filtro traduce a {@code 403}.</p>
+     *
+     * <p>Un fallo al resolver —desde una excepción de acceso a datos hasta cualquier error no
+     * comprobado del resolutor— también termina en {@link TenantNoResueltoException}: la
+     * puerta de entrada no puede convertir una base caída en un {@code 500} ni, mucho menos,
+     * dejar pasar la petición sin tenant verificado.</p>
+     *
+     * @param valor claim {@code tenantId} ya validado como texto no vacío
+     * @return el UUID de la organización de la sesión
+     * @throws TenantNoResueltoException si el texto no es un UUID, no corresponde a ninguna
+     *                                  organización o el resolutor falla
+     */
+    private UUID tenantDe(String valor) {
+        if (UUID_BIEN_FORMADO.matcher(valor).matches()) {
+            return UUID.fromString(valor);
+        }
+        if (resolutorDeTenant == null) {
+            // Sin acceso a la tabla de organizaciones no se puede resolver un slug: se falla
+            // cerrado en lugar de dejar pasar una petición con el tenant sin verificar.
+            throw new TenantNoResueltoException();
+        }
+        Optional<UUID> resuelto;
+        try {
+            resuelto = resolutorDeTenant.porSlug(valor);
+        } catch (RuntimeException excepcion) {
+            // Falla cerrado: sin tenant verificado no se autentica a nadie. Se registra solo el
+            // tipo de la excepción, nunca el token ni el slug (R-SEG-10).
+            REGISTRO.warn("Fallo al resolver el tenant del token ({}): se rechaza la petición",
+                    excepcion.getClass().getSimpleName());
+            throw new TenantNoResueltoException();
+        }
+        if (resuelto == null) {
+            // Un resolutor que devuelve nulo no resolvió nada: se trata como desconocido.
+            throw new TenantNoResueltoException();
+        }
+        return resuelto.orElseThrow(TenantNoResueltoException::new);
     }
 
     private static String claimObligatorio(String valor, String nombreClaim) {
@@ -254,5 +339,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             HttpServletRequest peticion, HttpServletResponse respuesta, String mensaje) throws IOException {
         SecurityErrorResponder.escribir(
                 peticion, respuesta, HttpStatus.UNAUTHORIZED, mensaje, jsonMapper);
+    }
+
+    private void responderAccesoDenegado(
+            HttpServletRequest peticion, HttpServletResponse respuesta) throws IOException {
+        SecurityErrorResponder.escribir(
+                peticion, respuesta, HttpStatus.FORBIDDEN, SecurityErrorResponder.MENSAJE_ACCESO_DENEGADO, jsonMapper);
+    }
+
+    /**
+     * Señal interna: el claim {@code tenantId} no es un UUID canónico y no corresponde a
+     * ninguna organización.
+     *
+     * <p>No hereda de {@link JwtException} a propósito: el token es válido y el rechazo por
+     * tenant desconocido es un {@code 403}, no el {@code 401} de la credencial inválida. El
+     * mensaje nunca llega al cliente; lo que se escribe es el contrato de acceso denegado.</p>
+     */
+    private static final class TenantNoResueltoException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        private TenantNoResueltoException() {
+            super("El tenant del token no corresponde a ninguna organización");
+        }
     }
 }

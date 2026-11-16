@@ -420,14 +420,21 @@ public class SecurityConfig {
      * @param entorno    entorno del que se leen {@code auth.public.key}, {@code auth.issuer} y
      *                   {@code auth.audience}
      * @param jsonMapper serializador con el que se escribe el {@code ErrorResponse} del 401
+     * @param resolutor  traductor de slug a UUID; se recibe como proveedor y no como
+     *                   dependencia directa para que las rebanadas {@code @WebMvcTest} que
+     *                   importan esta configuración —y que no levantan JPA— sigan arrancando:
+     *                   allí el proveedor no tiene resolutor y el filtro rechaza cerrado
+     *                   cualquier claim con forma de slug
      * @return el filtro listo para insertarse en la cadena
      */
     @Bean
-    public JwtAuthenticationFilter jwtAuthenticationFilter(Environment entorno, JsonMapper jsonMapper) {
+    public JwtAuthenticationFilter jwtAuthenticationFilter(Environment entorno, JsonMapper jsonMapper,
+            ObjectProvider<ResolutorDeTenant> resolutor) {
         return new JwtAuthenticationFilter(
                 AuthPublicKey.valorConfigurado(entorno, AuthPublicKey.PROPIEDAD_CLAVE),
                 AuthPublicKey.valorConfigurado(entorno, AuthPublicKey.PROPIEDAD_ISSUER),
                 AuthPublicKey.valorConfigurado(entorno, AuthPublicKey.PROPIEDAD_AUDIENCE),
-                jsonMapper);
+                jsonMapper,
+                resolutor.getIfAvailable());
     }
 }
