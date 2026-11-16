@@ -72,13 +72,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       ({@link #crearOrganizacionResponde403ParaLosTresRoles()}); y las rutas con el
  *       {@code organizacionId} de otro tenant, todas {@code 403} sin excepción de rol
  *       ({@link #elPathDeOtroTenantResponde403TambienParaAdmin()}).</li>
- *   <li><strong>MEDICO</strong>: las once operaciones de su tenant permitidas —las seis
+ *   <li><strong>MEDICO</strong>: las doce operaciones de su tenant permitidas —las seis
  *       lecturas de los módulos 02, 03 y paciente ({@link #medicoLeeSuPropioTenant()} y
- *       {@link #medicoLeePacientesDeSuPropioTenant()}) y los cinco endpoints de horarios
- *       sobre su propia agenda ({@link #medicoOperaSuPropiaAgendaDeHorarios()})— y las
- *       veintiuna operaciones restantes {@code 403}
- *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
- *   <li><strong>PACIENTE</strong>: las treinta y dos operaciones {@code 403}
+ *       {@link #medicoLeePacientesDeSuPropioTenant()}), los cinco endpoints de horarios sobre
+ *       su propia agenda ({@link #medicoOperaSuPropiaAgendaDeHorarios()}) y la lista de
+ *       consultorios asignados a su propio médico
+ *       ({@link #medicoLeeLosConsultoriosDeSuPropioMedico()})— y las veintitrés operaciones
+ *       restantes {@code 403} ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
+ *   <li><strong>PACIENTE</strong>: las treinta y cinco operaciones {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
  *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las operaciones por id de
  *       consultorio y médico, más las cuentas de usuario → {@code 404} sin revelar el recurso ni su
@@ -156,6 +157,9 @@ class AislamientoYMatrizRbacTest {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
+
+    @Autowired
+    private com.intoglobe.clinicas.repository.MedicoConsultorioRepository medicoConsultorioRepository;
 
     private Organizacion organizacionA;
     private Organizacion organizacionB;
@@ -557,6 +561,60 @@ class AislamientoYMatrizRbacTest {
     }
 
     // ------------------------------------------------------------------
+    // ADMIN: la asignación de consultorios de su propio médico
+    // ------------------------------------------------------------------
+
+    /**
+     * Las tres celdas de la asignación vistas de extremo a extremo con el rol {@code ADMIN}:
+     * asignar dos veces responde {@code 204} la segunda vez, el listado incluye el consultorio
+     * recién asignado y retirarlo dos veces responde {@code 204}. Se comprueba además que el
+     * consultorio principal del médico no se puede retirar ({@code 409}).
+     *
+     * <p>El consultorio que se asigna es uno nuevo de la organización del token: el sembrado es el
+     * consultorio principal del médico, y retirar ese es precisamente la operación prohibida.</p>
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("ADMIN asigna y retira consultorios de su médico, con idempotencia y sin tocar el principal")
+    void adminAsignaYRetiraLosConsultoriosDeSuMedico() throws Exception {
+        Consultorio consultorioNuevo = consultorioRepository.save(new Consultorio(organizacionA,
+                "Consultorio Alfa Dos", "Calle Alfa 2", "+52 55 0000 0003"));
+        String rutaAsignados = "/api/v1/medicos/" + medicoA.getId() + "/consultorios";
+        String cuerpo = cuerpoAsignacion(consultorioNuevo.getId());
+
+        ejecutar(post(rutaAsignados).contentType(MediaType.APPLICATION_JSON).content(cuerpo), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(post(rutaAsignados).contentType(MediaType.APPLICATION_JSON).content(cuerpo), tokenAdminA)
+                .andExpect(status().isNoContent());
+
+        ejecutar(get(rutaAsignados), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(consultorioNuevo.getId().toString()))
+                .andExpect(jsonPath("$[0].organizacionId").value(organizacionA.getId().toString()));
+        assertThat(medicoConsultorioRepository.buscarAsignacion(medicoA.getId(), consultorioNuevo.getId(),
+                organizacionA.getId()))
+                .as("la asignación repetida no debe duplicar la fila del par")
+                .isPresent();
+
+        ejecutar(delete(rutaAsignados + "/" + consultorioNuevo.getId()), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(delete(rutaAsignados + "/" + consultorioNuevo.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+        ejecutar(get(rutaAsignados), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        ejecutar(delete(rutaAsignados + "/" + consultorioA.getId()), tokenAdminA)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.mensaje", org.hamcrest.Matchers.containsString("consultorio principal")));
+    }
+
+    // ------------------------------------------------------------------
     // MEDICO: lecturas permitidas en su tenant
     // ------------------------------------------------------------------
 
@@ -621,6 +679,29 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(jsonPath("$.length()").value(0));
     }
 
+    /**
+     * La celda de lectura de la asignación de consultorios: {@code MEDICO} consulta los
+     * consultorios de su propio médico —el del claim {@code medicoId}, no el del path— y recibe
+     * {@code 403} cuando el path apunta a otro médico de su misma organización. Es la misma regla
+     * de propiedad que ya protege la agenda de horarios, aplicada a esta ruta.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("MEDICO lee los consultorios de su propio médico y solo los propios")
+    void medicoLeeLosConsultoriosDeSuPropioMedico() throws Exception {
+        String token = tokenMedicoDeSuAgenda();
+        Medico otroMedicoDeLaMismaClinica = medicoRepository.save(new Medico(organizacionA, consultorioA,
+                "Dr. Alfa Dos", "Dermatología", "33333333", "+52 55 0000 0033", new BigDecimal("600.00")));
+
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId() + "/consultorios"), token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        ejecutar(get("/api/v1/medicos/" + otroMedicoDeLaMismaClinica.getId() + "/consultorios"), token)
+                .andExpect(status().isForbidden());
+    }
+
     @Test
     @DisplayName("MEDICO lee los pacientes de su propio tenant")
     void medicoLeePacientesDeSuPropioTenant() throws Exception {
@@ -663,12 +744,13 @@ class AislamientoYMatrizRbacTest {
     // ------------------------------------------------------------------
 
     /**
-     * Celdas {@code 403} de la matriz: las treinta y dos operaciones para {@code PACIENTE} y las
-     * veintiuna que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path
-     * para que lo que se ejerza sea el rol y no el aislamiento. Las once celdas que la matriz
+     * Celdas {@code 403} de la matriz: las treinta y cinco operaciones para {@code PACIENTE} y las
+     * veintitrés que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path
+     * para que lo que se ejerza sea el rol y no el aislamiento. Las doce celdas que la matriz
      * concede a {@code MEDICO} no aparecen aquí: cuatro se ejercen en
-     * {@link #medicoLeeSuPropioTenant()}, dos en {@link #medicoLeePacientesDeSuPropioTenant()} y
-     * cinco en {@link #medicoOperaSuPropiaAgendaDeHorarios()}.
+     * {@link #medicoLeeSuPropioTenant()}, dos en {@link #medicoLeePacientesDeSuPropioTenant()},
+     * cinco en {@link #medicoOperaSuPropiaAgendaDeHorarios()} y una en
+     * {@link #medicoLeeLosConsultoriosDeSuPropioMedico()}.
      *
      * @return rol, descripción de la operación, método, ruta y cuerpo de cada celda denegada
      */
@@ -730,6 +812,14 @@ class AislamientoYMatrizRbacTest {
                         "/api/v1/horarios/" + UUID.randomUUID(), CUERPO_HORARIO_ACTUALIZADO),
                 Arguments.of(rol, "DELETE horario", "DELETE",
                         "/api/v1/horarios/" + UUID.randomUUID(), null),
+                Arguments.of(rol, "POST asignar consultorio al médico", "POST",
+                        "/api/v1/medicos/" + medicoA.getId() + "/consultorios",
+                        cuerpoAsignacion(consultorioA.getId())),
+                Arguments.of(rol, "GET consultorios del médico", "GET",
+                        "/api/v1/medicos/" + medicoA.getId() + "/consultorios", null),
+                Arguments.of(rol, "DELETE asignar consultorio al médico", "DELETE",
+                        "/api/v1/medicos/" + medicoA.getId() + "/consultorios/" + consultorioA.getId(),
+                        null),
                 Arguments.of(rol, "POST paciente", "POST",
                         "/api/v1/organizaciones/" + organizacionA.getId() + "/pacientes",
                         CUERPO_PACIENTE_NUEVO),
@@ -759,11 +849,12 @@ class AislamientoYMatrizRbacTest {
     }
 
     /**
-     * Las once celdas que la matriz concede a {@code MEDICO}: las seis lecturas de su propio
-     * tenant —consultorios, médicos y pacientes— y los cinco endpoints de horarios. Que las de
-     * horarios acaben en {@code 2xx} exige además que el actor sea el médico dueño de la
-     * agenda, y esa mitad la comprueba el service contra el claim {@code medicoId}; aquí solo se
-     * fija que el rol no es lo que deniega.
+     * Las doce celdas que la matriz concede a {@code MEDICO}: las seis lecturas de su propio
+     * tenant —consultorios, médicos y pacientes—, los cinco endpoints de horarios y la lista de
+     * consultorios asignados a su propio médico. Que las de horarios y la de la asignación acaben
+     * en {@code 2xx} exige además que el actor sea el médico dueño de la agenda o de los
+     * consultorios, y esa mitad la comprueba el service contra el claim {@code medicoId}; aquí solo
+     * se fija que el rol no es lo que deniega.
      *
      * @param descripcion descripción de la operación
      * @return {@code true} si la celda está permitida para {@code MEDICO}
@@ -772,7 +863,8 @@ class AislamientoYMatrizRbacTest {
         return List.of("GET consultorios anidados", "GET consultorio por id",
                 "GET médicos anidados", "GET médico por id",
                 "GET pacientes anidados", "GET paciente por id", "POST horario",
-                "GET horarios anidados", "GET horario por id", "PUT horario", "DELETE horario")
+                "GET horarios anidados", "GET horario por id", "PUT horario", "DELETE horario",
+                "GET consultorios del médico")
                 .contains(descripcion);
     }
 
@@ -1176,6 +1268,18 @@ class AislamientoYMatrizRbacTest {
      */
     private static String plantillaDeMensaje(String cuerpo, String id) {
         return JsonPath.read(cuerpo, "$.mensaje").toString().replace(id, "<id>");
+    }
+
+    /**
+     * Cuerpo de la asignación de un consultorio a un médico.
+     *
+     * @param consultorioId consultorio que se asigna
+     * @return cuerpo JSON de la petición
+     */
+    private static String cuerpoAsignacion(UUID consultorioId) {
+        return """
+                {"consultorioId":"%s"}
+                """.formatted(consultorioId);
     }
 
     private static String cuerpoMedico(String consultorioId, String nombre) {

@@ -71,7 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
  * la cadena la escribe {@link RestAccessDeniedHandler}.</p>
  *
  * <table>
- *   <caption>Matriz aplicada a las treinta y dos operaciones de la API</caption>
+ *   <caption>Matriz aplicada a las treinta y cinco operaciones de la API</caption>
  *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th></tr>
  *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td></tr>
@@ -87,6 +87,9 @@ import tools.jackson.databind.json.JsonMapper;
  *   <tr><td>{@code POST /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
  *   <tr><td>{@code GET /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
  *   <tr><td>{@code GET|PUT|DELETE /horarios/{id}}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
+ *   <tr><td>{@code GET /medicos/{id}/consultorios}</td><td>propio tenant</td><td>solo los propios</td><td>403</td></tr>
+ *   <tr><td>{@code POST /medicos/{id}/consultorios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code DELETE /medicos/{id}/consultorios/{consultorioId}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code POST /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
  *   <tr><td>{@code GET /pacientes/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
@@ -119,6 +122,23 @@ import tools.jackson.databind.json.JsonMapper;
  * sobre su propia agenda ({@code 403} cuando el bloque es de otro médico de la misma
  * organización). Ninguna de esas dos comprobaciones se puede expresar aquí: dependen del
  * estado de la base, no del rol.</p>
+ *
+ * <h2>Consultorios del médico: la matriz concede el rol, el service acota el tenant y la propiedad</h2>
+ *
+ * <p>Las tres rutas de la asignación de consultorios aparecen en la tabla como «solo los
+ * propios» en la lectura y como {@code 403} para {@code MEDICO} en las dos escrituras. Como en
+ * horarios, esta cadena solo aplica la mitad del rol: {@code MedicoConsultorioService} comprueba
+ * contra el {@code tenantId} del claim que el médico del path pertenezca a la organización del
+ * token ({@code 404} si no, para no revelar que existe) y que un token {@code MEDICO} consulte
+ * los consultorios del médico de su claim {@code medicoId} ({@code 403} si el path apunta a
+ * otro). Ninguna de las dos se puede expresar aquí: dependen del estado de la base.</p>
+ *
+ * <p><strong>Estas rutas no tienen {@code organizacionId} en el path</strong>, porque la colección
+ * cuelga del médico ({@code /medicos/{medicoId}/consultorios}). No hay, por lo tanto, ninguna
+ * celda de «path de otro tenant responde {@code 403}» que aplicar: la organización sale siempre
+ * del claim y el cruce de tenant se resuelve con {@code 404}, igual que en el módulo de
+ * horarios. El {@code 409} de las dos reglas de conflicto —el consultorio principal del médico y
+ * un consultorio con bloques de horario suyos— tampoco vive aquí: es estado de la base.</p>
  *
  * <h2>Pacientes: la matriz concede el rol, el service acota la organización y la pertenencia</h2>
  *
@@ -169,7 +189,7 @@ import tools.jackson.databind.json.JsonMapper;
  * venir acompañado del onboarding que haga alcanzable la organización creada, y de un test que
  * lo demuestre.</p>
  *
- * <p>{@code PACIENTE} recibe {@code 403} en las treinta y dos operaciones. Desde este módulo
+ * <p>{@code PACIENTE} recibe {@code 403} en las treinta y cinco operaciones. Desde este módulo
  * existe contrato de pacientes, así que su {@code 403} ya no es ausencia de endpoint:
  * <strong>hoy no se emiten tokens {@code PACIENTE}</strong> —el rol existe en el schema y se
  * conserva para una implementación futura, pero no hay cuentas de paciente— y por eso no
@@ -328,6 +348,19 @@ public class SecurityConfig {
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
                         .requestMatchers(HttpMethod.DELETE, RUTA_HORARIOS + "/*")
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        // Consultorios asignados al médico: el ADMIN los asigna y los retira y
+                        // comparte la lectura con MEDICO, que solo ve los de su propio médico.
+                        // Esta regla solo concede el rol; el acotamiento por organización (404) y
+                        // la propiedad (403 si un MEDICO pide los de otro médico) los aplica
+                        // MedicoConsultorioService contra el tenantId y el medicoId del token. Se
+                        // declaran los tres verbos por separado porque cada uno es una operación
+                        // de la matriz.
+                        .requestMatchers(HttpMethod.GET, RUTA_MEDICOS + "/*/consultorios")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .requestMatchers(HttpMethod.POST, RUTA_MEDICOS + "/*/consultorios")
+                        .hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, RUTA_MEDICOS + "/*/consultorios/*")
+                        .hasRole(ROL_ADMIN)
                         // Pacientes: ADMIN escribe y MEDICO solo lee. Esta regla solo concede
                         // el rol; que la organización del path sea la del token y que el
                         // paciente pertenezca a esa organización (404 si no) lo aplica

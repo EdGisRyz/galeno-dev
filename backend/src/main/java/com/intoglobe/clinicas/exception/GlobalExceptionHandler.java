@@ -127,6 +127,26 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Responde 409 cuando la operación intenta retirar de un médico un consultorio que no se puede
+     * retirar.
+     *
+     * <p>Cubre las dos reglas de la asignación de consultorios: el consultorio principal del médico
+     * no se retira, y un consultorio que todavía tiene bloques de horario suyos tampoco —la clave
+     * {@code horario_medico_consultorio_asignado_fkey} de la migración V6 lo impediría con un error
+     * de integridad, que llegaría al cliente como 500—. Como en los demás conflictos, el mensaje es
+     * parte de la regla: dice el motivo y, en el caso de los bloques, cuáles son.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(ConsultorioNoRetirableException.class)
+    public ResponseEntity<ErrorResponse> manejarConsultorioNoRetirable(
+            ConsultorioNoRetirableException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
      * Responde 400 cuando la actualización intenta reasignar el consultorio de un
      * médico a otro distinto del actual.
      *

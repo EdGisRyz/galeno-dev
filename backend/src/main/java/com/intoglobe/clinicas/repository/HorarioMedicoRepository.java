@@ -97,4 +97,36 @@ public interface HorarioMedicoRepository extends JpaRepository<HorarioMedico, UU
             @Param("horaInicio") LocalTime horaInicio,
             @Param("horaFin") LocalTime horaFin,
             @Param("idExcluido") UUID idExcluido);
+
+    /**
+     * Lista los bloques de un médico que se dictan en un consultorio concreto, ordenados por día
+     * y hora de inicio.
+     *
+     * <p>Es la consulta de la regla que impide retirar de un médico un consultorio que todavía
+     * tiene bloques de horario: la clave {@code horario_medico_consultorio_asignado_fkey} de la
+     * migración V6 lo rechazaría con un error de integridad, así que el servicio lo detecta antes
+     * y responde un {@code 409} que además dice cuáles son los bloques que lo impiden.</p>
+     *
+     * <p><strong>Es una consulta nativa, y es temporal.</strong> {@code horario_medico.consultorio_id}
+     * existe en el esquema desde la V6, pero la entidad {@link HorarioMedico} todavía no mapea la
+     * columna: eso lo hace la rebanada de los bloques con consultorio. Hasta entonces JPQL no
+     * puede nombrarla y la consulta baja a SQL. Cuando el mapeo exista, esta misma consulta pasa a
+     * JPQL con la misma forma —mismo nombre, mismos parámetros, mismo orden— y sin tocar al
+     * llamador.</p>
+     *
+     * <p>No se acota por organización porque no le hace falta: las dos claves foráneas de la V6
+     * exigen que el consultorio y el médico compartan {@code organizacion_id} y que el par esté
+     * asignado, de modo que un par de otra clínica no puede tener filas. El llamador, en cualquier
+     * caso, ya resolvió el médico y el consultorio dentro del tenant.</p>
+     *
+     * @param medicoId      médico dueño de los bloques
+     * @param consultorioId consultorio por el que se pregunta
+     * @return bloques de ese médico en ese consultorio, ordenados por {@code diaSemana} y
+     *         {@code horaInicio}; vacío si el consultorio no tiene ninguno
+     */
+    @Query(value = "SELECT h.* FROM horario_medico h WHERE h.medico_id = :medicoId "
+            + "AND h.consultorio_id = :consultorioId ORDER BY h.dia_semana, h.hora_inicio",
+            nativeQuery = true)
+    List<HorarioMedico> listarBloquesEnConsultorio(@Param("medicoId") UUID medicoId,
+            @Param("consultorioId") UUID consultorioId);
 }
