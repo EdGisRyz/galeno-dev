@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { iniciarServidor, leerConfiguracion } from '../server.mjs';
+import { normalizarCorreo } from '../usuarios.mjs';
 
 /** Contraseña de prueba: nunca está en el repositorio, la inyecta esta suite. */
 export const CONTRASENA = 'contrasena-sintetica-de-prueba';
@@ -14,6 +15,111 @@ export const CONTRASENA = 'contrasena-sintetica-de-prueba';
 export const CORREO_ADMIN = 'admin@dev-auth.local';
 export const CORREO_MEDICO = 'medico@dev-auth.local';
 export const CORREO_PACIENTE = 'paciente@dev-auth.local';
+
+export const ORGANIZACION_A = '11111111-1111-4111-8111-111111111111';
+export const ORGANIZACION_B = '22222222-2222-4222-8222-222222222222';
+export const AUTH_USER_ADMIN = 'a1b2c3d4-0000-4000-8000-000000000001';
+export const AUTH_USER_MEDICO = 'a1b2c3d4-0000-4000-8000-000000000002';
+export const AUTH_USER_PACIENTE = 'a1b2c3d4-0000-4000-8000-000000000003';
+export const MEDICO_ACTIVO = 'b2c3d4e5-0000-4000-8000-000000000002';
+
+/**
+ * Filas de la tabla `usuario` que usa la suite: la misma forma que devuelve la consulta del
+ * emisor (fila de `usuario` más el `activo` de su médico, si tiene uno). Reproducen
+ * `usuarios.json`, que quedó como semilla documentada y ya no se lee al arrancar.
+ *
+ * Son datos de prueba: ninguna prueba toca PostgreSQL.
+ */
+export const FILAS_SEMILLA = [
+  {
+    auth_user_id: AUTH_USER_ADMIN,
+    email: CORREO_ADMIN,
+    rol: 'ADMIN',
+    organizacion_id: ORGANIZACION_A,
+    medico_id: null,
+    activo: true,
+    medico_activo: null,
+  },
+  {
+    auth_user_id: AUTH_USER_MEDICO,
+    email: CORREO_MEDICO,
+    rol: 'MEDICO',
+    organizacion_id: ORGANIZACION_A,
+    medico_id: MEDICO_ACTIVO,
+    activo: true,
+    medico_activo: true,
+  },
+  {
+    auth_user_id: AUTH_USER_PACIENTE,
+    email: CORREO_PACIENTE,
+    rol: 'PACIENTE',
+    organizacion_id: ORGANIZACION_B,
+    medico_id: null,
+    activo: true,
+    medico_activo: null,
+  },
+];
+
+/**
+ * Copia profunda de las filas de la suite, para que una prueba pueda alterarlas (dar de baja
+ * una cuenta, agregar el mismo correo en otra organización) sin contaminar a las demás.
+ */
+export function filasPropias(sobrescrituras = []) {
+  const filas = JSON.parse(JSON.stringify(FILAS_SEMILLA));
+  for (const [indice, cambio] of sobrescrituras) {
+    filas[indice] = { ...filas[indice], ...cambio };
+  }
+  return filas;
+}
+
+/**
+ * Repositorio de identidad en memoria: cumple el mismo contrato que el de PostgreSQL para que
+ * las pruebas ejerciten el servidor real sin base de datos. Filtra por correo normalizado,
+ * igual que el `WHERE lower(u.email) = $1` de la consulta real.
+ *
+ * @param {Array<object>} filas filas de `usuario` (mutables: el repositorio las lee en vivo)
+ */
+export function crearRepositorioEnMemoria(filas) {
+  const consultas = [];
+  return {
+    consultas,
+    filas,
+    async verificarConexion() {
+      consultas.push('verificarConexion');
+    },
+    async buscarPorCorreo(correo) {
+      consultas.push(['correo', correo]);
+      const normalizado = normalizarCorreo(correo);
+      return filas.filter((fila) => normalizarCorreo(fila.email) === normalizado);
+    },
+    async buscarPorAuthUserId(authUserId) {
+      consultas.push(['auth_user_id', authUserId]);
+      return filas.filter((fila) => fila.auth_user_id === authUserId);
+    },
+    async cerrar() {
+      consultas.push('cerrar');
+    },
+  };
+}
+
+/**
+ * Repositorio que falla en toda consulta: prueba que un error de la base responde con un
+ * mensaje claro y sin detalles del driver.
+ */
+export function crearRepositorioCaido() {
+  return {
+    async verificarConexion() {
+      throw new Error('sin base');
+    },
+    async buscarPorCorreo() {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
+    },
+    async buscarPorAuthUserId() {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
+    },
+    async cerrar() {},
+  };
+}
 
 export const ORIGEN_FRONTEND = 'http://localhost:5173';
 
@@ -34,7 +140,10 @@ export const CLAVE_PRIVADA = CLAVE_PRIVADA_PEM;
 export const CLAVE_PRIVADA_AJENA = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs8', format: 'pem' });
 
-/** Entorno mínimo válido para arrancar el emisor. */
+/**
+ * Entorno mínimo válido para arrancar el emisor. La conexión a PostgreSQL solo se valida al
+ * armar la configuración: la suite inyecta un repositorio en memoria, así que nunca se conecta.
+ */
 export function entornoBase(sobrescrituras = {}) {
   return {
     AUTH_PRIVATE_KEY_PATH: '',
@@ -42,32 +151,38 @@ export function entornoBase(sobrescrituras = {}) {
     AUTH_ISSUER: 'galeno-dev',
     AUTH_AUDIENCE: 'galeno-api',
     DEV_AUTH_PORT: '0',
+    PGDATABASE: 'galeno_clinica_dev',
     ...sobrescrituras,
   };
 }
 
 /**
  * Arranca un emisor real en un puerto efímero, con clave privada en un directorio
- * temporal fuera del árbol de trabajo y apagado garantizado al terminar la prueba.
+ * temporal fuera del árbol de trabajo y apagado garantizado al terminar la prueba. La
+ * identidad se inyecta: un repositorio en memoria con las filas indicadas.
  *
  * @param {import('node:test').TestContext} t contexto de la prueba, para el teardown
- * @param {Record<string, string>} sobrescrituras variables de entorno a cambiar
+ * @param {object} [opciones]
+ * @param {Array<object>} [opciones.filas] filas de `usuario` visibles para el emisor
+ * @param {object} [opciones.repositorio] repositorio de identidad ya construido
+ * @param {Record<string, string>} [opciones.entorno] variables de entorno a cambiar
  */
-export async function levantarEmisor(t, sobrescrituras = {}) {
+export async function levantarEmisor(t, opciones = {}) {
   const directorio = mkdtempSync(path.join(tmpdir(), 'dev-auth-'));
   const rutaClave = path.join(directorio, 'privada.pem');
   writeFileSync(rutaClave, CLAVE_PRIVADA_PEM);
 
-  const entorno = entornoBase({ AUTH_PRIVATE_KEY_PATH: rutaClave, ...sobrescrituras });
+  const entorno = entornoBase({ AUTH_PRIVATE_KEY_PATH: rutaClave, ...opciones.entorno });
   const config = leerConfiguracion(entorno);
-  const emisor = await iniciarServidor(config);
+  const repositorio = opciones.repositorio ?? crearRepositorioEnMemoria(opciones.filas ?? FILAS_SEMILLA);
+  const emisor = await iniciarServidor(config, { repositorioUsuarios: repositorio });
 
   t.after(async () => {
     await emisor.cerrar();
     rmSync(directorio, { recursive: true, force: true });
   });
 
-  return { ...emisor, config, entorno };
+  return { ...emisor, config, entorno, repositorio };
 }
 
 /** Envía una petición HTTP al emisor. `cuerpo` se serializa como JSON si viene definido. */
@@ -84,7 +199,7 @@ export async function enviar(emisor, ruta, opciones = {}) {
   return fetch(`${emisor.url}${ruta}`, peticion);
 }
 
-/** Inicia sesión con las credenciales de la fixture y devuelve la respuesta cruda. */
+/** Inicia sesión con las credenciales sembradas y devuelve la respuesta cruda. */
 export function iniciarSesion(emisor, correo, contrasena = CONTRASENA) {
   return enviar(emisor, '/auth/login', { cuerpo: { email: correo, password: contrasena } });
 }

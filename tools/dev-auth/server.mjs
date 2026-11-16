@@ -22,18 +22,27 @@
  *   <li>{@code iss} y {@code aud} salen de {@code AUTH_ISSUER} y {@code AUTH_AUDIENCE}.</li>
  * </ul>
  *
- * <p><strong>Cero dependencias.</strong> Solo {@code node:crypto}, {@code node:http},
- * {@code node:fs} y utilidades de ruta de Node. No hay {@code package.json} en
- * {@code tools/}.</p>
+ * <p><strong>De dónde salen las cuentas.</strong> De la tabla {@code usuario} de PostgreSQL
+ * (más el {@code activo} de su médico), no de un archivo. El alta de una clínica crea un
+ * administrador nuevo y un archivo estático no lo conocería, así que la tabla es la única
+ * fuente de verdad también en desarrollo. {@code usuarios.json} queda como semilla documentada
+ * y no se lee al arrancar. La traducción de fila a claims y la decisión del login viven en
+ * {@code usuarios.mjs}: son funciones puras y se prueban sin base de datos.</p>
  *
- * <p><strong>Nunca se registra</strong> la clave privada, la contraseña ni ningún token.</p>
+ * <p><strong>Dependencia {@code pg}.</strong> Es la única dependencia del emisor y se carga de
+ * forma diferida, cuando no se inyecta un repositorio de identidad. Requiere
+ * {@code npm install} dentro de {@code tools/dev-auth}.</p>
+ *
+ * <p><strong>Nunca se registra</strong> la clave privada, la contraseña, ningún token ni la
+ * cadena de conexión.</p>
  */
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign, timingSafeEqual, verify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+
+import { crearRepositorioPostgres, descripcionDeBaseDeDatos, evaluarCuenta, normalizarCorreo } from './usuarios.mjs';
 
 /** Nombre del servicio; el prefijo `dev-` es deliberado (ver README). */
 export const NOMBRE_SERVICIO = 'dev-auth';
@@ -59,7 +68,7 @@ const EMISOR_POR_DEFECTO = 'galeno-dev';
 const AUDIENCIA_POR_DEFECTO = 'galeno-api';
 const PUERTO_POR_DEFECTO = 4001;
 const LIMITE_CUERPO_BYTES = 10 * 1024;
-const ROLES_PERMITIDOS = new Set(['ADMIN', 'MEDICO', 'PACIENTE']);
+/** Forma canónica de UUID: la que necesitan `sub`/`tenantId` para llegar intactos al backend. */
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MOTIVOS = new Map([
   [400, 'Bad Request'],
@@ -67,13 +76,25 @@ const MOTIVOS = new Map([
   [403, 'Forbidden'],
   [404, 'Not Found'],
   [405, 'Method Not Allowed'],
+  [409, 'Conflict'],
+  [500, 'Internal Server Error'],
 ]);
 
 const MENSAJE_CREDENCIALES_INVALIDAS = 'Credenciales inválidas';
 const MENSAJE_REFRESCO_INVALIDO = 'La sesión no es válida o expiró; vuelva a iniciar sesión';
 const MENSAJE_ORIGEN_NO_PERMITIDO = 'El origen de la petición no está permitido para esta operación';
-
-const RUTA_USUARIOS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'usuarios.json');
+const MENSAJE_CUENTA_INACTIVA =
+  'La cuenta está dada de baja: un administrador de la clínica debe reactivarla antes de poder iniciar sesión';
+const MENSAJE_MEDICO_INACTIVO =
+  'El médico asociado a esta cuenta ya no está activo, así que la cuenta no puede iniciar sesión';
+const MENSAJE_CORREO_AMBIGUO =
+  'El correo está registrado en más de una organización: el emisor de desarrollo no puede decidir cuál usar';
+const MENSAJE_FILA_INVALIDA =
+  'La tabla usuario tiene una fila que no puede convertirse en los claims del token:';
+const MENSAJE_IDENTIDAD_NO_DISPONIBLE =
+  'No se pudo consultar la tabla usuario; revise que PostgreSQL esté en marcha y que la configuración de conexión apunte a la base correcta';
+const MENSAJE_SIN_BASE_DE_DATOS =
+  'Falta la base de datos de identidad: defina DATABASE_URL o el conjunto PGHOST, PGPORT, PGDATABASE, PGUSER y PGPASSWORD. dev-auth no arranca sin ella porque los usuarios viven en la tabla usuario.';
 
 // ===============================
 // Configuración y arranque fail-fast
@@ -83,7 +104,7 @@ const RUTA_USUARIOS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'u
  * Lee y valida la configuración desde el entorno.
  *
  * @param {NodeJS.ProcessEnv} entorno variables de entorno (inyectables en pruebas)
- * @returns {{rutaClavePrivada: string, contrasena: string, emisor: string, audiencia: string, puerto: number, rutaUsuarios: string}}
+ * @returns {{rutaClavePrivada: string, contrasena: string, emisor: string, audiencia: string, puerto: number, baseDatos: object}}
  */
 export function leerConfiguracion(entorno = process.env) {
   return {
@@ -95,13 +116,51 @@ export function leerConfiguracion(entorno = process.env) {
     contrasena: textoObligatorio(
       entorno.DEV_AUTH_PASSWORD,
       'DEV_AUTH_PASSWORD',
-      'contraseña de los usuarios de la fixture de desarrollo',
+      'contraseña única de los usuarios de desarrollo',
     ),
     emisor: textoOpcional(entorno.AUTH_ISSUER) ?? EMISOR_POR_DEFECTO,
     audiencia: textoOpcional(entorno.AUTH_AUDIENCE) ?? AUDIENCIA_POR_DEFECTO,
     puerto: leerPuerto(entorno.DEV_AUTH_PORT),
-    rutaUsuarios: RUTA_USUARIOS,
+    baseDatos: leerBaseDeDatos(entorno),
   };
+}
+
+/**
+ * Lee la configuración de la base de identidad: `DATABASE_URL` o el conjunto `PG*`. Falla cerrado
+ * aquí, antes de intentar conectar, para que el síntoma sea un mensaje propio y no un error de
+ * socket.
+ *
+ * @param {NodeJS.ProcessEnv} entorno
+ */
+function leerBaseDeDatos(entorno) {
+  const url = textoOpcional(entorno.DATABASE_URL);
+  const base = textoOpcional(entorno.PGDATABASE);
+  if (url === null && base === null) {
+    throw new Error(MENSAJE_SIN_BASE_DE_DATOS);
+  }
+
+  const puerto = textoOpcional(entorno.PGPORT) === null ? null : leerPuertoDeBaseDeDatos(entorno.PGPORT);
+  const host = textoOpcional(entorno.PGHOST);
+  const baseDatos = url === null
+    ? {
+        url: null,
+        host: host ?? 'localhost',
+        puerto: puerto ?? 5432,
+        base,
+        usuario: textoOpcional(entorno.PGUSER),
+        contrasena: textoOpcional(entorno.PGPASSWORD),
+      }
+    : { url, host: null, puerto: null, base: null, usuario: null, contrasena: null };
+  baseDatos.descripcion = descripcionDeBaseDeDatos(baseDatos);
+  return baseDatos;
+}
+
+function leerPuertoDeBaseDeDatos(valor) {
+  const puerto = Number(valor);
+  if (!Number.isInteger(puerto) || puerto < 1 || puerto > 65535) {
+    throw new Error(`PGPORT no es un puerto válido: "${valor}". Use un entero entre 1 y 65535.`);
+  }
+  return puerto;
 }
 
 function textoObligatorio(valor, nombreVariable, descripcion) {
@@ -170,63 +229,6 @@ export function huellaEnHex(clavePrivada) {
   return createHash('sha256').update(der).digest('hex');
 }
 
-/**
- * Carga la fixture de usuarios (el directorio de identidad en desarrollo).
- *
- * @param {string} ruta ruta del JSON
- * @returns {Array<{sub: string, email: string, role: string, tenantId: string, medicoId?: string}>}
- */
-function cargarUsuarios(ruta) {
-  let fixture;
-  try {
-    fixture = JSON.parse(readFileSync(ruta, 'utf8'));
-  } catch (causa) {
-    throw new Error(`No se pudo leer la fixture de usuarios en ${ruta}: ${causa.message}`);
-  }
-
-  const usuarios = fixture?.usuarios;
-  if (!Array.isArray(usuarios) || usuarios.length === 0) {
-    throw new Error(`La fixture ${ruta} no declara una lista "usuarios" con al menos un usuario.`);
-  }
-
-  const correos = new Set();
-  return usuarios.map((usuario, indice) => {
-    const referencia = `usuarios[${indice}] de ${ruta}`;
-    const valido = (valor, campo) => {
-      if (typeof valor !== 'string' || !PATRON_UUID.test(valor)) {
-        throw new Error(`${referencia}: el campo "${campo}" debe ser un UUID bien formado.`);
-      }
-      return valor;
-    };
-
-    const correo = typeof usuario.email === 'string' ? usuario.email.trim().toLowerCase() : '';
-    if (correo === '' || !correo.includes('@')) {
-      throw new Error(`${referencia}: el campo "email" debe ser un correo.`);
-    }
-    if (correos.has(correo)) {
-      throw new Error(`${referencia}: el correo ${correo} está repetido.`);
-    }
-    correos.add(correo);
-
-    if (!ROLES_PERMITIDOS.has(usuario.role)) {
-      throw new Error(`${referencia}: el campo "role" debe ser ADMIN, MEDICO o PACIENTE.`);
-    }
-
-    const limpio = {
-      sub: valido(usuario.sub, 'sub'),
-      email: correo,
-      role: usuario.role,
-      tenantId: valido(usuario.tenantId, 'tenantId'),
-    };
-    if (usuario.role === 'MEDICO') {
-      limpio.medicoId = valido(usuario.medicoId, 'medicoId');
-    } else if (usuario.medicoId !== undefined && usuario.medicoId !== null) {
-      throw new Error(`${referencia}: "medicoId" solo aplica al rol MEDICO.`);
-    }
-    return limpio;
-  });
-}
-
 // ===============================
 // Emisión y verificación de tokens
 // ===============================
@@ -252,15 +254,15 @@ function firmarToken(carga, emisor) {
   return `${contenido}.${firma}`;
 }
 
-function crearTokenDeAcceso(usuario, emisor, ahora) {
+function crearTokenDeAcceso(claims, emisor, ahora) {
   const carga = {
-    sub: usuario.sub,
-    email: usuario.email,
-    role: usuario.role,
-    tenantId: usuario.tenantId,
+    sub: claims.sub,
+    email: claims.email,
+    role: claims.role,
+    tenantId: claims.tenantId,
   };
-  if (usuario.medicoId) {
-    carga.medicoId = usuario.medicoId;
+  if (claims.medicoId) {
+    carga.medicoId = claims.medicoId;
   }
   Object.assign(carga, {
     iat: ahora,
@@ -272,10 +274,10 @@ function crearTokenDeAcceso(usuario, emisor, ahora) {
   return firmarToken(carga, emisor);
 }
 
-function crearTokenDeRefresco(usuario, emisor, ahora) {
+function crearTokenDeRefresco(claims, emisor, ahora) {
   return firmarToken(
     {
-      sub: usuario.sub,
+      sub: claims.sub,
       tipo: TIPO_REFRESCO,
       iat: ahora,
       exp: ahora + TTL_REFRESCO_SEGUNDOS,
@@ -431,15 +433,15 @@ function contrasenaCoincide(intento, esperada) {
   return timingSafeEqual(resumenIntento, resumenEsperado);
 }
 
-function proyeccionDeUsuario(usuario) {
+function proyeccionDeUsuario(claims) {
   const proyeccion = {
-    sub: usuario.sub,
-    email: usuario.email,
-    role: usuario.role,
-    tenantId: usuario.tenantId,
+    sub: claims.sub,
+    email: claims.email,
+    role: claims.role,
+    tenantId: claims.tenantId,
   };
-  if (usuario.medicoId) {
-    proyeccion.medicoId = usuario.medicoId;
+  if (claims.medicoId) {
+    proyeccion.medicoId = claims.medicoId;
   }
   return proyeccion;
 }
@@ -474,34 +476,73 @@ async function manejarLogin(peticion, respuesta, emisor, cabeceras) {
     return;
   }
 
-  const correo = typeof cuerpo.email === 'string' ? cuerpo.email.trim().toLowerCase() : '';
+  const correo = normalizarCorreo(cuerpo.email);
   const contrasena = typeof cuerpo.password === 'string' ? cuerpo.password : '';
   if (correo === '' || contrasena === '') {
     responderError(peticion, respuesta, 400, 'La petición requiere "email" y "password".', cabeceras);
     return;
   }
 
-  const usuario = emisor.usuariosPorCorreo.get(correo) ?? null;
-
-  // La comparación de contraseña se hace siempre, exista o no el correo: el tiempo de
-  // respuesta y el cuerpo de error son idénticos, así que no se puede enumerar usuarios.
-  const contrasenaValida = contrasenaCoincide(contrasena, emisor.contrasena);
-  if (usuario === null || !contrasenaValida) {
+  // La contraseña se comprueba antes de consultar la identidad: sin la contraseña correcta no
+  // se revela nada del estado de la cuenta, y un correo inexistente sigue dando el mismo 401
+  // que una contraseña equivocada.
+  if (!contrasenaCoincide(contrasena, emisor.contrasena)) {
     responderError(peticion, respuesta, 401, MENSAJE_CREDENCIALES_INVALIDAS, cabeceras);
     return;
   }
 
+  let filas;
+  try {
+    filas = await emisor.repositorio.buscarPorCorreo(correo);
+  } catch {
+    // No se copia el error del driver: el mensaje del repositorio ya dice qué revisar y este
+    // no tiene por qué viajar a la respuesta con más detalle.
+    responderError(peticion, respuesta, 500, MENSAJE_IDENTIDAD_NO_DISPONIBLE, cabeceras);
+    return;
+  }
+
+  const decision = evaluarCuenta(filas);
+  if (decision.resultado === 'inexistente') {
+    responderError(peticion, respuesta, 401, MENSAJE_CREDENCIALES_INVALIDAS, cabeceras);
+    return;
+  }
+  if (decision.resultado === 'inactiva') {
+    responderError(peticion, respuesta, 403, MENSAJE_CUENTA_INACTIVA, cabeceras);
+    return;
+  }
+  if (decision.resultado === 'medico-inactivo') {
+    responderError(peticion, respuesta, 403, MENSAJE_MEDICO_INACTIVO, cabeceras);
+    return;
+  }
+  if (decision.resultado === 'ambiguo') {
+    responderError(
+      peticion,
+      respuesta,
+      409,
+      `${MENSAJE_CORREO_AMBIGUO} (${decision.cantidad} organizaciones).`,
+      cabeceras,
+    );
+    return;
+  }
+  if (decision.resultado !== 'ok') {
+    // Fila que el contrato de claims no admite: se falla cerrado en vez de emitir un token que
+    // el backend rechazaría sin causa visible.
+    responderError(peticion, respuesta, 500, `${MENSAJE_FILA_INVALIDA} ${decision.detalle}.`, cabeceras);
+    return;
+  }
+
+  const claims = decision.claims;
   const ahora = ahoraEnSegundos();
   responderJson(
     respuesta,
     200,
     {
-      accessToken: crearTokenDeAcceso(usuario, emisor, ahora),
-      user: proyeccionDeUsuario(usuario),
+      accessToken: crearTokenDeAcceso(claims, emisor, ahora),
+      user: proyeccionDeUsuario(claims),
     },
     {
       ...cabeceras,
-      'Set-Cookie': cabeceraDeCookieDeRefresco(crearTokenDeRefresco(usuario, emisor, ahora)),
+      'Set-Cookie': cabeceraDeCookieDeRefresco(crearTokenDeRefresco(claims, emisor, ahora)),
     },
   );
 }
@@ -519,28 +560,48 @@ async function manejarRefresco(peticion, respuesta, emisor, cabeceras) {
   }
 
   const ahora = ahoraEnSegundos();
-  let usuario;
+  let carga;
   try {
-    const carga = verificarTokenDeRefresco(token, emisor, ahora);
-    // El rol y el tenant se releen de la fixture: es la autoridad del directorio de
-    // identidad (D2.1), así que un cambio de clínica se refleja en el siguiente refresco.
-    usuario = emisor.usuariosPorId.get(carga.sub) ?? null;
+    carga = verificarTokenDeRefresco(token, emisor, ahora);
   } catch {
     responderError(peticion, respuesta, 401, MENSAJE_REFRESCO_INVALIDO, cabeceras);
     return;
   }
-  if (!usuario) {
+
+  // El rol y el tenant se releen de la tabla usuario: es la autoridad de la identidad, así que
+  // un cambio de clínica o una baja se reflejan en el siguiente refresco.
+  if (!PATRON_UUID.test(String(carga.sub))) {
+    // `auth_user_id` es una columna UUID: comparar contra un texto arbitrario sería un error de
+    // sintaxis de PostgreSQL y un 500. Un `sub` que no es UUID no es una sesión válida.
     responderError(peticion, respuesta, 401, MENSAJE_REFRESCO_INVALIDO, cabeceras);
     return;
   }
 
+  let filas;
+  try {
+    filas = await emisor.repositorio.buscarPorAuthUserId(carga.sub);
+  } catch {
+    responderError(peticion, respuesta, 500, MENSAJE_IDENTIDAD_NO_DISPONIBLE, cabeceras);
+    return;
+  }
+
+  const decision = evaluarCuenta(filas);
+  if (decision.resultado !== 'ok') {
+    // Una cuenta dada de baja, un médico inactivo o un `auth_user_id` presente en dos
+    // organizaciones no permiten reemitir la sesión: se trata como sesión inválida, sin
+    // detallar el estado de la cuenta.
+    responderError(peticion, respuesta, 401, MENSAJE_REFRESCO_INVALIDO, cabeceras);
+    return;
+  }
+
+  const claims = decision.claims;
   responderJson(
     respuesta,
     200,
-    { accessToken: crearTokenDeAcceso(usuario, emisor, ahora) },
+    { accessToken: crearTokenDeAcceso(claims, emisor, ahora) },
     {
       ...cabeceras,
-      'Set-Cookie': cabeceraDeCookieDeRefresco(crearTokenDeRefresco(usuario, emisor, ahora)),
+      'Set-Cookie': cabeceraDeCookieDeRefresco(crearTokenDeRefresco(claims, emisor, ahora)),
     },
   );
 }
@@ -585,13 +646,13 @@ const RUTAS = new Map([
 ]);
 
 /**
- * Construye el emisor en memoria: carga la clave y la fixture. Falla aquí, antes de escuchar.
+ * Construye el emisor en memoria: carga la clave. Falla aquí, antes de escuchar, si la clave no
+ * sirve.
  *
  * @param {ReturnType<typeof leerConfiguracion>} config
  */
 function crearEmisor(config) {
   const clavePrivada = cargarClavePrivada(config.rutaClavePrivada);
-  const usuarios = cargarUsuarios(config.rutaUsuarios);
   return {
     clavePrivada,
     clavePublica: createPublicKey(clavePrivada),
@@ -599,9 +660,6 @@ function crearEmisor(config) {
     emisor: config.emisor,
     audiencia: config.audiencia,
     contrasena: config.contrasena,
-    usuarios,
-    usuariosPorCorreo: new Map(usuarios.map((usuario) => [usuario.email, usuario])),
-    usuariosPorId: new Map(usuarios.map((usuario) => [usuario.sub, usuario])),
   };
 }
 
@@ -656,13 +714,27 @@ function crearServidorHttp(emisor) {
 }
 
 /**
- * Arranca el emisor. Falla cerrado si la configuración o la clave no sirven.
+ * Arranca el emisor. Falla cerrado si la configuración, la clave o la base de identidad no
+ * sirven. La comprobación de conexión se hace aquí para que «PostgreSQL no está levantado» se
+ * vea al arrancar y no en el primer login.
  *
  * @param {ReturnType<typeof leerConfiguracion>} config
- * @returns {Promise<{servidor: import('node:http').Server, puerto: number, url: string, huella: string, config: object, cerrar: () => Promise<void>}>}
+ * @param {{repositorioUsuarios?: object}} [opciones] repositorio de identidad inyectable (pruebas)
+ * @returns {Promise<{servidor: import('node:http').Server, puerto: number, url: string, huella: string, config: object, repositorio: object, cerrar: () => Promise<void>}>}
  */
-export async function iniciarServidor(config) {
-  const emisor = crearEmisor(config);
+export async function iniciarServidor(config, opciones = {}) {
+  // El orden importa: la clave se valida primero porque no depende de nada externo, y así el
+  // síntoma de una clave mal puesta no se confunde con el de una base inalcanzable.
+  const emisorBase = crearEmisor(config);
+  const repositorio = opciones.repositorioUsuarios ?? (await crearRepositorioPostgres(config.baseDatos));
+  try {
+    await repositorio.verificarConexion();
+  } catch (causa) {
+    await repositorio.cerrar?.();
+    throw new Error(`No se pudo conectar con la base de identidad: ${causa.message}`);
+  }
+
+  const emisor = { ...emisorBase, repositorio };
   const servidor = crearServidorHttp(emisor);
 
   await new Promise((resolver, rechazar) => {
@@ -682,14 +754,15 @@ export async function iniciarServidor(config) {
     puerto,
     url: `http://localhost:${puerto}`,
     huella: emisor.huella,
-    roles: [...new Set(emisor.usuarios.map((usuario) => usuario.role))].sort(),
-    cantidadUsuarios: emisor.usuarios.length,
     config,
-    cerrar: () =>
-      new Promise((resolver, rechazar) => {
+    repositorio,
+    cerrar: async () => {
+      await new Promise((resolver, rechazar) => {
         servidor.closeAllConnections?.();
         servidor.close((error) => (error ? rechazar(error) : resolver()));
-      }),
+      });
+      await repositorio.cerrar?.();
+    },
   };
 }
 
@@ -698,14 +771,21 @@ export function huellaFormateada(huellaHex) {
   return (huellaHex.toUpperCase().match(/.{2}/g) ?? []).join(':');
 }
 
-function imprimirArranque(emisor) {
-  process.stdout.write(
+/**
+ * Imprime el resumen de arranque. El escritor es inyectable para poder probar el texto sin
+ * capturar la salida del proceso.
+ *
+ * @param {Awaited<ReturnType<typeof iniciarServidor>>} emisor
+ * @param {(texto: string) => void} [escribir] destino de la salida
+ */
+export function imprimirArranque(emisor, escribir = (texto) => process.stdout.write(texto)) {
+  escribir(
     [
       '',
       `${NOMBRE_SERVICIO} · emisor de tokens RS256 para DESARROLLO LOCAL. No es el AuthService del producto.`,
       `Escuchando en ${emisor.url} (el backend espera este servicio en AUTH_SERVICE_URL).`,
       `iss=${emisor.config.emisor} · aud=${emisor.config.audiencia} · access=${TTL_ACCESO_SEGUNDOS}s · refresh=${TTL_REFRESCO_SEGUNDOS}s`,
-      `Usuarios de la fixture: ${emisor.cantidadUsuarios} (roles: ${emisor.roles.join(', ')}). La contraseña sale de DEV_AUTH_PASSWORD.`,
+      `Cuentas de la tabla usuario en ${emisor.config.baseDatos.descripcion}. La contraseña es la de DEV_AUTH_PASSWORD para todas.`,
       `Huella SHA-256 de la clave pública (DER SPKI): ${huellaFormateada(emisor.huella)}`,
       'Compare esta huella con la clave de AUTH_PUBLIC_KEY del backend: si no coincide, el backend rechazará todos los tokens.',
       '',

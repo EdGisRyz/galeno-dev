@@ -118,18 +118,22 @@ distintos, así que la cookie se descartaría.
 ### Emisor de tokens en desarrollo (`tools/dev-auth`)
 
 Herramienta de desarrollo, no el AuthService del producto: firma RS256 con una
-clave privada local, no tiene base de datos y no forma parte de ningún artefacto.
+clave privada local, resuelve las cuentas contra la tabla `usuario` de la base de
+desarrollo y no forma parte de ningún artefacto.
 
 ```bash
+(cd tools/dev-auth && npm install)                                   # una sola vez: dependencia pg
 export DEV_AUTH_PASSWORD='la-que-elijas'                             # obligatoria
 export AUTH_PRIVATE_KEY_PATH="$HOME/.vault/galeno-dev/privada.pem"   # obligatoria
+export DATABASE_URL='postgresql://usuario:clave@localhost:5432/galeno_clinica'  # obligatoria
 node tools/dev-auth/server.mjs                                      # http://localhost:4001
 ```
 
 | Variable | Obligatoria | Default | Para qué |
 |---|---|---|---|
 | `AUTH_PRIVATE_KEY_PATH` | Sí | — | Ruta al PEM de la clave privada RSA. |
-| `DEV_AUTH_PASSWORD` | Sí | — | Contraseña de los usuarios de la fixture. |
+| `DEV_AUTH_PASSWORD` | Sí | — | Contraseña, la misma para todas las cuentas de la tabla `usuario`. |
+| `DATABASE_URL` | Sí, o el conjunto `PG*` | — | Conexión a la base de desarrollo: de ahí salen las cuentas. |
 | `DEV_AUTH_PORT` | No | `4001` | Puerto local; el default coincide con `AUTH_SERVICE_URL` del backend. |
 | `AUTH_ISSUER` / `AUTH_AUDIENCE` | No | `galeno-dev` / `galeno-api` | Claims `iss`/`aud`; el backend solo los valida si `auth.issuer`/`auth.audience` están configurados. |
 

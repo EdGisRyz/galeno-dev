@@ -24,18 +24,24 @@ import {
 } from './ayuda.mjs';
 
 const UUID_BIEN_FORMADO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const RUTA_USUARIOS = path.join(
+const RUTA_SEMILLA = path.join(
   path.dirname(path.dirname(fileURLToPath(import.meta.url))),
   'usuarios.json',
 );
 
-test('la fixture declara un usuario por rol y no guarda contraseñas', () => {
-  const fixture = JSON.parse(readFileSync(RUTA_USUARIOS, 'utf8'));
-  const roles = new Set(fixture.usuarios.map((usuario) => usuario.role));
+test('la semilla de usuarios declara un usuario por rol y no guarda contraseñas', () => {
+  const semilla = JSON.parse(readFileSync(RUTA_SEMILLA, 'utf8'));
+  const roles = new Set(semilla.usuarios.map((usuario) => usuario.role));
   assert.deepEqual([...roles].sort(), ['ADMIN', 'MEDICO', 'PACIENTE']);
-  for (const usuario of fixture.usuarios) {
+  for (const usuario of semilla.usuarios) {
     assert.match(usuario.email, /@dev-auth\.local$/, 'los correos deben ser sintéticos');
     assert.ok(!Object.keys(usuario).some((clave) => /password|contrasena|hash/i.test(clave)));
+    // La semilla cubre las columnas de `usuario` que el emisor necesita: sin `activo` no se
+    // podría cargar la tabla tal cual.
+    for (const columna of ['sub', 'email', 'role', 'tenantId', 'medicoId', 'activo']) {
+      assert.ok(columna in usuario, `la semilla debe declarar "${columna}" para cargar la tabla usuario`);
+    }
+    assert.equal(usuario.activo, true, 'la semilla siembra cuentas activas');
   }
 });
 
