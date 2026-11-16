@@ -64,6 +64,43 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Responde 409 cuando el correo ya está ocupado dentro de la organización.
+     *
+     * <p>El conflicto no es de sintaxis: la petición está bien formada y lo que choca es el
+     * estado actual de la organización. Por eso 409 y no 400. El mensaje viene de la excepción
+     * porque explica <em>qué</em> correo está ocupado y por qué el mismo correo sí puede existir
+     * en otra organización; se reusa el constructor de respuesta del resto del traductor.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(CorreoDuplicadoEnOrganizacionException.class)
+    public ResponseEntity<ErrorResponse> manejarCorreoDuplicado(
+            CorreoDuplicadoEnOrganizacionException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 409 cuando la operación dejaría a la organización sin ninguna cuenta
+     * administradora activa.
+     *
+     * <p>Es la regla R8. Igual que el correo repetido, es un conflicto con el estado actual y no
+     * una petición mal formada, y el mensaje propio es parte de la regla: el administrador
+     * necesita saber que se trata de la última administradora y que debe nombrar otra antes de
+     * continuar.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(UltimaAdministradoraException.class)
+    public ResponseEntity<ErrorResponse> manejarUltimaAdministradora(
+            UltimaAdministradoraException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
      * Responde 400 cuando la actualización intenta reasignar el consultorio de un
      * médico a otro distinto del actual.
      *
@@ -115,6 +152,23 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuracionConsultaInvalidaException.class)
     public ResponseEntity<ErrorResponse> manejarDuracionConsultaInvalida(
             DuracionConsultaInvalidaException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.BAD_REQUEST, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 400 cuando una cuenta con rol {@code MEDICO} no indica su médico.
+     *
+     * <p>La obligación depende del valor de otro campo del cuerpo, así que no es expresable con
+     * anotaciones del DTO: {@code @NotNull} sobre {@code medicoId} rechazaría también a los roles
+     * que legítimamente no atienden. Reusa el constructor de respuesta del resto del traductor.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 400 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(MedicoRequeridoException.class)
+    public ResponseEntity<ErrorResponse> manejarMedicoRequerido(
+            MedicoRequeridoException excepcion, HttpServletRequest peticion) {
         return construir(HttpStatus.BAD_REQUEST, excepcion.getMessage(), peticion);
     }
 
