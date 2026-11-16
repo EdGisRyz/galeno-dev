@@ -90,11 +90,18 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
 
     const url = config.url || '';
     const method = (config.method || 'get').toLowerCase();
+    // Todas las comparaciones y expresiones regulares de ruta se hacen contra esta versión sin
+    // query string. `PacientesPage` agregó `?incluirInactivos=true` a su colección sin que nadie
+    // lo notara aquí: un regex anclado con `$` (como el de esa misma colección) deja de
+    // coincidir en cuanto la URL real trae una query string, y la petición se escapa a la red
+    // real — con el token falso del mock, que el backend real rechaza con 401 genuino. `url`
+    // (con query string) se conserva para los pocos lugares que sí necesitan leerla.
+    const ruta = url.split('?')[0];
 
     // ─────────────────────────────────────────
     // AUTH
     // ─────────────────────────────────────────
-    if (url.includes('/auth/login') && method === 'post') {
+    if (ruta.includes('/auth/login') && method === 'post') {
       await delay(350);
       const data = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const user = mockUsers.find((u) => u.email === data.email);
@@ -152,7 +159,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // por encima de lo que se acaba de hacer con el mock — sin aviso y sin relación con el correo
     // que se usó para entrar. Interceptarlas aquí, aunque sea para fallar, es lo que mantiene el
     // modo mock aislado de la red real.
-    if (url.includes('/auth/refresh') && method === 'post') {
+    if (ruta.includes('/auth/refresh') && method === 'post') {
       await delay(150);
       config.adapter = async () => ({
         data: { mensaje: 'No hay una sesión que refrescar en el mock.' },
@@ -164,7 +171,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/auth/logout') && method === 'post') {
+    if (ruta.includes('/auth/logout') && method === 'post') {
       await delay(100);
       config.adapter = async () => ({
         data: undefined,
@@ -181,7 +188,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // Ruta plana y exacta: no debe atrapar las rutas anidadas de abajo (marca, pacientes,
     // consultorios, médicos) que también cuelgan de `/organizaciones/{id}/...`.
-    const organizacionPorId = url.match(/^\/organizaciones\/([^/]+)\/?$/);
+    const organizacionPorId = ruta.match(/^\/organizaciones\/([^/]+)\/?$/);
 
     if (organizacionPorId && method === 'get') {
       await delay();
@@ -213,9 +220,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // e ítem plano. Reglas propias (R11, R8) que el mock replica: nadie opera sobre su propia
     // cuenta (cambio de rol o baja) y la última cuenta ADMIN activa no puede perder ese rol ni
     // darse de baja.
-    const coleccionDeUsuarios = url.match(/^\/organizaciones\/([^/]+)\/usuarios\/?$/);
-    const usuarioPorId = url.match(/^\/usuarios\/([^/]+)\/?$/);
-    const usuarioActivar = url.match(/^\/usuarios\/([^/]+)\/activar\/?$/);
+    const coleccionDeUsuarios = ruta.match(/^\/organizaciones\/([^/]+)\/usuarios\/?$/);
+    const usuarioPorId = ruta.match(/^\/usuarios\/([^/]+)\/?$/);
+    const usuarioActivar = ruta.match(/^\/usuarios\/([^/]+)\/activar\/?$/);
 
     if (coleccionDeUsuarios && method === 'get') {
       await delay();
@@ -409,8 +416,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // la cadena de filtros exige un token válido, igual que /organizaciones). El prefijo
     // /publico/ distingue estas rutas de sus equivalentes reales autenticadas; no existen en el
     // backend y no deben confundirse con la colección de /organizaciones/{id}/medicos.
-    const clinicaPublica = url.match(/^\/publico\/clinicas\/([^/]+)\/?$/);
-    const medicosPublicos = url.match(/^\/publico\/clinicas\/([^/]+)\/medicos\/?$/);
+    const clinicaPublica = ruta.match(/^\/publico\/clinicas\/([^/]+)\/?$/);
+    const medicosPublicos = ruta.match(/^\/publico\/clinicas\/([^/]+)\/medicos\/?$/);
 
     if (clinicaPublica && method === 'get') {
       await delay();
@@ -454,7 +461,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // Sin contrato real: `configuracion_tenant` no tiene columnas de marca y ningún GET/PUT de
     // organizaciones es público ni acepta estos campos todavía. Ruta exclusiva del mock.
-    const marcaDeOrganizacion = url.match(/^\/organizaciones\/([^/]+)\/marca\/?$/);
+    const marcaDeOrganizacion = ruta.match(/^\/organizaciones\/([^/]+)\/marca\/?$/);
 
     if (marcaDeOrganizacion && method === 'get') {
       await delay();
@@ -501,7 +508,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // (exige un token ya autenticado y aun así responde 403 hasta el onboarding de Sprint 2 —
     // ver `OrganizacionController`). Esta ruta es exclusiva del mock para poder dibujar la
     // pantalla; no existe en el backend real y nunca debe confundirse con la colección.
-    if (url === '/onboarding/registro-clinica' && method === 'post') {
+    if (ruta === '/onboarding/registro-clinica' && method === 'post') {
       await delay(400);
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       config.adapter = async () => ({
@@ -523,8 +530,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // Las rutas replican el contrato del backend: la colección cuelga de la organización dueña y
     // el ítem es plano. La comparación es exacta a propósito: el mock no puede ser más permisivo
     // que el backend, o el desarrollo local diría que una pantalla funciona cuando responde 404.
-    const coleccionDePacientes = url.match(/^\/organizaciones\/([^/]+)\/pacientes\/?$/);
-    const pacientePorId = url.match(/^\/pacientes\/([^/]+)\/?$/);
+    const coleccionDePacientes = ruta.match(/^\/organizaciones\/([^/]+)\/pacientes\/?$/);
+    const pacientePorId = ruta.match(/^\/pacientes\/([^/]+)\/?$/);
 
     if (coleccionDePacientes && method === 'get') {
       await delay();
@@ -604,7 +611,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // Comparación exacta: las rutas anidadas de Médicos y Horarios usan patrones distintos más
     // abajo y no deben quedar atrapadas por un `.includes('/medicos')` ni colisionar con él.
-    if (url === '/medicos' && method === 'get') {
+    if (ruta === '/medicos' && method === 'get') {
       await delay();
       config.adapter = async () => ({
         data: [...medicos],
@@ -623,8 +630,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // (`/organizaciones/{id}/medicos`) e ítem plano (`/medicos/{id}`). El consultorio del médico
     // viaja en el cuerpo (no es el dueño), pero el PUT real rechaza con 400 un cambio de
     // consultorio (MedicoService.actualizar) — el mock reproduce esa misma regla.
-    const coleccionDeMedicos = url.match(/^\/organizaciones\/([^/]+)\/medicos\/?$/);
-    const medicoPorId = url.match(/^\/medicos\/([^/]+)\/?$/);
+    const coleccionDeMedicos = ruta.match(/^\/organizaciones\/([^/]+)\/medicos\/?$/);
+    const medicoPorId = ruta.match(/^\/medicos\/([^/]+)\/?$/);
 
     if (coleccionDeMedicos && method === 'get') {
       await delay();
@@ -746,8 +753,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // bloques del mismo médico; el mock simplifica a las dos validaciones expresables sin
     // consultar el resto de la agenda (rango y duración), documentado aquí para no prometer una
     // paridad que no tiene.
-    const coleccionDeHorarios = url.match(/^\/medicos\/([^/]+)\/horarios\/?$/);
-    const horarioPorId = url.match(/^\/horarios\/([^/]+)\/?$/);
+    const coleccionDeHorarios = ruta.match(/^\/medicos\/([^/]+)\/horarios\/?$/);
+    const horarioPorId = ruta.match(/^\/horarios\/([^/]+)\/?$/);
     const DURACIONES_VALIDAS = new Set([20, 30, 45, 60]);
 
     if (coleccionDeHorarios && method === 'get') {
@@ -865,7 +872,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // (`/organizaciones/{id}/consultorios`) e ítem plano (`/consultorios/{id}`). La comparación es
     // exacta para no colisionar con el listado plano `/consultorios` que todavía consume la Agenda
     // (sin contrato real de Citas) ni con la ruta anidada.
-    if (url === '/consultorios' && method === 'get') {
+    if (ruta === '/consultorios' && method === 'get') {
       await delay();
       config.adapter = async () => ({
         data: [...consultorios],
@@ -877,8 +884,8 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    const coleccionDeConsultorios = url.match(/^\/organizaciones\/([^/]+)\/consultorios\/?$/);
-    const consultorioPorId = url.match(/^\/consultorios\/([^/]+)\/?$/);
+    const coleccionDeConsultorios = ruta.match(/^\/organizaciones\/([^/]+)\/consultorios\/?$/);
+    const consultorioPorId = ruta.match(/^\/consultorios\/([^/]+)\/?$/);
 
     if (coleccionDeConsultorios && method === 'get') {
       await delay();
@@ -985,7 +992,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // CITAS & AGENDA
     // ─────────────────────────────────────────
-    if (url.includes('/citas') && method === 'get') {
+    if (ruta.includes('/citas') && method === 'get') {
       await delay();
       config.adapter = async () => ({
         data: [...appointments],
@@ -997,7 +1004,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/citas') && method === 'post') {
+    if (ruta.includes('/citas') && method === 'post') {
       await delay();
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const paciente = patients.find((p) => p.id === body.paciente_id) || patients[0];
@@ -1032,9 +1039,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // Cambiar estado de cita (/citas/:id/estado)
-    if (url.includes('/citas/') && url.includes('/estado') && (method === 'patch' || method === 'put')) {
+    if (ruta.includes('/citas/') && ruta.includes('/estado') && (method === 'patch' || method === 'put')) {
       await delay();
-      const match = url.match(/\/citas\/([^/]+)\/estado/);
+      const match = ruta.match(/\/citas\/([^/]+)\/estado/);
       const id = match ? match[1] : '';
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const newStatus = body.estado as EstadoCita;
@@ -1064,7 +1071,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // COBROS & RESUMEN
     // ─────────────────────────────────────────
-    if (url.includes('/cobros') && method === 'get') {
+    if (ruta.includes('/cobros') && method === 'get') {
       await delay();
       config.adapter = async () => ({
         data: mockPayments,
@@ -1082,10 +1089,10 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // pantalla siempre entra desde un paciente elegido, nunca lista notas de toda la clínica.)
     // ─────────────────────────────────────────
     if (
-      url.includes('/expediente/notas') &&
+      ruta.includes('/expediente/notas') &&
       method === 'get' &&
-      !url.includes('/cerrar') &&
-      !url.includes('/correccion')
+      !ruta.includes('/cerrar') &&
+      !ruta.includes('/correccion')
     ) {
       await delay();
       const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
@@ -1100,7 +1107,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/expediente/notas') && method === 'post' && !url.includes('/cerrar') && !url.includes('/correccion')) {
+    if (ruta.includes('/expediente/notas') && method === 'post' && !ruta.includes('/cerrar') && !ruta.includes('/correccion')) {
       await delay();
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const newNote: SoapNote = {
@@ -1129,9 +1136,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // Cerrar nota SOAP (hacer inmutable según NOM-004)
-    if (url.includes('/expediente/notas/') && url.includes('/cerrar') && method === 'post') {
+    if (ruta.includes('/expediente/notas/') && ruta.includes('/cerrar') && method === 'post') {
       await delay();
-      const match = url.match(/\/expediente\/notas\/([^/]+)\/cerrar/);
+      const match = ruta.match(/\/expediente\/notas\/([^/]+)\/cerrar/);
       const noteId = match ? match[1] : '';
 
       soapNotes = soapNotes.map((n) => (n.id === noteId ? { ...n, inmutable: true } : n));
@@ -1148,9 +1155,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // Agregar corrección a nota cerrada (NOM-004)
-    if (url.includes('/expediente/notas/') && url.includes('/correccion') && method === 'post') {
+    if (ruta.includes('/expediente/notas/') && ruta.includes('/correccion') && method === 'post') {
       await delay();
-      const match = url.match(/\/expediente\/notas\/([^/]+)\/correccion/);
+      const match = ruta.match(/\/expediente\/notas\/([^/]+)\/correccion/);
       const noteId = match ? match[1] : '';
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
 
@@ -1186,7 +1193,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // Búsqueda en catálogo CIE-10
-    if (url.includes('/expediente/cie10/buscar') && method === 'get') {
+    if (ruta.includes('/expediente/cie10/buscar') && method === 'get') {
       await delay(100);
       const searchParams = new URLSearchParams(url.split('?')[1] || '');
       const query = (searchParams.get('q') || '').toLowerCase();
@@ -1207,7 +1214,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // DIAGNÓSTICOS (sin contrato real, mismo alcance que Notas SOAP)
     // ─────────────────────────────────────────
-    if (url.includes('/expediente/diagnosticos') && method === 'get') {
+    if (ruta.includes('/expediente/diagnosticos') && method === 'get') {
       await delay();
       const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
       const filtrados = pacienteId
@@ -1223,7 +1230,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/expediente/diagnosticos') && method === 'post') {
+    if (ruta.includes('/expediente/diagnosticos') && method === 'post') {
       await delay();
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
       const newDiagnostico: Diagnostico = {
@@ -1247,9 +1254,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // PRESCRIPCIONES (sin contrato real, mismo alcance que Notas SOAP)
     // ─────────────────────────────────────────
     if (
-      url.includes('/expediente/prescripciones') &&
+      ruta.includes('/expediente/prescripciones') &&
       method === 'get' &&
-      !url.includes('/desactivar')
+      !ruta.includes('/desactivar')
     ) {
       await delay();
       const pacienteId = new URLSearchParams(url.split('?')[1] || '').get('paciente_id');
@@ -1267,9 +1274,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     if (
-      url.includes('/expediente/prescripciones') &&
+      ruta.includes('/expediente/prescripciones') &&
       method === 'post' &&
-      !url.includes('/desactivar')
+      !ruta.includes('/desactivar')
     ) {
       await delay();
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
@@ -1290,9 +1297,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       return config;
     }
 
-    if (url.includes('/expediente/prescripciones/') && url.includes('/desactivar') && method === 'post') {
+    if (ruta.includes('/expediente/prescripciones/') && ruta.includes('/desactivar') && method === 'post') {
       await delay();
-      const match = url.match(/\/expediente\/prescripciones\/([^/]+)\/desactivar/);
+      const match = ruta.match(/\/expediente\/prescripciones\/([^/]+)\/desactivar/);
       const id = match ? match[1] : '';
       const idx = prescripciones.findIndex((p) => p.id === id);
       if (idx !== -1) prescripciones[idx] = { ...prescripciones[idx], activo: false };
