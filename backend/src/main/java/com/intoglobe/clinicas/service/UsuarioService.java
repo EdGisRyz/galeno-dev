@@ -372,12 +372,19 @@ public class UsuarioService {
     /**
      * Indica si la cuenta operada es la del propio actor.
      *
+     * <p><strong>Se compara contra {@code authUserId}, no contra {@code id}.</strong> El
+     * {@link AuthenticatedUser#id()} del principal es el claim {@code sub} del token, es decir el
+     * {@code auth_user_id} de la cuenta —el sujeto del servicio de identidad—, y no la clave primaria
+     * de la fila: son dos columnas distintas y siempre distintas. Comparar contra {@code usuario.id}
+     * haría que esta regla no disparara nunca y dejaría a una administradora poder darse de baja a sí
+     * misma. No «simplificar» esta comparación: el identificador del token no es el de la fila.</p>
+     *
      * @param actor   usuario autenticado de la sesión
      * @param usuario cuenta operada
-     * @return {@code true} si el identificador del actor es el de la cuenta
+     * @return {@code true} si la identidad de autenticación del actor es la de la cuenta
      */
     private static boolean esLaPropiaCuenta(AuthenticatedUser actor, Usuario usuario) {
-        return actor != null && Objects.equals(usuario.getId(), actor.id());
+        return actor != null && Objects.equals(usuario.getAuthUserId(), actor.id());
     }
 
     /**

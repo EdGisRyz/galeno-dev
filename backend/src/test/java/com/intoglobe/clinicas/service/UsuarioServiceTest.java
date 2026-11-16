@@ -57,8 +57,10 @@ import static org.mockito.Mockito.when;
  * obligatorio y de la misma organización), R5 (roles que no atienden), R6 (identidad generada),
  * R7 (baja y reactivación idempotentes) y R8 (última administradora). R10 —una cuenta de otra
  * organización responde 404— se prueba en las operaciones por id porque es la otra mitad del
- * aislamiento por tenant. R11 no tiene prueba todavía: el servicio aún no recibe el actor de la
- * sesión y el método deja constancia de ello.</p>
+ * aislamiento por tenant. R11 —nadie se da de baja ni se cambia el rol a sí mismo— tiene su propio
+ * bloque, con el actor construido desde el {@code authUserId} de la cuenta, que es el claim
+ * {@code sub} del token y no la clave de la fila: ahí se fija que R11 gana a R8 cuando ambas
+ * aplicarían y que editar el propio correo sin cambiar el rol sigue permitido.</p>
  *
  * <p>Las validaciones Jakarta del DTO ({@code @NotBlank}, {@code @Size}, {@code @NotNull}) y el
  * 400 de un rol que no se puede deserializar no se prueban aquí: son del contrato de entrada y se
@@ -607,6 +609,36 @@ class UsuarioServiceTest {
                 .isEqualTo(EMAIL);
     }
 
+    @Test
+    @DisplayName("R11: el actor llega como sub del token (auth_user_id): no puede darse de baja a sí mismo")
+    void desactivar_shouldThrow_whenActorSubIsTheAuthUserIdOfTheAccount() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, "propia@example.com", RolUsuario.ADMIN, UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+        var actor = new AuthenticatedUser(cuenta.getAuthUserId(), "propia@example.com", "ADMIN", organizacionId, null);
+        assertThatThrownBy(() -> usuarioService.desactivar(actor, cuenta.getId()))
+                .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
+                .hasMessageContaining("propia cuenta");
+        assertThat(cuenta.isActivo()).isTrue();
+    }
+
+    @Test
+    @DisplayName("R11: el actor llega como sub del token (auth_user_id): no puede cambiarse el rol a sí mismo")
+    void actualizar_shouldThrow_whenActorSubIsTheAuthUserIdOfTheAccount() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, "propia@example.com", RolUsuario.ADMIN, UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+        var actor = new AuthenticatedUser(cuenta.getAuthUserId(), "propia@example.com", "ADMIN", organizacionId, null);
+
+        assertThatThrownBy(() -> usuarioService.actualizar(actor, cuenta.getId(),
+                new UsuarioRequest("propia@example.com", RolUsuario.PACIENTE, null)))
+                .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
+                .hasMessageContaining("su propia cuenta");
+        assertThat(cuenta.getRol()).isEqualTo(RolUsuario.ADMIN);
+    }
+
     // ─────────────────────────────────────────
     // Contrato de las operaciones de colección
     // ─────────────────────────────────────────
@@ -697,9 +729,18 @@ class UsuarioServiceTest {
 
     /**
      * Actor autenticado cuya cuenta es la que se opera: el caso que rechaza R11.
+     *
+     * <p>El identificador del actor es el {@code sub} del token, que es el {@code auth_user_id} de la
+     * cuenta y <strong>no</strong> su clave primaria: son dos columnas distintas y siempre diferentes.
+     * Fabricar el actor con {@code getId()} deja la prueba ciega al defecto que este archivo tiene que
+     * atrapar.</p>
+     *
+     * @param cuenta   cuenta operada
+     * @param tenantId organización del token
+     * @return el actor con la identidad de autenticación de la cuenta indicada
      */
     private static AuthenticatedUser actorDe(Usuario cuenta, UUID tenantId) {
-        return new AuthenticatedUser(cuenta.getId(), EMAIL, "ADMIN", tenantId, null);
+        return new AuthenticatedUser(cuenta.getAuthUserId(), EMAIL, "ADMIN", tenantId, null);
     }
 
     /** Request de una cuenta de médico con el médico indicado (o sin él). */

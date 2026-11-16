@@ -58,8 +58,11 @@ import jakarta.validation.Valid;
  * para que el servicio lo contraste, como en los módulos anteriores.</p>
  *
  * <p><strong>Autorización.</strong> Qué rol alcanza estas rutas lo decide la cadena de filtros, en
- * {@code SecurityConfig}, y no este archivo: mientras el módulo no tenga sus celdas en la matriz, el
- * fallback deny-by-default cierra las seis operaciones para todos los roles.</p>
+ * {@code SecurityConfig}, y no este archivo: las seis operaciones están concedidas a {@code ADMIN}
+ * sobre su propio tenant, y {@code MEDICO}, {@code PACIENTE} y {@code RECEPCIONISTA} caen en el
+ * {@code 403} de la matriz (el último, hoy sin token emitible). La mitad que la cadena no puede
+ * expresar —que la organización del path sea la del claim y que una cuenta o un médico de otra
+ * organización respondan {@code 404}— la aplica el servicio.</p>
  */
 @RestController
 @RequestMapping("/api/v1")

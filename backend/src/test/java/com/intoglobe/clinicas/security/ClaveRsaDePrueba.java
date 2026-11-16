@@ -37,7 +37,16 @@ public final class ClaveRsaDePrueba {
 
     public static final String EMISOR = "https://auth.intoglobe.test";
     public static final String AUDIENCIA = "galeno-api";
-    static final String ID_USUARIO = "9f0d2c4a-1b2e-4c7d-9a11-5b7f3e2d1a01";
+
+    /**
+     * Claim {@code sub} de los tokens de prueba: es la identidad de autenticación del usuario
+     * —el {@code auth_user_id} de su cuenta— y no la clave primaria de la fila.
+     *
+     * <p>Es público para que las pruebas de otros paquetes puedan afirmar que el actor que recibe el
+     * servicio es exactamente el sujeto del token, y no un identificador tomado del path o del
+     * cuerpo.</p>
+     */
+    public static final String ID_USUARIO = "9f0d2c4a-1b2e-4c7d-9a11-5b7f3e2d1a01";
     static final String EMAIL = "ana.torres@clinicasanrafael.test";
     static final String TENANT_ID = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90";
     static final String MEDICO_ID = "1c7d9a11-4b2e-4c7d-9a11-77aa3e2d1a55";
