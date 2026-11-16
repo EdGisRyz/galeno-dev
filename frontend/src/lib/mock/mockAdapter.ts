@@ -97,7 +97,22 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     if (url.includes('/auth/login') && method === 'post') {
       await delay(350);
       const data = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-      const user = mockUsers.find((u) => u.email === data.email) || mockUsers[0];
+      const user = mockUsers.find((u) => u.email === data.email);
+
+      // Un correo que no está en la fixture del mock debe fallar, no entrar como si fuera el
+      // primer usuario de la lista: ese fallback silencioso era indistinguible de iniciar sesión
+      // de verdad con esa cuenta, y typear mal el correo (o usar las credenciales del backend
+      // real por error) terminaba abriendo sesión como admin sin ningún aviso.
+      if (!user) {
+        config.adapter = async () => ({
+          data: { mensaje: 'Correo o contraseña incorrectos.' },
+          status: 401,
+          statusText: 'Unauthorized',
+          headers: {},
+          config,
+        });
+        return config;
+      }
 
       // Simulamos token JWT RS256 codificando la carga útil.
       // Vigencia alineada con ADR-012: **30 minutos**, los mismos que la ventana de inactividad.
