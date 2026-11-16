@@ -32,10 +32,13 @@ import com.intoglobe.clinicas.model.Medico;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.Paciente;
 import com.intoglobe.clinicas.model.PlanTipo;
+import com.intoglobe.clinicas.model.RolUsuario;
+import com.intoglobe.clinicas.model.Usuario;
 import com.intoglobe.clinicas.repository.ConsultorioRepository;
 import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 import com.intoglobe.clinicas.repository.PacienteRepository;
+import com.intoglobe.clinicas.repository.UsuarioRepository;
 
 import com.jayway.jsonpath.JsonPath;
 
@@ -62,7 +65,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <ul>
  *   <li><strong>ADMIN</strong>: las veinticinco operaciones permitidas sobre su propio tenant
- *       ({@link #adminOperaLasVeinticincoOperacionesPermitidasSobreSuPropioTenant()}); el alta de
+ *       ({@link #adminOperaLasVeinticincoOperacionesPermitidasSobreSuPropioTenant()}); las seis
+ *       rutas de cuentas de usuario sobre su propio tenant
+ *       ({@link #adminAdministraLasCuentasDeSuPropioTenant()}); el alta de
  *       organizaciones {@code 403} para los tres roles
  *       ({@link #crearOrganizacionResponde403ParaLosTresRoles()}); y las rutas con el
  *       {@code organizacionId} de otro tenant, todas {@code 403} sin excepción de rol
@@ -71,13 +76,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       lecturas de los módulos 02, 03 y paciente ({@link #medicoLeeSuPropioTenant()} y
  *       {@link #medicoLeePacientesDeSuPropioTenant()}) y los cinco endpoints de horarios
  *       sobre su propia agenda ({@link #medicoOperaSuPropiaAgendaDeHorarios()})— y las
- *       quince operaciones restantes {@code 403}
+ *       veintiuna operaciones restantes {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
- *   <li><strong>PACIENTE</strong>: las veintiséis operaciones {@code 403}
+ *   <li><strong>PACIENTE</strong>: las treinta y dos operaciones {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
- *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las seis operaciones
- *       por id → {@code 404} sin revelar el recurso
- *       ({@link #recursoDeOtroTenantResponde404SinRevelarlo()}).</li>
+ *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las operaciones por id de
+ *       consultorio y médico, más las cuentas de usuario → {@code 404} sin revelar el recurso ni su
+ *       organización ({@link #recursoDeOtroTenantResponde404SinRevelarlo()}).</li>
  *   <li><strong>R8.3(a)</strong>: {@code GET /organizaciones} devuelve solo la organización
  *       del token ({@link #listarOrganizacionesDevuelveSoloLaDelToken()}).</li>
  * </ul>
@@ -127,6 +132,12 @@ class AislamientoYMatrizRbacTest {
     private static final String CUERPO_PACIENTE_ACTUALIZADO = """
             {"nombre":"Paciente Nuevo Renombrado","telefono":"+52 55 3333 5555","fechaNacimiento":"1990-06-21","sexo":"F","email":"paciente.nuevo@example.com","notas":null}
             """;
+    private static final String CUERPO_USUARIO_NUEVO = """
+            {"email":"cuenta.nueva@example.com","rol":"RECEPCIONISTA","medicoId":null}
+            """;
+    private static final String CUERPO_USUARIO_ACTUALIZADO = """
+            {"email":"cuenta.actualizada@example.com","rol":"PACIENTE","medicoId":null}
+            """;
 
     @Autowired
     private MockMvc mockMvc;
@@ -142,6 +153,9 @@ class AislamientoYMatrizRbacTest {
 
     @Autowired
     private PacienteRepository pacienteRepository;
+
+    @Autowired
+    private UsuarioRepository usuarioRepository;
 
     private Organizacion organizacionA;
     private Organizacion organizacionB;
@@ -377,6 +391,150 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(content().string(""));
     }
 
+    // ------------------------------------------------------------------
+    // ADMIN: las seis rutas de cuentas de usuario
+    // ------------------------------------------------------------------
+
+    /**
+     * Las seis celdas que el módulo de usuario concede a {@code ADMIN} sobre su propio tenant,
+     * ejercidas de extremo a extremo: alta con {@code Location}, listado acotado a la organización del
+     * token, consulta por id, actualización, baja lógica y reactivación idempotente.
+     *
+     * <p>La cuenta que se crea no es administrativa a propósito: así la baja y el cambio de rol no
+     * chocan con la protección de la última administradora (R8), que tiene sus propias pruebas en
+     * {@code UsuarioServiceTest}. Se siembra además una cuenta en el tenant ajeno para fijar que el
+     * listado y la consulta por id no la alcanzan.</p>
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("ADMIN administra las cuentas de su propio tenant: las seis rutas de usuario")
+    void adminAdministraLasCuentasDeSuPropioTenant() throws Exception {
+        String rutaUsuariosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/usuarios";
+        Usuario cuentaAjena = usuarioRepository.save(new Usuario(organizacionB, null,
+                "cuenta.beta@example.com", RolUsuario.ADMIN, UUID.randomUUID()));
+
+        // 1. POST /organizaciones/{organizacionId}/usuarios — 201 y Location de la ruta plana.
+        MvcResult creada = ejecutar(post(rutaUsuariosA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_USUARIO_NUEVO), tokenAdminA)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()))
+                .andExpect(jsonPath("$.rol").value("RECEPCIONISTA"))
+                .andExpect(jsonPath("$.activo").value(true))
+                .andExpect(jsonPath("$.authUserId").doesNotExist())
+                .andReturn();
+        String cuentaCreadaId = idDe(creada);
+        assertThat(creada.getResponse().getHeader(HttpHeaders.LOCATION))
+                .as("el alta publica el Location de la ruta plana del recurso creado")
+                .isEqualTo("/api/v1/usuarios/" + cuentaCreadaId);
+
+        // 2. GET anidado — la cuenta creada sí, la del tenant ajeno no.
+        ejecutar(get(rutaUsuariosA), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers.hasItem(cuentaCreadaId)))
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.hasItem(cuentaAjena.getId().toString()))));
+
+        // 3. GET /usuarios/{id}
+        ejecutar(get("/api/v1/usuarios/" + cuentaCreadaId), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(cuentaCreadaId))
+                .andExpect(jsonPath("$.email").value("cuenta.nueva@example.com"));
+
+        // 4. PUT /usuarios/{id} — cambia correo y rol, no la organización ni el estado lógico.
+        ejecutar(put("/api/v1/usuarios/" + cuentaCreadaId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_USUARIO_ACTUALIZADO), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("cuenta.actualizada@example.com"))
+                .andExpect(jsonPath("$.rol").value("PACIENTE"))
+                .andExpect(jsonPath("$.activo").value(true))
+                .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()));
+
+        // 5. DELETE /usuarios/{id} — baja lógica: la fila se conserva y queda inactiva.
+        ejecutar(delete("/api/v1/usuarios/" + cuentaCreadaId), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        assertThat(usuarioRepository.findById(UUID.fromString(cuentaCreadaId)).orElseThrow().isActivo())
+                .as("la baja es lógica: la cuenta se conserva, inactiva")
+                .isFalse();
+
+        // 6. POST /usuarios/{id}/activar — reactivación idempotente.
+        ejecutar(post("/api/v1/usuarios/" + cuentaCreadaId + "/activar"), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(post("/api/v1/usuarios/" + cuentaCreadaId + "/activar"), tokenAdminA)
+                .andExpect(status().isNoContent());
+        assertThat(usuarioRepository.findById(UUID.fromString(cuentaCreadaId)).orElseThrow().isActivo())
+                .as("la reactivación devuelve la cuenta a activa, sin duplicarla")
+                .isTrue();
+
+        assertThat(usuarioRepository.listarPorOrganizacion(organizacionB.getId()))
+                .as("ninguna operación sobre el tenant propio debe crear cuentas en el ajeno")
+                .extracting(Usuario::getId)
+                .containsExactly(cuentaAjena.getId());
+    }
+
+    /**
+     * R11 de extremo a extremo contra la base real: la administradora autenticada no puede darse de
+     * baja a sí misma ni quitarse el rol, aunque su token sí pueda administrar cuentas.
+     *
+     * <p><strong>Por qué este caso existe.</strong> Las demás pruebas de R11 simulan el servicio y
+     * fabrican el actor a mano, así que no ejercen la cadena real de identidad. Aquí la cuenta
+     * sembrada tiene {@code auth_user_id} igual al claim {@code sub} del token —que es el sujeto del
+     * servicio de identidad, no la clave de la fila— y la petición pasa por el filtro, el
+     * controlador y el servicio. Eso hace que la prueba falle en las dos reincidencias posibles del
+     * defecto: si el filtro propagara el id de la fila en vez del {@code sub}, y si el servicio
+     * volviera a comparar contra {@code getId()} en lugar de {@code getAuthUserId()}.</p>
+     *
+     * <p>Se siembra una segunda cuenta {@code ADMIN} activa a propósito: así R8 no puede ser lo que
+     * frene la operación y el {@code 403} observado solo puede venir de R11. Las dos operaciones
+     * —baja y cambio de rol— se afirman contra la fila en la base, no solo contra la respuesta.
+     *</p>
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("R11: la propia administradora no puede darse de baja ni cambiarse el rol, contra la base real")
+    void laPropiaAdministradoraNoPuedeOperarSobreSuCuenta() throws Exception {
+        var identidadDelToken = UUID.fromString(ClaveRsaDePrueba.ID_USUARIO);
+        Usuario propia = usuarioRepository.save(new Usuario(organizacionA, null,
+                "administradora.propia@example.com", RolUsuario.ADMIN, identidadDelToken));
+        usuarioRepository.save(new Usuario(organizacionA, null, "otra.administradora@example.com",
+                RolUsuario.ADMIN, UUID.randomUUID()));
+        String ruta = "/api/v1/usuarios/" + propia.getId();
+
+        // Baja de la propia cuenta: 403 con el motivo de R11, no el 403 genérico de la cadena ni un
+        // 409 de última administradora.
+        ejecutar(delete(ruta), tokenAdminA)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.codigo").value(403))
+                .andExpect(jsonPath("$.mensaje", org.hamcrest.Matchers.containsString("propia cuenta")))
+                .andExpect(jsonPath("$.ruta").value(ruta));
+
+        // Cambio de rol de la propia cuenta: el mismo 403.
+        ejecutar(put(ruta)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_USUARIO_ACTUALIZADO), tokenAdminA)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.codigo").value(403))
+                .andExpect(jsonPath("$.mensaje", org.hamcrest.Matchers.containsString("su propia cuenta")))
+                .andExpect(jsonPath("$.ruta").value(ruta));
+
+        // Y la fila sigue como estaba: ni dada de baja ni con otro rol.
+        Usuario despues = usuarioRepository.findById(propia.getId()).orElseThrow();
+        assertThat(despues.isActivo())
+                .as("una baja rechazada por R11 no debe desactivar la propia cuenta")
+                .isTrue();
+        assertThat(despues.getRol())
+                .as("un cambio de rol rechazado por R11 no debe modificar la propia cuenta")
+                .isEqualTo(RolUsuario.ADMIN);
+        assertThat(despues.getEmail())
+                .as("el cuerpo rechazado tampoco debe aplicarse al correo")
+                .isEqualTo("administradora.propia@example.com");
+    }
+
     /**
      * El bloqueo del alta es de autorización, no de validación del cuerpo: se comprueba para
      * los tres roles y con un cuerpo válido, y se afirma que no se persistió nada.
@@ -505,8 +663,8 @@ class AislamientoYMatrizRbacTest {
     // ------------------------------------------------------------------
 
     /**
-     * Celdas {@code 403} de la matriz: las veintiséis operaciones para {@code PACIENTE} y las
-     * quince que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path
+     * Celdas {@code 403} de la matriz: las treinta y dos operaciones para {@code PACIENTE} y las
+     * veintiuna que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path
      * para que lo que se ejerza sea el rol y no el aislamiento. Las once celdas que la matriz
      * concede a {@code MEDICO} no aparecen aquí: cuatro se ejercen en
      * {@link #medicoLeeSuPropioTenant()}, dos en {@link #medicoLeePacientesDeSuPropioTenant()} y
@@ -584,7 +742,20 @@ class AislamientoYMatrizRbacTest {
                 Arguments.of(rol, "DELETE paciente", "DELETE",
                         "/api/v1/pacientes/" + UUID.randomUUID(), null),
                 Arguments.of(rol, "POST activar paciente", "POST",
-                        "/api/v1/pacientes/" + UUID.randomUUID() + "/activar", null));
+                        "/api/v1/pacientes/" + UUID.randomUUID() + "/activar", null),
+                Arguments.of(rol, "POST usuario", "POST",
+                        "/api/v1/organizaciones/" + organizacionA.getId() + "/usuarios",
+                        CUERPO_USUARIO_NUEVO),
+                Arguments.of(rol, "GET usuarios anidados", "GET",
+                        "/api/v1/organizaciones/" + organizacionA.getId() + "/usuarios", null),
+                Arguments.of(rol, "GET usuario por id", "GET",
+                        "/api/v1/usuarios/" + UUID.randomUUID(), null),
+                Arguments.of(rol, "PUT usuario", "PUT",
+                        "/api/v1/usuarios/" + UUID.randomUUID(), CUERPO_USUARIO_ACTUALIZADO),
+                Arguments.of(rol, "DELETE usuario", "DELETE",
+                        "/api/v1/usuarios/" + UUID.randomUUID(), null),
+                Arguments.of(rol, "POST activar usuario", "POST",
+                        "/api/v1/usuarios/" + UUID.randomUUID() + "/activar", null));
     }
 
     /**
@@ -616,6 +787,7 @@ class AislamientoYMatrizRbacTest {
         String rutaConsultoriosB = rutaOrganizacionB + "/consultorios";
         String rutaMedicosB = rutaOrganizacionB + "/medicos";
         String rutaPacientesB = rutaOrganizacionB + "/pacientes";
+        String rutaUsuariosB = rutaOrganizacionB + "/usuarios";
 
         afirmar403(ejecutar(get(rutaOrganizacionB), tokenAdminA), rutaOrganizacionB);
         afirmar403(ejecutar(put(rutaOrganizacionB)
@@ -635,6 +807,10 @@ class AislamientoYMatrizRbacTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(CUERPO_PACIENTE_NUEVO), tokenAdminA), rutaPacientesB);
         afirmar403(ejecutar(get(rutaPacientesB), tokenAdminA), rutaPacientesB);
+        afirmar403(ejecutar(post(rutaUsuariosB)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_USUARIO_NUEVO), tokenAdminA), rutaUsuariosB);
+        afirmar403(ejecutar(get(rutaUsuariosB), tokenAdminA), rutaUsuariosB);
 
         // El rechazo del path no altera nada del tenant ajeno ni crea recursos en él.
         assertThat(organizacionRepository.findById(organizacionB.getId()).orElseThrow().getNombre())
@@ -655,6 +831,9 @@ class AislamientoYMatrizRbacTest {
                 .as("un POST rechazado no debe crear pacientes en el tenant ajeno")
                 .extracting(Paciente::getId)
                 .containsExactly(pacienteB.getId());
+        assertThat(usuarioRepository.listarPorOrganizacion(organizacionB.getId()))
+                .as("un POST rechazado no debe crear cuentas en el tenant ajeno")
+                .isEmpty();
     }
 
     // ------------------------------------------------------------------
@@ -666,6 +845,9 @@ class AislamientoYMatrizRbacTest {
     void recursoDeOtroTenantResponde404SinRevelarlo() throws Exception {
         String consultorioAjeno = "/api/v1/consultorios/" + consultorioB.getId();
         String medicoAjeno = "/api/v1/medicos/" + medicoB.getId();
+        Usuario cuentaAjena = usuarioRepository.save(new Usuario(organizacionB, null,
+                "cuenta.secreta.beta@example.com", RolUsuario.PACIENTE, UUID.randomUUID()));
+        String usuarioAjeno = "/api/v1/usuarios/" + cuentaAjena.getId();
 
         afirmar404(ejecutar(get(consultorioAjeno), tokenAdminA), consultorioAjeno, "Consultorio",
                 consultorioB.getId());
@@ -681,6 +863,21 @@ class AislamientoYMatrizRbacTest {
                 .content(cuerpoMedico(consultorioB.getId().toString(), "Dr. Intruso")), tokenAdminA),
                 medicoAjeno, "Medico", medicoB.getId());
         afirmar404(ejecutar(delete(medicoAjeno), tokenAdminA), medicoAjeno, "Medico", medicoB.getId());
+        afirmar404(ejecutar(get(usuarioAjeno), tokenAdminA), usuarioAjeno, "Usuario", cuentaAjena.getId());
+        afirmar404(ejecutar(put(usuarioAjeno)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_USUARIO_ACTUALIZADO), tokenAdminA), usuarioAjeno, "Usuario",
+                cuentaAjena.getId());
+        afirmar404(ejecutar(delete(usuarioAjeno), tokenAdminA), usuarioAjeno, "Usuario",
+                cuentaAjena.getId());
+
+        // El mismo 404 para un médico del cuerpo del alta: la organización ajena no se confirma por
+        // ninguna de las dos vías, ni por la cuenta pedida por id ni por un identificador del cuerpo.
+        String rutaUsuariosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/usuarios";
+        afirmar404(ejecutar(post(rutaUsuariosA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(usuarioMedicoConMedicoDe(medicoB.getId())), tokenAdminA), rutaUsuariosA,
+                "Medico", medicoB.getId());
 
         // El 404 es indistinguible del de un id inexistente y no filtra datos del recurso.
         String inexistente = "/api/v1/consultorios/" + UUID.randomUUID();
@@ -704,6 +901,21 @@ class AislamientoYMatrizRbacTest {
         assertThat(medicoRepository.findById(medicoB.getId()).orElseThrow().getNombre())
                 .isEqualTo("Dr. Secreto Beta");
         assertThat(medicoRepository.findById(medicoB.getId()).orElseThrow().isActivo()).isTrue();
+
+        Usuario ajenoUsuario = usuarioRepository.findById(cuentaAjena.getId()).orElseThrow();
+        assertThat(ajenoUsuario.getEmail())
+                .as("una mutación rechazada no debe cambiar el correo de la cuenta ajena")
+                .isEqualTo("cuenta.secreta.beta@example.com");
+        assertThat(ajenoUsuario.getRol())
+                .as("una mutación rechazada no debe cambiar el rol de la cuenta ajena")
+                .isEqualTo(RolUsuario.PACIENTE);
+        assertThat(ajenoUsuario.isActivo())
+                .as("una baja rechazada no debe desactivar la cuenta ajena")
+                .isTrue();
+        assertThat(usuarioRepository.listarPorOrganizacion(organizacionA.getId()))
+                .as("ni la cuenta ajena ni el alta con médico ajeno pueden crear cuentas en el tenant "
+                        + "del token")
+                .isEmpty();
     }
 
     @Test
@@ -970,6 +1182,18 @@ class AislamientoYMatrizRbacTest {
         return """
                 {"consultorioId":"%s","nombre":"%s","especialidad":"Cardiología","tarifaBase":"500.00"}
                 """.formatted(consultorioId, nombre);
+    }
+
+    /**
+     * Cuerpo de alta de una cuenta {@code MEDICO} que apunta al médico indicado.
+     *
+     * @param medicoId identificador del médico que se intenta asociar
+     * @return cuerpo JSON de la petición
+     */
+    private static String usuarioMedicoConMedicoDe(UUID medicoId) {
+        return """
+                {"email":"cuenta.medico@example.com","rol":"MEDICO","medicoId":"%s"}
+                """.formatted(medicoId);
     }
 
     /**

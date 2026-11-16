@@ -71,7 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
  * la cadena la escribe {@link RestAccessDeniedHandler}.</p>
  *
  * <table>
- *   <caption>Matriz aplicada a las veintiséis operaciones de la API</caption>
+ *   <caption>Matriz aplicada a las treinta y dos operaciones de la API</caption>
  *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th></tr>
  *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td></tr>
@@ -92,6 +92,12 @@ import tools.jackson.databind.json.JsonMapper;
  *   <tr><td>{@code GET /pacientes/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
  *   <tr><td>{@code PUT|DELETE /pacientes/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code POST /pacientes/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /organizaciones/{orgId}/usuarios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{orgId}/usuarios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code PUT /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code DELETE /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /usuarios/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
  * </table>
  *
  * <p>«Propio tenant» tiene dos mitades y las aplican dos piezas distintas: aquí se exige el
@@ -133,6 +139,20 @@ import tools.jackson.databind.json.JsonMapper;
  * la propiedad que importa: ninguna de las dos respuestas confirma que la organización ajena
  * exista.</p>
  *
+ * <h2>Usuarios: la matriz concede el rol, el service acota la organización y protege las cuentas</h2>
+ *
+ * <p>Las seis rutas de cuentas aparecen en la tabla como «propio tenant» solo para {@code ADMIN},
+ * que es el único rol que administra cuentas (R9 de la card 06); {@code MEDICO} y
+ * {@code PACIENTE} no tienen ninguna celda y {@code RECEPCIONISTA} tampoco, de modo que hoy no
+ * existe un token con el que puedan alcanzarse. Como en los módulos anteriores, esta cadena solo
+ * concede el rol: {@code UsuarioService} comprueba contra el {@code tenantId} del claim que la
+ * organización del path sea la del token ({@code 403} sin consultar la base), responde
+ * {@code 404} por una cuenta o un médico de otra organización para no revelar que existen, y
+ * aplica las dos reglas que ningún rol puede ejercer sobre su propia cuenta: nadie se da de baja
+ * ni se cambia el rol a sí mismo ({@code 403}, R11) y la última cuenta {@code ADMIN} activa no se
+ * puede dar de baja ni perder el rol ({@code 409}, R8). Ninguna de esas tres comprobaciones se
+ * puede expresar aquí: dependen del estado de la base y del actor, no del rol.</p>
+ *
  * <h2>El alta de organizaciones está bloqueada, y es deliberado</h2>
  *
  * <p>{@code POST /organizaciones} responde {@code 403} a <strong>los tres roles</strong>
@@ -149,7 +169,7 @@ import tools.jackson.databind.json.JsonMapper;
  * venir acompañado del onboarding que haga alcanzable la organización creada, y de un test que
  * lo demuestre.</p>
  *
- * <p>{@code PACIENTE} recibe {@code 403} en las veintiséis operaciones. Desde este módulo
+ * <p>{@code PACIENTE} recibe {@code 403} en las treinta y dos operaciones. Desde este módulo
  * existe contrato de pacientes, así que su {@code 403} ya no es ausencia de endpoint:
  * <strong>hoy no se emiten tokens {@code PACIENTE}</strong> —el rol existe en el schema y se
  * conserva para una implementación futura, pero no hay cuentas de paciente— y por eso no
@@ -209,6 +229,9 @@ public class SecurityConfig {
 
     /** Ruta base de los pacientes pedidos por id y de su reactivación. */
     private static final String RUTA_PACIENTES = "/api/v1/pacientes";
+
+    /** Ruta base de las cuentas de usuario pedidas por id y de su reactivación. */
+    private static final String RUTA_USUARIOS = "/api/v1/usuarios";
 
     /** Endpoint de error del contenedor, servido por {@code RestErrorController}. */
     private static final String RUTA_ERROR = "/error";
@@ -321,6 +344,23 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, RUTA_PACIENTES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_PACIENTES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.POST, RUTA_PACIENTES + "/*/activar").hasRole(ROL_ADMIN)
+                        // Usuarios: la administración de cuentas es exclusiva de ADMIN (R9 de la
+                        // card 06). Esta regla solo concede el rol; el acotamiento por
+                        // organización (403 si el path no es el del claim, 404 si la cuenta o el
+                        // médico son de otra organización), la protección de la última
+                        // administradora (409) y el rechazo de la operación sobre la propia
+                        // cuenta (403) los aplica UsuarioService contra el tenantId y el actor
+                        // del claim. Se declaran las seis operaciones por separado porque cada
+                        // una es una celda de la matriz; la reactivación se nombra aparte porque
+                        // POST /usuarios/* no la alcanza (son dos segmentos después de la base).
+                        .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*/usuarios")
+                        .hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES + "/*/usuarios")
+                        .hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.GET, RUTA_USUARIOS + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.PUT, RUTA_USUARIOS + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, RUTA_USUARIOS + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.POST, RUTA_USUARIOS + "/*/activar").hasRole(ROL_ADMIN)
                         // Fallback: deny-by-default (R-SEG-09). Toda ruta con controlador que no
                         // esté declarada arriba queda cerrada para los tres roles; una ruta
                         // inexistente conserva el 401/404 normal del framework.
