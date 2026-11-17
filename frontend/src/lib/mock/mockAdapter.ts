@@ -1,3 +1,4 @@
+import { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import {
   mockUsers,
@@ -20,9 +21,8 @@ import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import type { Medico, HorarioMedico } from '@/features/medicos/medicos.types';
 import type { Usuario } from '@/features/usuarios/usuarios.types';
 import type { Diagnostico } from '@/features/expediente/expediente.types';
-import type { MarcaClinica, PatientIdentification, SoapNote, Prescription } from '@/types/futuro.types';
+import type { MarcaClinica, SoapNote, Prescription } from '@/types/futuro.types';
 
-type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
 type MedicoMock = Medico & { duracionConsultaMin?: number };
 
 /**
@@ -53,6 +53,67 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   const delay = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
 
   /**
+   * Forma canónica de la CURP (S3): se recorta y se pasa a mayúsculas, así `sasc850101mdfrrn01` y
+   * `SASC850101MDFRRN01` son el mismo paciente. Vacía o ausente significa «sin CURP», que es un
+   * registro válido (urgencia, menor, extranjero).
+   */
+  const curpCanonica = (curp: unknown): string | null => {
+    if (typeof curp !== 'string') return null;
+    const canonica = curp.trim().toUpperCase();
+    return canonica === '' ? null : canonica;
+  };
+
+  /**
+   * Paciente que ya ocupa esa CURP dentro de la organización, si lo hay.
+   *
+   * Replica la restricción `UNIQUE (organizacion_id, curp)` (S2): la unicidad es por organización,
+   * nunca global, y los registros sin CURP no colisionan entre sí. Al editar se excluye al propio
+   * paciente, porque conservar su CURP no es un duplicado.
+   */
+  const pacienteConLaCurp = (organizacionId: string, curp: string, exceptoId?: string) =>
+    patients.find(
+      (p) =>
+        p.id !== exceptoId &&
+        p.organizacionId === organizacionId &&
+        curpCanonica(p.curp) === curp,
+    );
+
+  /**
+   * 409 del backend cuando la CURP ya existe en la organización (S5).
+   *
+   * No es 400: la petición está bien formada, es el estado de la organización el que la impide. El
+   * mensaje nombra el motivo, porque es el que la pantalla muestra tal cual.
+   *
+   * Se devuelve como error y no como respuesta: en Axios el veredicto de estado (`settle`) vive
+   * dentro de los adaptadores integrados, así que un `status: 409` devuelto por un adaptador
+   * propio resolvería la promesa y el error de negocio se perdería. El mock tiene que fallar como
+   * falla el backend, o la pantalla nunca ejercita su rama de 409 en desarrollo.
+   */
+  const rechazoPorCurpDuplicada = (
+    config: InternalAxiosRequestConfig,
+    curp: string,
+  ): AxiosError =>
+    new AxiosError(
+      'Request failed with status code 409',
+      AxiosError.ERR_BAD_REQUEST,
+      config,
+      undefined,
+      {
+        data: {
+          codigo: 409,
+          error: 'Conflict',
+          mensaje:
+            `Ya existe un paciente con la CURP ${curp} en esta organización. La CURP es única ` +
+            'dentro de la organización, aunque el mismo paciente pueda estar registrado en otra',
+        },
+        status: 409,
+        statusText: 'Conflict',
+        headers: {},
+        config,
+      },
+    );
+
+  /**
    * Decodifica el `sub` del token de la sesión desde la cabecera `Authorization`, para las reglas
    * de "nadie opera sobre su propia cuenta" (R11) de Usuarios. Se llama solo dentro de
    * `config.adapter`, nunca en el cuerpo del interceptor: este mock se registra antes que el
@@ -72,7 +133,7 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   };
 
   // Mutable in-memory store for mocks
-  const patients: PacienteConFicha[] = [...mockPatients];
+  const patients: Paciente[] = [...mockPatients];
   const consultorios: Consultorio[] = [...mockClinicRooms];
   const medicos: MedicoMock[] = [...mockDoctors];
   const horarios: HorarioMedico[] = [...mockDoctorSchedules];
@@ -557,18 +618,40 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       await delay();
       // La organización dueña llega por el path: el cuerpo no puede cambiar de tenant.
       const organizacionId = coleccionDePacientes[1];
-      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const body = (typeof config.data === 'string'
+        ? JSON.parse(config.data)
+        : config.data) as Partial<Paciente>;
+      // S3: la CURP se guarda canónica, así que el duplicado se detecta aunque llegue en otra
+      // forma. El objeto anidado `ficha` del contrato viejo no se interpreta: el backend real
+      // tampoco lo declara, y el mock no puede aceptar lo que el backend descarta.
+      const curp = curpCanonica(body.curp);
+      if (curp !== null && pacienteConLaCurp(organizacionId, curp)) {
+        config.adapter = async () => {
+          throw rechazoPorCurpDuplicada(config, curp);
+        };
+        return config;
+      }
       const newPatientId = `pac-${Date.now()}`;
-      const newPatient: PacienteConFicha = {
+      // Solo los campos del contrato (`PacienteRequest`): lo que el backend no declara no se
+      // guarda, y el id, el dueño y la baja lógica no se reciben del cuerpo.
+      const newPatient: Paciente = {
         id: newPatientId,
-        activo: true,
-        createdAt: new Date().toISOString(),
-        ...body,
         // El dueño lo fija el path: si el cuerpo trae otro, no puede cambiarlo.
         organizacionId: organizacionId,
-        ficha: body.ficha
-          ? { id: `ficha-${Date.now()}`, paciente_id: newPatientId, ...body.ficha }
-          : undefined,
+        nombre: body.nombre ?? '',
+        telefono: body.telefono ?? null,
+        fechaNacimiento: body.fechaNacimiento ?? null,
+        sexo: body.sexo ?? null,
+        email: body.email ?? null,
+        notas: body.notas ?? null,
+        curp,
+        ocupacion: body.ocupacion ?? null,
+        domicilio: body.domicilio ?? null,
+        nombreResponsable: body.nombreResponsable ?? null,
+        telefonoResponsable: body.telefonoResponsable ?? null,
+        parentesco: body.parentesco ?? null,
+        activo: true,
+        createdAt: new Date().toISOString(),
       };
       patients.unshift(newPatient);
       config.adapter = async () => ({
@@ -585,18 +668,38 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     if (pacientePorId && method === 'put') {
       await delay();
       const id = pacientePorId[1];
-      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const body = (typeof config.data === 'string'
+        ? JSON.parse(config.data)
+        : config.data) as Partial<Paciente>;
       const idx = patients.findIndex((p) => p.id === id);
 
       if (idx !== -1) {
         const current = patients[idx];
-        const { ficha: fichaBody, ...patientBody } = body as { ficha?: Partial<PatientIdentification> } & Partial<Paciente>;
+        // S3 y S5 también al editar: la CURP se guarda canónica y no puede quedar igual a la de
+        // otro paciente de la organización. La del propio paciente no es un duplicado.
+        const curp = curpCanonica(body.curp);
+        if (curp !== null && pacienteConLaCurp(current.organizacionId, curp, current.id)) {
+          config.adapter = async () => {
+            throw rechazoPorCurpDuplicada(config, curp);
+          };
+          return config;
+        }
+        // La edición reemplaza la ficha completa, como el PUT del backend; el id, el dueño y la
+        // baja lógica no se pueden cambiar desde el cuerpo.
         patients[idx] = {
           ...current,
-          ...patientBody,
-          ficha: fichaBody
-            ? { id: current.ficha?.id || `ficha-${Date.now()}`, paciente_id: id, ...current.ficha, ...fichaBody }
-            : current.ficha,
+          nombre: body.nombre ?? current.nombre,
+          telefono: body.telefono ?? null,
+          fechaNacimiento: body.fechaNacimiento ?? null,
+          sexo: body.sexo ?? null,
+          email: body.email ?? null,
+          notas: body.notas ?? null,
+          curp,
+          ocupacion: body.ocupacion ?? null,
+          domicilio: body.domicilio ?? null,
+          nombreResponsable: body.nombreResponsable ?? null,
+          telefonoResponsable: body.telefonoResponsable ?? null,
+          parentesco: body.parentesco ?? null,
         };
       }
 

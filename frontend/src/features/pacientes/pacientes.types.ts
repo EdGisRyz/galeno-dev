@@ -16,4 +16,18 @@ export interface Paciente {
   notas?: string | null;
   activo: boolean;
   createdAt: string;
+  //
+  // Ficha de identificación (NOM-004) en **campos planos**, tal como la devuelve
+  // `PacienteResponse` (spec S6): al mismo nivel que el resto y en camelCase. Antes la pantalla
+  // enviaba y leía un objeto anidado `ficha` que el backend no declaraba, así que el dato se
+  // descartaba en silencio; ese objeto ya no existe en el cliente.
+  //
+  // `curp` es opcional porque un paciente puede registrarse sin ella (urgencia, menor o
+  // extranjero), pero cuando viene es única dentro de la organización y se guarda canónica.
+  curp?: string | null;
+  ocupacion?: string | null;
+  domicilio?: string | null;
+  nombreResponsable?: string | null;
+  telefonoResponsable?: string | null;
+  parentesco?: string | null;
 }

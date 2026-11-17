@@ -54,6 +54,10 @@ const RUTA_LISTADO = `${RUTA_COLECCION}?incluirInactivos=true`;
 /** Ítem del contrato plano: `PUT /pacientes/{id}`. */
 const RUTA_ITEM = (id: string) => `/pacientes/${id}`;
 
+/**
+ * Paciente de la fixture con la ficha en campos planos, tal como la devuelve `PacienteResponse`
+ * (S6): los seis campos van al mismo nivel que el resto y en camelCase.
+ */
 const PACIENTE: Paciente = {
   id: 'pac-0001',
   organizacionId: 'org-001',
@@ -65,6 +69,12 @@ const PACIENTE: Paciente = {
   notas: null,
   activo: true,
   createdAt: '2026-01-02T10:00:00.000Z',
+  curp: 'LOFM900504MOCPZR08',
+  ocupacion: 'Docente',
+  domicilio: 'Calle Independencia 12, Centro',
+  nombreResponsable: 'Responsable de prueba',
+  telefonoResponsable: '5550001111',
+  parentesco: 'Hermana',
 };
 
 beforeEach(() => {
@@ -288,7 +298,7 @@ describe('PacientesPage · comportamiento previo que se conserva', () => {
 
     await screen.findByText(PACIENTE.nombre);
 
-    fireEvent.change(screen.getByPlaceholderText(/buscar por nombre, teléfono o curp/i), {
+    fireEvent.change(screen.getByPlaceholderText(/buscar por nombre/i), {
       target: { value: 'zzz-no-existe' },
     });
 

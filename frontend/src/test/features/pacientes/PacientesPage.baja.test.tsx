@@ -36,6 +36,7 @@ const RUTA_COLECCION = `/organizaciones/${ORGANIZACION_ID}/pacientes?incluirInac
 /** Baja del contrato: `DELETE /pacientes/{id}` (204 sin cuerpo). */
 const RUTA_BAJA = (id: string) => `/pacientes/${id}`;
 
+/** Fixture con la ficha en campos planos, la forma que devuelve `PacienteResponse` (S6). */
 const PACIENTE_ACTIVO: Paciente = {
   id: 'pac-0001',
   organizacionId: ORGANIZACION_ID,
@@ -47,6 +48,12 @@ const PACIENTE_ACTIVO: Paciente = {
   notas: null,
   activo: true,
   createdAt: '2026-01-02T10:00:00.000Z',
+  curp: 'LOFM900504MOCPZR08',
+  ocupacion: 'Docente',
+  domicilio: 'Calle Independencia 12, Centro',
+  nombreResponsable: 'Responsable de prueba',
+  telefonoResponsable: '5550001111',
+  parentesco: 'Hermana',
 };
 
 beforeEach(() => {
