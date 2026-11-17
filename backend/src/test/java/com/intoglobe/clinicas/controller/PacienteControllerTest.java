@@ -1,5 +1,6 @@
 package com.intoglobe.clinicas.controller;
 
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -7,9 +8,11 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
@@ -23,12 +26,15 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.intoglobe.clinicas.dto.request.PacienteRequest;
 import com.intoglobe.clinicas.dto.response.PacienteResponse;
+import com.intoglobe.clinicas.exception.CurpDuplicadaEnOrganizacionException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.security.ClaveRsaDePrueba;
 import com.intoglobe.clinicas.security.SecurityConfig;
 import com.intoglobe.clinicas.security.SecurityErrorResponder;
 import com.intoglobe.clinicas.service.PacienteService;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -93,6 +99,12 @@ class PacienteControllerTest {
             "No se encontró el recurso Paciente con id: " + PACIENTE_ID;
     private static final String MENSAJE_CUERPO_MAL_FORMADO =
             "El cuerpo de la petición no es válido o está mal formado";
+
+    /** CURP canónica de ejemplo: 18 posiciones, cuatro letras, seis dígitos, sexo, estado, consonantes, homoclave y dígito. */
+    private static final String CURP = "SASC850101MDFRRN01";
+
+    /** Nombre de la restricción de unicidad de la CURP por organización (migración V8). */
+    private static final String RESTRICCION_CURP = "paciente_organizacion_id_curp_key";
     private static final String MENSAJE_ID_INVALIDO =
             "El parámetro 'id' tiene un formato inválido";
     private static final String MENSAJE_ORGANIZACION_ID_INVALIDO =
@@ -103,6 +115,11 @@ class PacienteControllerTest {
             """;
     private static final String CUERPO_PACIENTE_ACTUALIZADO = """
             {"nombre":"María López R.","telefono":"+52 55 5555 0000","fechaNacimiento":"1985-03-14","sexo":"F","email":"maria.lopez@example.com","notas":null}
+            """;
+
+    /** Cuerpo con la ficha completa; la CURP viaja en minúsculas a propósito. */
+    private static final String CUERPO_PACIENTE_CON_FICHA = """
+            {"nombre":"María López Ramírez","telefono":"+52 55 5555 4321","fechaNacimiento":"1985-03-14","sexo":"F","email":"maria.lopez@example.com","notas":"Alergia a la penicilina","curp":"sasc850101mdfrrn01","ocupacion":"Comerciante","domicilio":"Av. Reforma 123, Col. Centro","nombreResponsable":"Rosa Ramírez Silva","telefonoResponsable":"+52 55 5555 8765","parentesco":"Madre"}
             """;
 
     /**
@@ -358,6 +375,139 @@ class PacienteControllerTest {
     }
 
     // ------------------------------------------------------------------
+    // Ficha administrativa, canónica de la CURP y conflicto de duplicado
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("POST devuelve los seis campos de la ficha planos, en camelCase y al mismo nivel")
+    void crear_shouldReturnTheSixFichaFields_whenTheRequestBringsThem() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "María López Ramírez", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_PACIENTE_CON_FICHA))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.curp").value(CURP))
+                .andExpect(jsonPath("$.ocupacion").value("Comerciante"))
+                .andExpect(jsonPath("$.domicilio").value("Av. Reforma 123, Col. Centro"))
+                .andExpect(jsonPath("$.nombreResponsable").value("Rosa Ramírez Silva"))
+                .andExpect(jsonPath("$.telefonoResponsable").value("+52 55 5555 8765"))
+                .andExpect(jsonPath("$.parentesco").value("Madre"))
+                .andExpect(jsonPath("$.ficha").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("POST entrega al service la CURP ya canónica: recortada y en mayúsculas")
+    void crear_shouldCanonicalizeTheCurpBeforeCallingTheService() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "María López Ramírez", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_PACIENTE_CON_FICHA))
+                .andExpect(status().isCreated());
+
+        var captor = ArgumentCaptor.forClass(PacienteRequest.class);
+        verify(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), captor.capture());
+        assertThat(captor.getValue().curp())
+                .as("la normalización ocurre antes de la validación, en el borde de la API")
+                .isEqualTo(CURP);
+    }
+
+    @Test
+    @DisplayName("POST con CURP vacía se acepta y llega al service como nula")
+    void crear_shouldAcceptAnEmptyCurp() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "María López Ramírez", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"María López Ramírez","curp":"   "}
+                                """))
+                .andExpect(status().isCreated());
+
+        var captor = ArgumentCaptor.forClass(PacienteRequest.class);
+        verify(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), captor.capture());
+        assertThat(captor.getValue().curp())
+                .as("una CURP en blanco es «no se registró»: dos registros así no pueden colisionar")
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("POST con CURP de estructura inválida devuelve 400 sin llamar al service")
+    void crear_shouldReturn400_whenCurpIsMalformed() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"María López Ramírez","curp":"SASC8501"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo curp es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con CURP duplicada devuelve 409 con el mensaje del motivo")
+    void crear_shouldReturn409_whenTheCurpIsAlreadyUsedInTheOrganization() throws Exception {
+        doThrow(new CurpDuplicadaEnOrganizacionException(CURP))
+                .when(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_PACIENTE_CON_FICHA))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(containsString(CURP)))
+                .andExpect(jsonPath("$.mensaje").value(containsString("La CURP es única")))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+    }
+
+    @Test
+    @DisplayName("si la carrera del alta choca contra la unicidad de la CURP, la respuesta es 409 y no 500")
+    void crear_shouldReturn409_whenTheUniqueCurpConstraintWinsTheRace() throws Exception {
+        doThrow(violacionDeIntegridad(RESTRICCION_CURP))
+                .when(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_PACIENTE_CON_FICHA))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(containsString("CURP")));
+    }
+
+    @Test
+    @DisplayName("PUT reemplaza los seis campos de la ficha y entrega la CURP canónica")
+    void actualizar_shouldReplaceTheSixFichaFields() throws Exception {
+        when(pacienteService.actualizar(eq(PACIENTE_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "María López Ramírez", true));
+
+        perform(put("/api/v1/pacientes/{id}", PACIENTE_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"María López Ramírez","curp":"sasc850101mdfrrn01","ocupacion":"Comerciante","domicilio":"Av. Reforma 123, Col. Centro","nombreResponsable":"Rosa Ramírez Silva","telefonoResponsable":"+52 55 5555 8765","parentesco":"Madre"}
+                                """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(PacienteRequest.class);
+        verify(pacienteService).actualizar(eq(PACIENTE_ID), eq(TENANT_ID), captor.capture());
+        var recibido = captor.getValue();
+        assertThat(recibido.curp()).isEqualTo(CURP);
+        assertThat(recibido.ocupacion()).isEqualTo("Comerciante");
+        assertThat(recibido.domicilio()).isEqualTo("Av. Reforma 123, Col. Centro");
+        assertThat(recibido.nombreResponsable()).isEqualTo("Rosa Ramírez Silva");
+        assertThat(recibido.telefonoResponsable()).isEqualTo("+52 55 5555 8765");
+        assertThat(recibido.parentesco()).isEqualTo("Madre");
+    }
+
+    // ------------------------------------------------------------------
     // 400 de validación: ocurren antes del service
     // ------------------------------------------------------------------
 
@@ -526,12 +676,14 @@ class PacienteControllerTest {
      * @param id     identificador del paciente
      * @param nombre nombre del paciente
      * @param activo estado lógico del paciente
-     * @return la respuesta con los diez campos del contrato
+     * @return la respuesta con los dieciséis campos del contrato
      */
     private static PacienteResponse respuesta(UUID id, String nombre, boolean activo) {
         return new PacienteResponse(id, TENANT_ID, nombre, "+52 55 5555 4321",
                 LocalDate.parse("1985-03-14"), "F", "maria.lopez@example.com",
-                "Alergia a la penicilina", activo,
+                "Alergia a la penicilina",
+                CURP, "Comerciante", "Av. Reforma 123, Col. Centro", "Rosa Ramírez Silva",
+                "+52 55 5555 8765", "Madre", activo,
                 OffsetDateTime.parse("2025-01-15T10:30:00-06:00"));
     }
 
@@ -569,6 +721,20 @@ class PacienteControllerTest {
      */
     private ResultActions perform(MockHttpServletRequestBuilder peticion, String token) throws Exception {
         return mockMvc.perform(peticion.header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+    }
+
+    /**
+     * Construye el error de integridad que lanza el proveedor cuando una restricción rechaza la
+     * escritura, con el nombre de la restricción dentro del mensaje tal como lo publican H2 y
+     * PostgreSQL.
+     *
+     * @param restriccion nombre de la restricción violada
+     * @return la excepción que recibe el traductor
+     */
+    private static DataIntegrityViolationException violacionDeIntegridad(String restriccion) {
+        return new DataIntegrityViolationException("could not execute statement",
+                new SQLException("Unique index or primary key violation: \"public." + restriccion
+                        + " INDEX public." + restriccion + "_INDEX_F\""));
     }
 
     /**

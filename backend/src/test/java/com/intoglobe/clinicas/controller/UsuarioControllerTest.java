@@ -416,7 +416,7 @@ class UsuarioControllerTest {
         var otraRestriccion = violacionDeIntegridad("usuario_auth_user_id_key");
         var peticion = mock(HttpServletRequest.class);
 
-        assertThatThrownBy(() -> traductor.manejarCorreoDuplicadoEnCarrera(otraRestriccion, peticion))
+        assertThatThrownBy(() -> traductor.manejarUnicidadDuplicadaEnCarrera(otraRestriccion, peticion))
                 .as("traducir en bloque convertiría en conflicto de negocio cualquier fallo de "
                         + "integridad de cualquier módulo")
                 .isSameAs(otraRestriccion);
@@ -428,7 +428,7 @@ class UsuarioControllerTest {
         var traductor = new GlobalExceptionHandler();
         var peticion = mock(HttpServletRequest.class);
 
-        var respuesta = traductor.manejarCorreoDuplicadoEnCarrera(
+        var respuesta = traductor.manejarUnicidadDuplicadaEnCarrera(
                 violacionDeIntegridad(RESTRICCION_CORREO), peticion);
 
         assertThat(respuesta.getStatusCode().value()).isEqualTo(409);

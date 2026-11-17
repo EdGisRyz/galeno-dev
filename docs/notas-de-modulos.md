@@ -1000,9 +1000,31 @@ inactivo y existe `POST /pacientes/{id}/activar`, idempotente. Deuda declarada: 
 `consultorio` solo tienen `desactivar` y este módulo no les agrega la operación simétrica.
 [Probada: `PacienteServiceTest` (reactiva y repite sin error) y `PacienteControllerTest`
 (204 sin cuerpo).]
-6. **Las dos lecturas de la colección y del ítem admiten `MEDICO`; las cuatro mutaciones
-son de `ADMIN`.** Editar la ficha de un paciente es función administrativa; un médico la
-consulta. `PACIENTE` no tiene ninguna celda: hoy no se emiten tokens de ese rol.
+6. **Las dos lecturas de la colección y del ítem admiten `MEDICO` y `RECEPCIONISTA`; las
+cuatro mutaciones son de `ADMIN` y `RECEPCIONISTA`.** Editar la ficha de un paciente es
+función del mostrador y de la administración; un médico la consulta. `PACIENTE` no tiene
+ninguna celda: hoy no se emiten tokens de ese rol.
+7. **La ficha administrativa vive en la misma tabla `paciente`** —seis columnas nulables,
+migración V8—: CURP, ocupación, domicilio, y nombre, teléfono y parentesco del responsable.
+Todas son opcionales a propósito: atender una urgencia, a un menor o a un extranjero sin
+documento es el caso diario del mostrador, y un `NOT NULL` obligaría a inventar el dato para
+poder registrar a la persona. **La CURP, cuando existe, es única dentro de la organización**,
+y esa unicidad se sostiene en dos capas: el servicio comprueba antes de guardar para
+responder **409** con un mensaje entendible, y la restricción `paciente_organizacion_id_curp_key`
+es la última palabra si dos altas simultáneas pasan las dos la comprobación. Los valores nulos
+no colisionan en una restricción única ni en PostgreSQL ni en H2, así que varios pacientes sin
+CURP conviven en la misma organización sin índice parcial; y como la clave incluye la
+organización, la misma CURP puede existir en dos clínicas, igual que el correo de las cuentas.
+La CURP se guarda **canónica** (recortada y en mayúsculas) por una sola función,
+`Paciente.normalizarCurp`, que usan el DTO, el mapper, la entidad y el servicio: dos
+definiciones distintas de «la misma CURP» es exactamente cómo se cuela un duplicado. El
+formato se valida en el borde con una comprobación **estructural** de 18 posiciones; la
+validación autoritativa —existencia y dígito verificador— corresponde al registro nacional y
+queda **fuera de alcance**.
+   Esta ficha cierra una **pérdida silenciosa de datos**: la pantalla ya enviaba un objeto
+   `ficha` anidado que el backend no declaraba, y Spring descarta por defecto las propiedades
+   desconocidas, así que lo que la recepcionista escribía no se guardaba y no había error.
+   Con la ficha en campos planos (S6) el dato viaja, se guarda y se devuelve.
 
 ### Autorización en tres capas
 
@@ -1010,7 +1032,7 @@ Ninguna capa alcanza sola, y el reparto no es cosmético:
 
 | Capa | Dónde | Qué decide | Respuesta |
 |---|---|---|---|
-| Rol | `SecurityConfig` | quién entra a la ruta | **403** a `PACIENTE` y a `MEDICO` en las mutaciones |
+| Rol | `SecurityConfig` | quién entra a la ruta | **403** a `PACIENTE` en todo y a `MEDICO` en las mutaciones |
 | Organización | `PacienteService` | la organización del path es la del token | **403** en las dos rutas anidadas |
 | Pertenencia | `PacienteService` | el paciente es de esa organización | **404** en las cuatro rutas por id |
 

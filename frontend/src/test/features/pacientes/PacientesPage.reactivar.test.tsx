@@ -39,6 +39,7 @@ const RUTA_COLECCION = `/organizaciones/${ORGANIZACION_ID}/pacientes?incluirInac
 /** Reactivación del contrato: `POST /pacientes/{id}/activar` (204 idempotente, sin cuerpo). */
 const RUTA_ACTIVAR = (id: string) => `/pacientes/${id}/activar`;
 
+/** Fixture con la ficha en campos planos, la forma que devuelve `PacienteResponse` (S6). */
 const PACIENTE_INACTIVO: Paciente = {
   id: 'pac-0001',
   organizacionId: ORGANIZACION_ID,
@@ -50,6 +51,12 @@ const PACIENTE_INACTIVO: Paciente = {
   notas: null,
   activo: false,
   createdAt: '2026-01-02T10:00:00.000Z',
+  curp: 'LOFM900504MOCPZR08',
+  ocupacion: 'Docente',
+  domicilio: 'Calle Independencia 12, Centro',
+  nombreResponsable: 'Responsable de prueba',
+  telefonoResponsable: '5550001111',
+  parentesco: 'Hermana',
 };
 
 beforeEach(() => {

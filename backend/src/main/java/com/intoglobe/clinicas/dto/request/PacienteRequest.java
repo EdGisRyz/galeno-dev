@@ -2,6 +2,8 @@ package com.intoglobe.clinicas.dto.request;
 
 import java.time.LocalDate;
 
+import com.intoglobe.clinicas.model.Paciente;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -35,6 +37,28 @@ import jakarta.validation.constraints.Size;
  * {@code TEXT} en V1 y no fija límite. Poner un máximo aquí sería inventar una
  * restricción ausente en el schema.</p>
  *
+ * <p><strong>La CURP es opcional y viaja plana.</strong> Un paciente puede registrarse sin ella
+ * —urgencia, menor, extranjero— y eso es normal, así que no lleva {@code @NotBlank}. Cuando viene,
+ * su estructura se valida aquí; cuando viene vacía se acepta y se guarda como {@code null}, para
+ * que dos pacientes sin CURP no compitan por el mismo hueco en la restricción única de la base.</p>
+ *
+ * <p><strong>La CURP llega ya canónica a la validación.</strong> El constructor compacto la recorta
+ * y la pasa a mayúsculas delegando en {@link Paciente#normalizarCurp(String)}, que es la única
+ * definición de «la misma CURP» del módulo, y convierte el vacío en {@code null}. De ahí que el
+ * {@code @Pattern} exija la forma canónica y a la vez acepte minúsculas: cuando el cuerpo trae
+ * {@code sasc850101mdfrrn01}, lo que se valida es {@code SASC850101MDFRRN01}.</p>
+ *
+ * <p><strong>La validación de la CURP es estructural, no autoritativa.</strong> El
+ * {@code @Pattern} comprueba 18 posiciones con la forma declarada —cuatro letras, seis dígitos,
+ * sexo, cinco letras, homoclave y dígito de control—, que es lo que este borde puede afirmar sin
+ * salir de la petición. Comprobar que la CURP existe en el registro nacional, o que su dígito de
+ * control cierra, queda fuera de alcance: aquí solo se rechaza lo que no puede ser una CURP.</p>
+ *
+ * <p>El resto de los campos opcionales no se normaliza: llegan al mapper tal como el cliente los
+ * envió, porque el contrato de actualización es un reemplazo y una cadena vacía significa «campo
+ * presente y vacío», no «campo ausente». Solo la CURP se canoniza, porque de ella depende la
+ * unicidad.</p>
+ *
  * <p>Las validaciones Jakarta viven aquí, nunca en la entidad.</p>
  *
  * @param nombre          nombre del paciente (obligatorio, 1..160 caracteres)
@@ -44,6 +68,12 @@ import jakarta.validation.constraints.Size;
  * @param email           correo electrónico (opcional, máx. 180 caracteres, sin
  *                        validación de formato)
  * @param notas           notas libres (opcional, columna {@code TEXT})
+ * @param curp            CURP del paciente (opcional, 18 posiciones; se guarda canónica)
+ * @param ocupacion       ocupación del paciente (opcional, máx. 120 caracteres)
+ * @param domicilio       domicilio del paciente (opcional, máx. 240 caracteres)
+ * @param nombreResponsable nombre del responsable (opcional, máx. 160 caracteres)
+ * @param telefonoResponsable teléfono del responsable (opcional, máx. 20 caracteres)
+ * @param parentesco      parentesco del responsable con el paciente (opcional, máx. 40 caracteres)
  */
 public record PacienteRequest(
 
@@ -76,5 +106,57 @@ public record PacienteRequest(
 
         @Schema(description = "Notas libres sobre el paciente; null si no se registraron. La columna es TEXT, sin límite.",
                 example = "Alergia a la penicilina")
-        String notas) {
+        String notas,
+
+        @Schema(description = "CURP del paciente; null o vacía si no se registró. Opcional, única "
+                + "dentro de la organización y se guarda en mayúsculas.",
+                example = "SASC850101MDFRRN01")
+        @Size(max = 18)
+        // Acepta vacío (la CURP es opcional) y acepta minúsculas (el constructor compacto ya
+        // canonizó el valor); cuando hay valor exige las 18 posiciones de una CURP: cuatro
+        // letras, seis dígitos de la fecha, sexo, cinco letras, homoclave alfanumérica y dígito
+        // de control. Es estructural: la validación autoritativa es del registro nacional.
+        @Pattern(regexp = "^$|^(?i)[A-Z]{4}\\d{6}[HM][A-Z]{5}[A-Z0-9]\\d$")
+        String curp,
+
+        @Schema(description = "Ocupación del paciente; null si no se registró, máximo 120 caracteres.",
+                example = "Comerciante")
+        @Size(max = 120)
+        String ocupacion,
+
+        @Schema(description = "Domicilio del paciente; null si no se registró, máximo 240 caracteres.",
+                example = "Av. Reforma 123, Col. Centro")
+        @Size(max = 240)
+        String domicilio,
+
+        @Schema(description = "Nombre del responsable del paciente; null si no se registró, máximo 160 caracteres.",
+                example = "Rosa Ramírez Silva")
+        @Size(max = 160)
+        String nombreResponsable,
+
+        @Schema(description = "Teléfono del responsable; null si no se registró, máximo 20 caracteres.",
+                example = "+52 55 5555 8765")
+        @Size(max = 20)
+        String telefonoResponsable,
+
+        @Schema(description = "Parentesco del responsable con el paciente; null si no se registró, máximo 40 caracteres.",
+                example = "Madre")
+        @Size(max = 40)
+        String parentesco) {
+
+    /**
+     * Canoniza la CURP en el borde de la API, antes de que Bean Validation la mire.
+     *
+     * <p>Se delega en {@link Paciente#normalizarCurp(String)} para que la forma canónica tenga una
+     * sola definición: recorta, pasa a mayúsculas y convierte el vacío en {@code null}. Así
+     * {@code "  sasc850101mdfrrn01 "} y {@code "SASC850101MDFRRN01"} son la misma CURP, y una CURP
+     * en blanco es «no se registró» en lugar de una cadena vacía que competiría consigo misma en
+     * la restricción única de la base.</p>
+     *
+     * <p>Es idempotente respecto del mapper y de la entidad, que vuelven a aplicarla: las tres
+     * capas comparten la misma función, así que no pueden discrepar.</p>
+     */
+    public PacienteRequest {
+        curp = Paciente.normalizarCurp(curp);
+    }
 }

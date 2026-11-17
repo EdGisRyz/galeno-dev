@@ -2,8 +2,10 @@
 // TIPOS EN CUARENTENA — NO EXISTEN EN EL ESQUEMA V1
 // ─────────────────────────────────────────
 // Estos tipos NO tienen tabla ni contrato en `V1__base_schema.sql` y el backend los declaró
-// fuera de alcance (SOAP y prescripciones son trabajo futuro; la ficha de identificación
-// extendida y la historia clínica son NOM-004 / NOM-024, posteriores a V1).
+// fuera de alcance (SOAP y prescripciones son trabajo futuro; la historia clínica es NOM-004 /
+// NOM-024, posterior a V1). La ficha de identificación salió de esta cuarentena cuando el
+// esquema la adoptó: sus seis campos viven planos en `Paciente`
+// (`src/features/pacientes/pacientes.types.ts`), porque `PacienteResponse` los devuelve.
 //
 // Nadie debe importarlos como si fueran un contrato real: hoy solo los consumen los mocks
 // (`src/lib/mock/mockData.ts`, `src/lib/mock/mockAdapter.ts`) para poder dibujar pantallas
@@ -11,17 +13,6 @@
 // `src/features/<dominio>/<dominio>.types.ts` con el nombre del contrato real.
 //
 // No se borran: son la referencia de la forma que la UI mockeada ya espera.
-
-// NOM-004: ficha de identificación extendida. No hay tabla en V1.
-export interface PatientIdentification {
-  id: string;
-  paciente_id: string;
-  curp?: string | null;
-  ocupacion?: string | null;
-  domicilio_completo?: string | null;
-  nombre_responsable?: string | null;
-  telefono_responsable?: string | null;
-}
 
 // NOM-004: historia clínica. No hay tabla en V1.
 export interface MedicalHistory {

@@ -29,6 +29,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param sexo            sexo registrado ({@code M}, {@code F}, {@code O}) o {@code null}
  * @param email           correo electrónico o {@code null} si no se registró
  * @param notas           notas libres o {@code null} si no se registraron
+ * @param curp            CURP canónica del paciente o {@code null} si no se registró
+ * @param ocupacion       ocupación del paciente o {@code null}
+ * @param domicilio       domicilio del paciente o {@code null}
+ * @param nombreResponsable nombre del responsable o {@code null}
+ * @param telefonoResponsable teléfono del responsable o {@code null}
+ * @param parentesco      parentesco del responsable con el paciente o {@code null}
  * @param activo          {@code true} si está activo, {@code false} si fue dado de baja
  * @param createdAt       fecha y hora de alta asignada por el sistema
  */
@@ -65,6 +71,30 @@ public record PacienteResponse(
         @Schema(description = "Notas libres; null si no se registraron.",
                 example = "Alergia a la penicilina")
         String notas,
+
+        @Schema(description = "CURP del paciente en su forma canónica (mayúsculas); null si no se registró.",
+                example = "SASC850101MDFRRN01")
+        String curp,
+
+        @Schema(description = "Ocupación del paciente; null si no se registró.",
+                example = "Comerciante")
+        String ocupacion,
+
+        @Schema(description = "Domicilio del paciente; null si no se registró.",
+                example = "Av. Reforma 123, Col. Centro")
+        String domicilio,
+
+        @Schema(description = "Nombre del responsable del paciente; null si no se registró.",
+                example = "Rosa Ramírez Silva")
+        String nombreResponsable,
+
+        @Schema(description = "Teléfono del responsable del paciente; null si no se registró.",
+                example = "+52 55 5555 8765")
+        String telefonoResponsable,
+
+        @Schema(description = "Parentesco del responsable con el paciente; null si no se registró.",
+                example = "Madre")
+        String parentesco,
 
         @Schema(description = "Indica si el paciente está activo (true) o dado de baja lógica (false).",
                 example = "true")

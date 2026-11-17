@@ -20,7 +20,6 @@ import {
 } from '@/components/ui';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import { useAuthStore } from '@/store/auth.store';
-import type { PatientIdentification } from '@/types/futuro.types';
 import {
   Users,
   UserPlus,
@@ -38,8 +37,6 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-type PacienteConFicha = Paciente & { ficha?: PatientIdentification };
-
 /** Mensaje único del estado de error de carga: el detalle técnico solo va a la consola. */
 const MENSAJE_ERROR_CARGA =
   'No fue posible obtener el directorio de pacientes. Revisa la conexión con el servicio e inténtalo de nuevo.';
@@ -53,6 +50,13 @@ const MENSAJE_ERROR_BAJA =
 const MENSAJE_ERROR_REACTIVAR =
   'No fue posible reactivar al paciente. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
+/**
+ * Respaldo del alta y de la edición. El rechazo por CURP duplicada (409) trae su propio motivo y
+ * se muestra tal cual (S7); este texto solo cubre un fallo que no vino con mensaje.
+ */
+const MENSAJE_ERROR_GUARDAR =
+  'No fue posible guardar la ficha del paciente. Revisa la conexión con el servicio e inténtalo de nuevo.';
+
 const EMPTY_FORM = {
   nombre: '',
   telefono: '',
@@ -62,10 +66,24 @@ const EMPTY_FORM = {
   notas: '',
   curp: '',
   ocupacion: '',
-  domicilio_completo: '',
-  nombre_responsable: '',
-  telefono_responsable: '',
+  domicilio: '',
+  nombreResponsable: '',
+  telefonoResponsable: '',
+  parentesco: '',
 };
+
+/**
+ * Mensaje que el backend adjunta a un error de negocio (`ErrorResponse.mensaje`), si viene.
+ *
+ * El 409 por CURP duplicada explica el motivo —la CURP ya existe en la organización— y
+ * reemplazarlo por un texto genérico dejaría a la recepcionista sin saber qué corregir antes de
+ * reintentar. Mismo criterio que en `MedicosPage`.
+ */
+function mensajeDelBackend(error: unknown, respaldo: string): string {
+  const posible = error as { response?: { data?: { mensaje?: string } } } | null | undefined;
+  const mensaje = posible?.response?.data?.mensaje;
+  return typeof mensaje === 'string' && mensaje.trim() !== '' ? mensaje : respaldo;
+}
 
 function calcularEdad(fechaNacimiento?: string | null): string {
   if (!fechaNacimiento) return 'Sin registrar';
@@ -87,7 +105,7 @@ export function PacientesPage() {
    */
   const rutaColeccion = organizacionId ? `/organizaciones/${organizacionId}/pacientes` : null;
 
-  const [patients, setPatients] = useState<PacienteConFicha[]>([]);
+  const [patients, setPatients] = useState<Paciente[]>([]);
   // Sin organización en la sesión la pantalla nace en el estado de error visible: no hay petición
   // que hacer ni se muestra un directorio vacío que afirmaría «no hay pacientes».
   const [isLoading, setIsLoading] = useState(() => rutaColeccion !== null);
@@ -103,13 +121,16 @@ export function PacientesPage() {
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
   const [reactivarError, setReactivarError] = useState<string | null>(null);
   const [bajaError, setBajaError] = useState<string | null>(null);
+  // Motivo visible del último rechazo del alta o de la edición: el 409 por CURP duplicada trae el
+  // suyo y se muestra tal cual, sin cambiarlo por un texto genérico.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const loadData = (ruta: string) => {
     // Se piden también los inactivos: la baja es lógica y el historial se conserva, así que ocultarlos
     // dejaría al usuario sin otra salida que volver a dar de alta al paciente, que es cómo se
     // duplicaba. El servicio los devuelve solo si se lo piden; sin el parámetro, el contrato no cambia.
     return api
-      .get<PacienteConFicha[]>(`${ruta}?incluirInactivos=true`)
+      .get<Paciente[]>(`${ruta}?incluirInactivos=true`)
       .then((res) => {
         setPatients(res.data);
         setLoadError(null);
@@ -141,11 +162,17 @@ export function PacientesPage() {
   const openCreateModal = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setSaveError(null);
     setIsModalOpen(true);
   };
 
-  const openEditModal = (patient: PacienteConFicha) => {
+  /**
+   * La ficha se lee de los campos planos del paciente (S6): es la misma forma en la que el backend
+   * la devuelve, así que no hay nada que desenvolver ni campos que se pierdan al editar.
+   */
+  const openEditModal = (patient: Paciente) => {
     setEditingId(patient.id);
+    setSaveError(null);
     setForm({
       nombre: patient.nombre,
       telefono: patient.telefono || '',
@@ -153,11 +180,12 @@ export function PacientesPage() {
       sexo: patient.sexo || '',
       email: patient.email || '',
       notas: patient.notas || '',
-      curp: patient.ficha?.curp || '',
-      ocupacion: patient.ficha?.ocupacion || '',
-      domicilio_completo: patient.ficha?.domicilio_completo || '',
-      nombre_responsable: patient.ficha?.nombre_responsable || '',
-      telefono_responsable: patient.ficha?.telefono_responsable || '',
+      curp: patient.curp || '',
+      ocupacion: patient.ocupacion || '',
+      domicilio: patient.domicilio || '',
+      nombreResponsable: patient.nombreResponsable || '',
+      telefonoResponsable: patient.telefonoResponsable || '',
+      parentesco: patient.parentesco || '',
     });
     setIsModalOpen(true);
   };
@@ -166,6 +194,9 @@ export function PacientesPage() {
     e.preventDefault();
     if (!form.nombre.trim()) return;
 
+    // S6/S8: los seis campos de la ficha van planos, al mismo nivel que el resto y en camelCase.
+    // El objeto anidado `ficha` de antes no lo declaraba el backend y Spring lo descartaba en
+    // silencio: la recepcionista escribía los datos y la tabla quedaba vacía sin ningún error.
     const payload = {
       nombre: form.nombre,
       telefono: form.telefono || null,
@@ -173,20 +204,20 @@ export function PacientesPage() {
       sexo: form.sexo || null,
       email: form.email || null,
       notas: form.notas || null,
-      ficha: {
-        curp: form.curp || null,
-        ocupacion: form.ocupacion || null,
-        domicilio_completo: form.domicilio_completo || null,
-        nombre_responsable: form.nombre_responsable || null,
-        telefono_responsable: form.telefono_responsable || null,
-      },
+      curp: form.curp || null,
+      ocupacion: form.ocupacion || null,
+      domicilio: form.domicilio || null,
+      nombreResponsable: form.nombreResponsable || null,
+      telefonoResponsable: form.telefonoResponsable || null,
+      parentesco: form.parentesco || null,
     };
 
+    setSaveError(null);
     try {
       setIsSubmitting(true);
       if (editingId) {
         // El ítem es plano: la organización dueña no se envía ni se puede cambiar.
-        const res = await api.put<PacienteConFicha>(`/pacientes/${editingId}`, payload);
+        const res = await api.put<Paciente>(`/pacientes/${editingId}`, payload);
         setPatients((prev) => prev.map((p) => (p.id === editingId ? res.data : p)));
         setAlertNotice('Ficha del paciente actualizada correctamente.');
       } else {
@@ -194,14 +225,18 @@ export function PacientesPage() {
           // Sin organización de la sesión no hay colección donde registrar y no se inventa una.
           return;
         }
-        const res = await api.post<PacienteConFicha>(rutaColeccion, payload);
+        const res = await api.post<Paciente>(rutaColeccion, payload);
         setPatients((prev) => [res.data, ...prev]);
         setAlertNotice('Paciente registrado correctamente.');
       }
       setIsModalOpen(false);
       setTimeout(() => setAlertNotice(null), 3500);
     } catch (err) {
-      console.error('Error al guardar paciente:', err);
+      // El rechazo por CURP duplicada llega como 409 con el motivo en `mensaje`: se muestra tal
+      // cual. El modal se queda abierto y la fila no se toca, para que el usuario corrija la CURP
+      // sin volver a escribir la ficha.
+      console.error('Error al guardar paciente:', resumenDeErrorHttp(err));
+      setSaveError(mensajeDelBackend(err, MENSAJE_ERROR_GUARDAR));
     } finally {
       setIsSubmitting(false);
     }
@@ -213,7 +248,7 @@ export function PacientesPage() {
    * El listado incluye a los inactivos gracias al parámetro `incluirInactivos`, así que la fila
    * sigue visible después de recargar y la reactivación no obliga a un alta nueva.
    */
-  const handleReactivar = async (paciente: PacienteConFicha) => {
+  const handleReactivar = async (paciente: Paciente) => {
     setReactivarError(null);
     try {
       await api.post(`/pacientes/${paciente.id}/activar`);
@@ -234,7 +269,7 @@ export function PacientesPage() {
    * para reactivarla. No se pide confirmación: la baja es reversible en un clic y el historial se
    * conserva, que es justamente el motivo de que sea lógica.
    */
-  const handleDesactivar = async (paciente: PacienteConFicha) => {
+  const handleDesactivar = async (paciente: Paciente) => {
     setBajaError(null);
     try {
       await api.delete(`/pacientes/${paciente.id}`);
@@ -249,6 +284,11 @@ export function PacientesPage() {
     }
   };
 
+  /**
+   * Búsqueda del directorio: nombre, teléfono, CURP y ocupación. La CURP se compara en minúsculas
+   * por los dos lados, así que da igual escribir la forma canónica o como la dictaron al
+   * mostrador; el teléfono se compara tal cual porque solo tiene dígitos y guiones.
+   */
   const filteredPatients = useMemo(() => {
     const term = search.toLowerCase();
     return patients.filter(
@@ -256,7 +296,8 @@ export function PacientesPage() {
         !term ||
         p.nombre.toLowerCase().includes(term) ||
         (p.telefono || '').includes(term) ||
-        (p.ficha?.curp || '').toLowerCase().includes(term)
+        (p.curp || '').toLowerCase().includes(term) ||
+        (p.ocupacion || '').toLowerCase().includes(term)
     );
   }, [patients, search]);
 
@@ -394,7 +435,7 @@ export function PacientesPage() {
       <Card>
         <CardContent className="p-4">
           <Input
-            placeholder="Buscar por nombre, teléfono o CURP..."
+            placeholder="Buscar por nombre, teléfono, CURP u ocupación..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             leftIcon={<Search className="w-4 h-4" />}
@@ -492,14 +533,21 @@ export function PacientesPage() {
 
                   <TableCell>
                     <span className="text-xs text-[#41484D] font-mono">
-                      {p.ficha?.curp || '—'}
+                      {p.curp || '—'}
                     </span>
                   </TableCell>
 
                   <TableCell>
                     <span className="text-xs text-[#41484D] block">
-                      {p.ficha?.nombre_responsable || '—'}
+                      {p.nombreResponsable || '—'}
                     </span>
+                    {/* El parentesco se muestra junto al responsable: «quién es» y «qué es del
+                        paciente» son el mismo dato para quien atiende el mostrador. */}
+                    {p.parentesco && (
+                      <span className="text-[11px] text-[#64748B] block mt-0.5">
+                        {p.parentesco}
+                      </span>
+                    )}
                   </TableCell>
 
                   <TableCell>
@@ -660,24 +708,36 @@ export function PacientesPage() {
               />
               <Input
                 label="Domicilio Completo"
-                value={form.domicilio_completo}
-                onChange={(e) => setForm((f) => ({ ...f, domicilio_completo: e.target.value }))}
+                value={form.domicilio}
+                onChange={(e) => setForm((f) => ({ ...f, domicilio: e.target.value }))}
                 leftIcon={<Home className="w-4 h-4" />}
                 className="sm:col-span-2"
               />
               <Input
                 label="Nombre del Responsable"
-                value={form.nombre_responsable}
-                onChange={(e) => setForm((f) => ({ ...f, nombre_responsable: e.target.value }))}
+                value={form.nombreResponsable}
+                onChange={(e) => setForm((f) => ({ ...f, nombreResponsable: e.target.value }))}
                 helperText="Para menores de edad o urgencias"
               />
               <Input
+                label="Parentesco"
+                value={form.parentesco}
+                onChange={(e) => setForm((f) => ({ ...f, parentesco: e.target.value }))}
+                helperText="Relación con el paciente: madre, tutor, hermano..."
+              />
+              <Input
                 label="Teléfono del Responsable"
-                value={form.telefono_responsable}
-                onChange={(e) => setForm((f) => ({ ...f, telefono_responsable: e.target.value }))}
+                value={form.telefonoResponsable}
+                onChange={(e) => setForm((f) => ({ ...f, telefonoResponsable: e.target.value }))}
               />
             </div>
           </div>
+
+          {saveError && (
+            <Alert variant="error" title="No se pudo guardar la ficha del paciente">
+              {saveError}
+            </Alert>
+          )}
 
           <div className="flex justify-end gap-2 pt-4 border-t border-[#F1F5F9]">
             <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>

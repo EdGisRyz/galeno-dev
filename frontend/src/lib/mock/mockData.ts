@@ -6,7 +6,7 @@ import type { HorarioMedico, Medico } from '@/features/medicos/medicos.types';
 import type { Organizacion } from '@/features/organizaciones/organizaciones.types';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import type { Pago } from '@/features/pagos/pagos.types';
-import type { PatientIdentification, Prescription, SoapNote } from '@/types/futuro.types';
+import type { Prescription, SoapNote } from '@/types/futuro.types';
 
 export const mockOrganization: Organizacion = {
   id: 'org-001',
@@ -144,7 +144,14 @@ export const mockMedicoConsultorios: { medicoId: string; consultorioId: string }
   { medicoId: 'med-002', consultorioId: 'room-102' },
 ];
 
-export const mockPatients: (Paciente & { ficha?: PatientIdentification })[] = [
+/**
+ * Directorio simulado de pacientes.
+ *
+ * La ficha va en **campos planos** (S6), la misma forma que devuelve `PacienteResponse`: el
+ * parentesco es su propio campo y no va embebido en el nombre del responsable, que es como estaba
+ * cuando el backend todavía no lo declaraba.
+ */
+export const mockPatients: Paciente[] = [
   {
     id: 'pac-001',
     organizacionId: 'org-001',
@@ -156,15 +163,12 @@ export const mockPatients: (Paciente & { ficha?: PatientIdentification })[] = [
     notas: 'Alergia conocida a la Penicilina.',
     activo: true,
     createdAt: new Date('2026-02-10').toISOString(),
-    ficha: {
-      id: 'ficha-001',
-      paciente_id: 'pac-001',
-      curp: 'SAGC880514MOCMRL09',
-      ocupacion: 'Docente de Secundaria',
-      domicilio_completo: 'Calle Benito Juárez 402, Centro, Oaxaca, Oax.',
-      nombre_responsable: 'Carlos Sánchez (Hermano)',
-      telefono_responsable: '951-987-6543',
-    },
+    curp: 'SAGC880514MOCMRL09',
+    ocupacion: 'Docente de Secundaria',
+    domicilio: 'Calle Benito Juárez 402, Centro, Oaxaca, Oax.',
+    nombreResponsable: 'Carlos Sánchez',
+    telefonoResponsable: '951-987-6543',
+    parentesco: 'Hermano',
   },
   {
     id: 'pac-002',
@@ -177,15 +181,12 @@ export const mockPatients: (Paciente & { ficha?: PatientIdentification })[] = [
     notas: 'Hipertensión arterial controlada.',
     activo: true,
     createdAt: new Date('2026-02-15').toISOString(),
-    ficha: {
-      id: 'ficha-002',
-      paciente_id: 'pac-002',
-      curp: 'PEHJ751122HOCRN03',
-      ocupacion: 'Contador Público',
-      domicilio_completo: 'Av. Las Palmas 120, Col. Reforma, Oaxaca, Oax.',
-      nombre_responsable: 'Ana Laura Gómez (Esposa)',
-      telefono_responsable: '951-654-3210',
-    },
+    curp: 'PEHJ751122HOCRN03',
+    ocupacion: 'Contador Público',
+    domicilio: 'Av. Las Palmas 120, Col. Reforma, Oaxaca, Oax.',
+    nombreResponsable: 'Ana Laura Gómez',
+    telefonoResponsable: '951-654-3210',
+    parentesco: 'Esposa',
   },
   {
     id: 'pac-003',
@@ -198,15 +199,12 @@ export const mockPatients: (Paciente & { ficha?: PatientIdentification })[] = [
     notas: 'Paciente pediátrico en esquema de vacunación.',
     activo: true,
     createdAt: new Date('2026-03-01').toISOString(),
-    ficha: {
-      id: 'ficha-003',
-      paciente_id: 'pac-003',
-      curp: 'LODM200308HOCPN01',
-      ocupacion: 'Estudiante preescolar',
-      domicilio_completo: 'Privada Los Pinos 14, Santa Rosa Panzacola, Oaxaca.',
-      nombre_responsable: 'Lorena Díaz Ruiz (Madre)',
-      telefono_responsable: '951-456-7890',
-    },
+    curp: 'LODM200308HOCPN01',
+    ocupacion: 'Estudiante preescolar',
+    domicilio: 'Privada Los Pinos 14, Santa Rosa Panzacola, Oaxaca.',
+    nombreResponsable: 'Lorena Díaz Ruiz',
+    telefonoResponsable: '951-456-7890',
+    parentesco: 'Madre',
   },
 ];
 
