@@ -163,7 +163,10 @@ describe('App · recepción entra a las secciones clínicas (S5)', () => {
 
     // Recepción ve exactamente el mismo menú que un médico: ni más ni menos módulos.
     expect(barraDeRecepcion).toEqual(barraDelMedico);
-    expect(barraDeRecepcion).toContain('Agenda y Citas');
+    // Agenda, expediente y cobros se anuncian pero no navegan (no tienen backend todavía), así
+    // que el nombre está en la barra sin ser un enlace: se comprueba la mitad que importa acá.
+    expect(screen.getByText('Agenda y Citas')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Agenda y Citas' })).toBeNull();
     expect(barraDeRecepcion).not.toContain('Administración');
     expect(barraDeRecepcion).not.toContain('Usuarios');
     // El badge del perfil identifica el rol de la sesión, no un valor por defecto.
