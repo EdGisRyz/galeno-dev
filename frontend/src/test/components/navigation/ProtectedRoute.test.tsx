@@ -13,6 +13,9 @@ import { USUARIO } from '../../helpers/jwt';
  *
  * T7 agrega `allowedRoles` (ADR-013): un rol fuera de la lista no llega a los hijos y vuelve al
  * login con `reason=sin_acceso`.
+ *
+ * S5 suma `RECEPCIONISTA` a las listas de las secciones clínicas y lo deja fuera de las de
+ * administración: el motivo del rechazo sigue siendo el mismo que el de un `PACIENTE`.
  */
 
 function renderizarRutaProtegida() {
@@ -100,7 +103,8 @@ function autenticarComo(role: UserRole) {
 }
 
 describe('ProtectedRoute · roles permitidos (ADR-013)', () => {
-  const ROLES_DE_AGENDA: UserRole[] = ['ADMIN', 'MEDICO'];
+  const ROLES_DE_AGENDA: UserRole[] = ['ADMIN', 'MEDICO', 'RECEPCIONISTA'];
+  const ROLES_DE_ADMINISTRACION: UserRole[] = ['ADMIN'];
 
   it('deja pasar a un ADMIN', () => {
     autenticarComo('ADMIN');
@@ -116,6 +120,23 @@ describe('ProtectedRoute · roles permitidos (ADR-013)', () => {
     renderizarRutaConRoles(ROLES_DE_AGENDA);
 
     expect(screen.getByText('agenda-clinica')).toBeInTheDocument();
+  });
+
+  it('deja pasar a un RECEPCIONISTA', () => {
+    autenticarComo('RECEPCIONISTA');
+
+    renderizarRutaConRoles(ROLES_DE_AGENDA);
+
+    expect(screen.getByText('agenda-clinica')).toBeInTheDocument();
+  });
+
+  it('no deja entrar a un RECEPCIONISTA a una ruta solo de ADMIN: mismo motivo de acceso', () => {
+    autenticarComo('RECEPCIONISTA');
+
+    renderizarRutaConRoles(ROLES_DE_ADMINISTRACION);
+
+    expect(screen.queryByText('agenda-clinica')).not.toBeInTheDocument();
+    expect(screen.getByText('pantalla-de-login?reason=sin_acceso')).toBeInTheDocument();
   });
 
   it('no renderiza los hijos para un PACIENTE y lo manda al login con reason=sin_acceso', () => {

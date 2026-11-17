@@ -94,7 +94,8 @@ export function MainLayout() {
 
   // `adminOnly` solo era una etiqueta hasta ahora: no filtraba nada y un MEDICO veía
   // Administración en el menú aunque la ruta lo rechace. Se filtra aquí para que el menú
-  // coincida con lo que el rol realmente puede abrir.
+  // coincida con lo que el rol realmente puede abrir: `RECEPCIONISTA` ve lo mismo que un `MEDICO`
+  // —los módulos clínicos— y ninguna de las dos secciones de administración.
   const visibleNavItems = navItems.filter((item) => !item.adminOnly || user?.role === 'ADMIN');
 
   return (

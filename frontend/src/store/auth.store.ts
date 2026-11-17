@@ -127,6 +127,9 @@ function resolverSesion(claims: ClaimsToken | null): SesionResuelta {
 
   const { id, email, role, tenantId, medicoId, exp } = claims;
 
+  // `role` se toma del claim sin lista blanca: el contrato de roles lo valida el backend al
+  // verificar el token, y aquí solo se comprueba que venga. Un rol que las listas de rutas no
+  // conozcan no entra a ninguna pantalla (ProtectedRoute lo devuelve con `reason=sin_acceso`).
   if (!id || !email || !role) return { ok: false, motivo: 'identidad_incompleta' };
   if (!tenantId) return { ok: false, motivo: 'sin_tenant' };
   if (typeof exp !== 'number' || !Number.isFinite(exp)) {
