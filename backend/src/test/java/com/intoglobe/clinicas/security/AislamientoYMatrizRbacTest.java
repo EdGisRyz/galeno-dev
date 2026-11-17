@@ -82,6 +82,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       restantes {@code 403} ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
  *   <li><strong>PACIENTE</strong>: las treinta y cinco operaciones {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
+ *   <li><strong>RECEPCIONISTA</strong>: las trece celdas que le concede la matriz —las siete
+ *       lecturas de consultorios, médicos, horarios y consultorios asignados, las dos lecturas de
+ *       pacientes y las cuatro escrituras de pacientes (S3)— ejercidas de extremo a extremo con su
+ *       código de éxito ({@link #recepcionConsultaConsultoriosDeSuOrganizacion()} y las demás
+ *       pruebas {@code recepcion*}), y las veintidós operaciones restantes {@code 403}
+ *       ({@link #celdaDenegadaResponde403ConElContratoDeError} y
+ *       {@link #familiaDenegadaDeRecepcionResponde403}).</li>
  *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las operaciones por id de
  *       consultorio y médico, más las cuentas de usuario → {@code 404} sin revelar el recurso ni su
  *       organización ({@link #recursoDeOtroTenantResponde404SinRevelarlo()}).</li>
@@ -109,6 +116,7 @@ class AislamientoYMatrizRbacTest {
     private static final String ROL_ADMIN = "ADMIN";
     private static final String ROL_MEDICO = "MEDICO";
     private static final String ROL_PACIENTE = "PACIENTE";
+    private static final String ROL_RECEPCIONISTA = "RECEPCIONISTA";
 
     private static final String CUERPO_ORGANIZACION_NUEVA = """
             {"nombre":"Clínica Nueva","plan":"SOLO"}
@@ -175,6 +183,7 @@ class AislamientoYMatrizRbacTest {
     private String tokenAdminB;
     private String tokenMedicoA;
     private String tokenPacienteA;
+    private String tokenRecepcionA;
 
     /**
      * Publica la clave pública de prueba: los tokens de esta clase los firma
@@ -223,6 +232,7 @@ class AislamientoYMatrizRbacTest {
         tokenAdminB = ClaveRsaDePrueba.tokenPara(ROL_ADMIN, organizacionB.getId());
         tokenMedicoA = ClaveRsaDePrueba.tokenPara(ROL_MEDICO, organizacionA.getId());
         tokenPacienteA = ClaveRsaDePrueba.tokenPara(ROL_PACIENTE, organizacionA.getId());
+        tokenRecepcionA = ClaveRsaDePrueba.tokenPara(ROL_RECEPCIONISTA, organizacionA.getId());
     }
 
     // ------------------------------------------------------------------
@@ -731,6 +741,294 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(jsonPath("$.nombre").value("Paciente Alfa"));
     }
 
+    // ------------------------------------------------------------------
+    // RECEPCIONISTA: las trece celdas permitidas de S3
+    // ------------------------------------------------------------------
+
+    /**
+     * Crea un bloque de horario del médico sembrado con el token de administración, para que
+     * recepción tenga algo que consultar: la escritura de la agenda no está entre sus celdas.
+     *
+     * @return identificador del bloque creado
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    private String sembrarHorarioDelMedicoA() throws Exception {
+        return idDe(ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/horarios")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_HORARIO_NUEVO), tokenAdminA)
+                .andExpect(status().isCreated())
+                .andReturn());
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta los consultorios de su organización")
+    void recepcionConsultaConsultoriosDeSuOrganizacion() throws Exception {
+        ejecutar(get("/api/v1/organizaciones/" + organizacionA.getId() + "/consultorios"), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id",
+                        org.hamcrest.Matchers.hasItem(consultorioA.getId().toString())))
+                .andExpect(jsonPath("$[*].id",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                consultorioB.getId().toString()))));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta un consultorio de su organización")
+    void recepcionConsultaUnConsultorio() throws Exception {
+        ejecutar(get("/api/v1/consultorios/" + consultorioA.getId()), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(consultorioA.getId().toString()))
+                .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta los médicos de su organización")
+    void recepcionConsultaMedicosDeSuOrganizacion() throws Exception {
+        ejecutar(get("/api/v1/organizaciones/" + organizacionA.getId() + "/medicos"), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id",
+                        org.hamcrest.Matchers.hasItem(medicoA.getId().toString())))
+                .andExpect(jsonPath("$[*].id",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                medicoB.getId().toString()))));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta un médico de su organización")
+    void recepcionConsultaUnMedico() throws Exception {
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId()), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(medicoA.getId().toString()))
+                .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta los horarios de un médico para responder dónde y cuándo atiende")
+    void recepcionConsultaHorariosDeUnMedico() throws Exception {
+        String horarioId = sembrarHorarioDelMedicoA();
+
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId() + "/horarios"), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers.hasItem(horarioId)));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta un bloque de horario")
+    void recepcionConsultaUnBloqueDeHorario() throws Exception {
+        String horarioId = sembrarHorarioDelMedicoA();
+
+        ejecutar(get("/api/v1/horarios/" + horarioId), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(horarioId))
+                .andExpect(jsonPath("$.medicoId").value(medicoA.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta los consultorios asignados a un médico")
+    void recepcionConsultaConsultoriosAsignadosAUnMedico() throws Exception {
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId() + "/consultorios"), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(consultorioA.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta los pacientes de su organización")
+    void recepcionConsultaPacientesDeSuOrganizacion() throws Exception {
+        ejecutar(get("/api/v1/organizaciones/" + organizacionA.getId() + "/pacientes"), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id",
+                        org.hamcrest.Matchers.hasItem(pacienteA.getId().toString())))
+                .andExpect(jsonPath("$[*].id",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                pacienteB.getId().toString()))));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA consulta un paciente de su organización")
+    void recepcionConsultaUnPaciente() throws Exception {
+        ejecutar(get("/api/v1/pacientes/" + pacienteA.getId()), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(pacienteA.getId().toString()))
+                .andExpect(jsonPath("$.nombre").value("Paciente Alfa"))
+                .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA registra un paciente en su organización")
+    void recepcionRegistraPaciente() throws Exception {
+        String rutaPacientesA = "/api/v1/organizaciones/" + organizacionA.getId() + "/pacientes";
+
+        String creado = idDe(ejecutar(post(rutaPacientesA)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_PACIENTE_NUEVO), tokenRecepcionA)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()))
+                .andExpect(jsonPath("$.nombre").value("Paciente Nuevo"))
+                .andExpect(jsonPath("$.activo").value(true))
+                .andReturn());
+
+        assertThat(pacienteRepository.listarActivosPorOrganizacion(organizacionA.getId()))
+                .as("el alta permitida debe persistir el paciente en el tenant del token")
+                .extracting(Paciente::getId)
+                .containsExactlyInAnyOrder(pacienteA.getId(), UUID.fromString(creado));
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA actualiza un paciente de su organización")
+    void recepcionActualizaPaciente() throws Exception {
+        ejecutar(put("/api/v1/pacientes/" + pacienteA.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_PACIENTE_ACTUALIZADO), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nombre").value("Paciente Nuevo Renombrado"))
+                .andExpect(jsonPath("$.activo").value(true));
+
+        Paciente actualizado = pacienteRepository.findById(pacienteA.getId()).orElseThrow();
+        assertThat(actualizado.getNombre())
+                .as("la actualización permitida debe persistirse")
+                .isEqualTo("Paciente Nuevo Renombrado");
+        assertThat(actualizado.getTelefono()).isEqualTo("+52 55 3333 5555");
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA da de baja un paciente de su organización")
+    void recepcionDaDeBajaPaciente() throws Exception {
+        ejecutar(delete("/api/v1/pacientes/" + pacienteA.getId()), tokenRecepcionA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        assertThat(pacienteRepository.findById(pacienteA.getId()).orElseThrow().isActivo())
+                .as("la baja es lógica: el paciente se conserva inactivo")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("RECEPCIONISTA reactiva un paciente de su organización")
+    void recepcionReactivaPaciente() throws Exception {
+        ejecutar(delete("/api/v1/pacientes/" + pacienteA.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+        assertThat(pacienteRepository.findById(pacienteA.getId()).orElseThrow().isActivo())
+                .as("el paciente debe quedar dado de baja antes de reactivarlo")
+                .isFalse();
+
+        ejecutar(post("/api/v1/pacientes/" + pacienteA.getId() + "/activar"), tokenRecepcionA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(post("/api/v1/pacientes/" + pacienteA.getId() + "/activar"), tokenRecepcionA)
+                .andExpect(status().isNoContent());
+
+        assertThat(pacienteRepository.findById(pacienteA.getId()).orElseThrow().isActivo())
+                .as("la reactivación permitida devuelve el paciente a activo")
+                .isTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // RECEPCIONISTA: las familias que la matriz le deniega
+    // ------------------------------------------------------------------
+
+    /**
+     * Familias de operaciones que S3 deniega a {@code RECEPCIONISTA}. Cada caso ejerce todas las
+     * operaciones de la familia con el tenant correcto en el path, así que lo que se ejerce es el
+     * rol y no el aislamiento, y afirma además que un rechazo no deja rastro en la base.
+     *
+     * <p>Las escrituras de horarios, consultorios, médicos y asignaciones se deniegan enteras: la
+     * agenda del médico es suya y de la administración, y recepción solo la consulta.</p>
+     *
+     * @param familia nombre de la familia que se ejerce
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @ParameterizedTest(name = "recepción · la familia {0} responde 403 con el contrato de error")
+    @ValueSource(strings = {"organización", "consultorios", "médicos", "asignaciones de consultorios",
+            "horarios en escritura", "cuentas del personal"})
+    void familiaDenegadaDeRecepcionResponde403(String familia) throws Exception {
+        String organizacion = organizacionA.getId().toString();
+        String rutaOrganizacion = "/api/v1/organizaciones/" + organizacion;
+        String rutaHorarios = "/api/v1/medicos/" + medicoA.getId() + "/horarios";
+
+        switch (familia) {
+            case "organización" -> {
+                afirmar403(ejecutar(get("/api/v1/organizaciones"), tokenRecepcionA),
+                        "/api/v1/organizaciones");
+                afirmar403(ejecutar(get(rutaOrganizacion), tokenRecepcionA), rutaOrganizacion);
+                afirmar403(ejecutar(put(rutaOrganizacion)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_ORGANIZACION_ACTUALIZADA), tokenRecepcionA), rutaOrganizacion);
+                afirmar403(ejecutar(delete(rutaOrganizacion), tokenRecepcionA), rutaOrganizacion);
+            }
+            case "consultorios" -> {
+                afirmar403(ejecutar(post(rutaOrganizacion + "/consultorios")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_CONSULTORIO_NUEVO), tokenRecepcionA),
+                        rutaOrganizacion + "/consultorios");
+                afirmar403(ejecutar(put("/api/v1/consultorios/" + consultorioA.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_CONSULTORIO_ACTUALIZADO), tokenRecepcionA),
+                        "/api/v1/consultorios/" + consultorioA.getId());
+                afirmar403(ejecutar(delete("/api/v1/consultorios/" + consultorioA.getId()), tokenRecepcionA),
+                        "/api/v1/consultorios/" + consultorioA.getId());
+            }
+            case "médicos" -> {
+                afirmar403(ejecutar(post(rutaOrganizacion + "/medicos")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(cuerpoMedico(consultorioA.getId().toString(), "Dr. Nuevo")), tokenRecepcionA),
+                        rutaOrganizacion + "/medicos");
+                afirmar403(ejecutar(put("/api/v1/medicos/" + medicoA.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(cuerpoMedico(consultorioA.getId().toString(), "Dra. Intrusa")), tokenRecepcionA),
+                        "/api/v1/medicos/" + medicoA.getId());
+                afirmar403(ejecutar(delete("/api/v1/medicos/" + medicoA.getId()), tokenRecepcionA),
+                        "/api/v1/medicos/" + medicoA.getId());
+            }
+            case "asignaciones de consultorios" -> {
+                afirmar403(ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/consultorios")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(cuerpoAsignacion(consultorioA.getId())), tokenRecepcionA),
+                        "/api/v1/medicos/" + medicoA.getId() + "/consultorios");
+                afirmar403(ejecutar(delete("/api/v1/medicos/" + medicoA.getId() + "/consultorios/"
+                        + consultorioA.getId()), tokenRecepcionA),
+                        "/api/v1/medicos/" + medicoA.getId() + "/consultorios/" + consultorioA.getId());
+            }
+            case "horarios en escritura" -> {
+                UUID bloqueExistente = UUID.randomUUID();
+                afirmar403(ejecutar(post(rutaHorarios)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_HORARIO_NUEVO), tokenRecepcionA), rutaHorarios);
+                afirmar403(ejecutar(put("/api/v1/horarios/" + bloqueExistente)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_HORARIO_ACTUALIZADO), tokenRecepcionA),
+                        "/api/v1/horarios/" + bloqueExistente);
+                afirmar403(ejecutar(delete("/api/v1/horarios/" + bloqueExistente), tokenRecepcionA),
+                        "/api/v1/horarios/" + bloqueExistente);
+            }
+            case "cuentas del personal" -> {
+                String rutaUsuarios = rutaOrganizacion + "/usuarios";
+                UUID cuenta = UUID.randomUUID();
+                afirmar403(ejecutar(post(rutaUsuarios)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_USUARIO_NUEVO), tokenRecepcionA), rutaUsuarios);
+                afirmar403(ejecutar(get(rutaUsuarios), tokenRecepcionA), rutaUsuarios);
+                afirmar403(ejecutar(get("/api/v1/usuarios/" + cuenta), tokenRecepcionA),
+                        "/api/v1/usuarios/" + cuenta);
+                afirmar403(ejecutar(put("/api/v1/usuarios/" + cuenta)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CUERPO_USUARIO_ACTUALIZADO), tokenRecepcionA),
+                        "/api/v1/usuarios/" + cuenta);
+                afirmar403(ejecutar(delete("/api/v1/usuarios/" + cuenta), tokenRecepcionA),
+                        "/api/v1/usuarios/" + cuenta);
+                afirmar403(ejecutar(post("/api/v1/usuarios/" + cuenta + "/activar"), tokenRecepcionA),
+                        "/api/v1/usuarios/" + cuenta + "/activar");
+            }
+            default -> throw new IllegalArgumentException("Familia sin sonda en estas pruebas: " + familia);
+        }
+
+        afirmarQueNadaCambio("familia " + familia);
+        assertThat(usuarioRepository.listarPorOrganizacion(organizacionA.getId()))
+                .as("ninguna operación de la familia %s puede crear cuentas en el tenant del token",
+                        familia)
+                .isEmpty();
+    }
+
     @Test
     @DisplayName("Un MEDICO no puede mutar aunque sea de su tenant: la escritura queda intacta")
     void medicoNoPuedeMutarYElRecursoQuedaIntacto() throws Exception {
@@ -755,30 +1053,64 @@ class AislamientoYMatrizRbacTest {
     // ------------------------------------------------------------------
 
     /**
-     * Celdas {@code 403} de la matriz: las treinta y cinco operaciones para {@code PACIENTE} y las
-     * veintitrés que {@code MEDICO} no tiene permitidas, todas con el tenant correcto en el path
-     * para que lo que se ejerza sea el rol y no el aislamiento. Las doce celdas que la matriz
-     * concede a {@code MEDICO} no aparecen aquí: cuatro se ejercen en
-     * {@link #medicoLeeSuPropioTenant()}, dos en {@link #medicoLeePacientesDeSuPropioTenant()},
-     * cinco en {@link #medicoOperaSuPropiaAgendaDeHorarios()} y una en
-     * {@link #medicoLeeLosConsultoriosDeSuPropioMedico()}.
+     * Celdas {@code 403} de la matriz: las treinta y cinco operaciones para {@code PACIENTE}, las
+     * veintitrés que {@code MEDICO} no tiene permitidas y las veintidós que {@code RECEPCIONISTA}
+     * no tiene, todas con el tenant correcto en el path para que lo que se ejerza sea el rol y no
+     * el aislamiento. Las doce celdas que la matriz concede a {@code MEDICO} no aparecen aquí:
+     * cuatro se ejercen en {@link #medicoLeeSuPropioTenant()}, dos en
+     * {@link #medicoLeePacientesDeSuPropioTenant()}, cinco en
+     * {@link #medicoOperaSuPropiaAgendaDeHorarios()} y una en
+     * {@link #medicoLeeLosConsultoriosDeSuPropioMedico()}. Las trece celdas de
+     * {@code RECEPCIONISTA} tampoco: se ejercen en las pruebas {@code recepcion*}.
      *
      * @return rol, descripción de la operación, método, ruta y cuerpo de cada celda denegada
      */
     Stream<Arguments> celdasDenegadas() {
-        return Stream.concat(
-                celdasDenegadasDe(ROL_PACIENTE),
-                celdasDenegadasDe(ROL_MEDICO)
-                        .filter(celda -> !esCeldaPermitidaParaMedico((String) celda.get()[1])));
+        return Stream.of(ROL_PACIENTE, ROL_MEDICO, ROL_RECEPCIONISTA)
+                .flatMap(this::celdasDenegadasDe)
+                .filter(celda -> !esCeldaPermitida((String) celda.get()[0], (String) celda.get()[1]));
     }
 
     @ParameterizedTest(name = "{0} · {1} responde 403")
     @MethodSource("celdasDenegadas")
     void celdaDenegadaResponde403ConElContratoDeError(
             String rol, String descripcion, String metodo, String ruta, String cuerpo) throws Exception {
-        String token = ROL_PACIENTE.equals(rol) ? tokenPacienteA : tokenMedicoA;
+        afirmar403(ejecutar(peticion(metodo, ruta, cuerpo), tokenDe(rol)), ruta);
+    }
 
-        afirmar403(ejecutar(peticion(metodo, ruta, cuerpo), token), ruta);
+    /**
+     * Indica si la matriz concede la operación al rol. Las celdas permitidas de {@code MEDICO} y
+     * {@code RECEPCIONISTA} no se ejercen aquí porque tienen sus propias pruebas de éxito.
+     *
+     * @param rol         rol del token
+     * @param descripcion descripción de la operación
+     * @return {@code true} si la celda está permitida para ese rol
+     */
+    private static boolean esCeldaPermitida(String rol, String descripcion) {
+        if (ROL_MEDICO.equals(rol)) {
+            return esCeldaPermitidaParaMedico(descripcion);
+        }
+        if (ROL_RECEPCIONISTA.equals(rol)) {
+            return esCeldaPermitidaParaRecepcion(descripcion);
+        }
+        return false;
+    }
+
+    /**
+     * Las trece celdas que S3 concede a {@code RECEPCIONISTA}: las siete lecturas de consultorios,
+     * médicos, horarios y consultorios asignados, las dos lecturas de pacientes y las cuatro
+     * escrituras de pacientes. La escritura de la agenda y de los catálogos no está entre ellas.
+     *
+     * @param descripcion descripción de la operación
+     * @return {@code true} si la celda está permitida para {@code RECEPCIONISTA}
+     */
+    private static boolean esCeldaPermitidaParaRecepcion(String descripcion) {
+        return List.of("GET consultorios anidados", "GET consultorio por id",
+                "GET médicos anidados", "GET médico por id",
+                "GET horarios anidados", "GET horario por id", "GET consultorios del médico",
+                "GET pacientes anidados", "GET paciente por id",
+                "POST paciente", "PUT paciente", "DELETE paciente", "POST activar paciente")
+                .contains(descripcion);
     }
 
     private Stream<Arguments> celdasDenegadasDe(String rol) {
@@ -1158,6 +1490,7 @@ class AislamientoYMatrizRbacTest {
             case ROL_ADMIN -> tokenAdminA;
             case ROL_MEDICO -> tokenMedicoA;
             case ROL_PACIENTE -> tokenPacienteA;
+            case ROL_RECEPCIONISTA -> tokenRecepcionA;
             default -> throw new IllegalArgumentException("Rol sin token en estas pruebas: " + rol);
         };
     }
@@ -1354,5 +1687,97 @@ class AislamientoYMatrizRbacTest {
      */
     private static String idDe(MvcResult resultado) throws Exception {
         return JsonPath.read(resultado.getResponse().getContentAsString(), "$.id");
+    }
+
+    /**
+     * Sonda independiente de S3/S4: la tabla se deriva del pedido, no de las listas del test.
+     * Cuerpo "{}" en las escrituras: la autorización corre antes de la validación.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("SONDA S3/S4: recepción obtiene exactamente las trece celdas de la tabla")
+    void matrizDeRecepcionSegunLaTablaS3() throws Exception {
+        String org = organizacionA.getId().toString();
+        String con = consultorioA.getId().toString();
+        String med = medicoA.getId().toString();
+        String hor = UUID.randomUUID().toString();
+        String pac = UUID.randomUUID().toString();
+        String usr = UUID.randomUUID().toString();
+        String tabla = """
+                POST   /api/v1/organizaciones                     DENEGADA
+                GET    /api/v1/organizaciones                     DENEGADA
+                GET    /api/v1/organizaciones/{org}               DENEGADA
+                PUT    /api/v1/organizaciones/{org}               DENEGADA
+                DELETE /api/v1/organizaciones/{org}               DENEGADA
+                POST   /api/v1/organizaciones/{org}/consultorios  DENEGADA
+                GET    /api/v1/organizaciones/{org}/consultorios  PERMITIDA
+                GET    /api/v1/consultorios/{con}                 PERMITIDA
+                PUT    /api/v1/consultorios/{con}                 DENEGADA
+                DELETE /api/v1/consultorios/{con}                 DENEGADA
+                POST   /api/v1/organizaciones/{org}/medicos       DENEGADA
+                GET    /api/v1/organizaciones/{org}/medicos       PERMITIDA
+                GET    /api/v1/medicos/{med}                      PERMITIDA
+                PUT    /api/v1/medicos/{med}                      DENEGADA
+                DELETE /api/v1/medicos/{med}                      DENEGADA
+                POST   /api/v1/medicos/{med}/horarios             DENEGADA
+                GET    /api/v1/medicos/{med}/horarios             PERMITIDA
+                GET    /api/v1/horarios/{hor}                     PERMITIDA
+                PUT    /api/v1/horarios/{hor}                     DENEGADA
+                DELETE /api/v1/horarios/{hor}                     DENEGADA
+                POST   /api/v1/medicos/{med}/consultorios         DENEGADA
+                GET    /api/v1/medicos/{med}/consultorios         PERMITIDA
+                DELETE /api/v1/medicos/{med}/consultorios/{con}   DENEGADA
+                POST   /api/v1/organizaciones/{org}/pacientes     PERMITIDA
+                GET    /api/v1/organizaciones/{org}/pacientes     PERMITIDA
+                GET    /api/v1/pacientes/{pac}                    PERMITIDA
+                PUT    /api/v1/pacientes/{pac}                    PERMITIDA
+                DELETE /api/v1/pacientes/{pac}                    PERMITIDA
+                POST   /api/v1/pacientes/{pac}/activar            PERMITIDA
+                POST   /api/v1/organizaciones/{org}/usuarios      DENEGADA
+                GET    /api/v1/organizaciones/{org}/usuarios      DENEGADA
+                GET    /api/v1/usuarios/{usr}                     DENEGADA
+                PUT    /api/v1/usuarios/{usr}                     DENEGADA
+                DELETE /api/v1/usuarios/{usr}                     DENEGADA
+                POST   /api/v1/usuarios/{usr}/activar             DENEGADA
+                """;
+        int permitidas = 0;
+        int denegadas = 0;
+        for (String linea : tabla.strip().split("\\n")) {
+            String[] partes = linea.strip().split("\\s+");
+            String metodo = partes[0];
+            String ruta = partes[1].replace("{org}", org).replace("{con}", con).replace("{med}", med)
+                    .replace("{hor}", hor).replace("{pac}", pac).replace("{usr}", usr);
+            var resultado = ejecutar(peticion(metodo, ruta,
+                    "GET".equals(metodo) || "DELETE".equals(metodo) ? null : "{}"), tokenRecepcionA);
+            if ("PERMITIDA".equals(partes[2])) {
+                permitidas++;
+                assertThat(resultado.andReturn().getResponse().getStatus())
+                        .as("S3 concede %s %s a RECEPCIONISTA: no puede ser 403", metodo, ruta)
+                        .isNotEqualTo(403);
+            } else {
+                denegadas++;
+                afirmar403(resultado, ruta);
+            }
+        }
+        assertThat(permitidas).as("S3 concede trece celdas a recepción").isEqualTo(13);
+        assertThat(denegadas).as("las otras veintidós quedan denegadas").isEqualTo(22);
+    }
+
+    /**
+     * Sonda de S2: rol fuera del contrato responde 401 genérico aunque la ruta exista
+     * y el tenant sea el correcto.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("SONDA S2: un token SUPERADMIN responde 401 genérico donde recepción sí entra")
+    void rolInventadoResponde401Generico() throws Exception {
+        String token = ClaveRsaDePrueba.tokenPara("SUPERADMIN", organizacionA.getId());
+        ejecutar(get("/api/v1/pacientes/" + pacienteA.getId()), token)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.codigo").value(401))
+                .andExpect(jsonPath("$.mensaje").value(
+                        com.intoglobe.clinicas.security.SecurityErrorResponder.MENSAJE_TOKEN_INVALIDO));
     }
 }
