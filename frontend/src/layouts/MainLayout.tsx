@@ -11,6 +11,7 @@ import {
   FileText,
   CreditCard,
   Settings,
+  UserCog,
   LogOut,
   Stethoscope,
   Menu,
@@ -80,6 +81,13 @@ export function MainLayout() {
       label: 'Administración',
       icon: Settings,
       description: 'Marca de la clínica y ajustes',
+      adminOnly: true,
+    },
+    {
+      to: '/administracion/usuarios',
+      label: 'Usuarios',
+      icon: UserCog,
+      description: 'Cuentas del personal y sus roles',
       adminOnly: true,
     },
   ];

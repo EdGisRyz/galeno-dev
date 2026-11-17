@@ -12,9 +12,6 @@ export function AuthLayout() {
         <h2 className="text-2xl font-bold font-heading text-[#0B1C30] tracking-tight">
           Vitalix SaaS
         </h2>
-        <p className="mt-1 text-xs text-[#64748B]">
-          Sistema de Gestión Clínica y Expediente Electrónico NOM-004
-        </p>
       </div>
 
       {/* Contenedor del Formulario */}

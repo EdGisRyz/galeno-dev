@@ -9,8 +9,14 @@ import type { LoginRequest, LoginResponse, RefreshResponse } from './auth.types'
 export const authService = {
   /** `POST /auth/login` → `{ accessToken, user }` y setea la cookie de refresco. */
   login: async (payload: LoginRequest): Promise<LoginResponse> => {
-    const { data } = await authApi.post<LoginResponse>('/auth/login', payload);
-    return data;
+    const res = await authApi.post<LoginResponse>('/auth/login', payload);
+    // El mock resuelve la promesa siempre, incluso en un status de error (nunca la rechaza, solo
+    // la red lo haría): sin esta comprobación, un correo que el mock no reconoce entraría con un
+    // `accessToken` vacío en vez de fallar como lo haría el emisor real.
+    if (res.status >= 400) {
+      throw { response: res };
+    }
+    return res.data;
   },
 
   /** `POST /auth/refresh` → `{ accessToken }`; rota la cookie (deslizante). */

@@ -45,6 +45,8 @@ export function AgendaPage() {
    * guardarraíl 4).
    */
   const organizacionId = useAuthStore((state) => state.user?.tenantId ?? '');
+  const sesionRole = useAuthStore((state) => state.user?.role);
+  const sesionMedicoId = useAuthStore((state) => state.user?.medicoId);
 
   /**
    * La colección de pacientes cuelga de la organización dueña:
@@ -156,9 +158,17 @@ export function AgendaPage() {
     }
   };
 
+  // Un médico solo ve su propia agenda; un administrador ve la de toda la clínica. El recorte se
+  // hace aquí, antes de los filtros de la barra de búsqueda, para que ni las métricas ni el
+  // selector de "todos los médicos" puedan asomar la cita de otro médico.
+  const citasVisibles = useMemo(() => {
+    if (sesionRole !== 'MEDICO') return appointments;
+    return appointments.filter((apt) => apt.medico_id === sesionMedicoId);
+  }, [appointments, sesionRole, sesionMedicoId]);
+
   // Filtrado de citas
   const filteredAppointments = useMemo(() => {
-    return appointments.filter((apt) => {
+    return citasVisibles.filter((apt) => {
       const matchDoc = selectedDoctorId === 'all' || apt.medico_id === selectedDoctorId;
       const matchStatus = selectedStatus === 'all' || apt.estado === selectedStatus;
       const matchPatient =
@@ -166,16 +176,16 @@ export function AgendaPage() {
         (apt.paciente?.nombre || '').toLowerCase().includes(searchPatient.toLowerCase());
       return matchDoc && matchStatus && matchPatient;
     });
-  }, [appointments, selectedDoctorId, selectedStatus, searchPatient]);
+  }, [citasVisibles, selectedDoctorId, selectedStatus, searchPatient]);
 
   // Métricas rápidas del día
   const stats = useMemo(() => {
-    const total = appointments.length;
-    const confirmadas = appointments.filter((a) => a.estado === 'CONFIRMADA').length;
-    const sinConfirmar = appointments.filter((a) => a.estado === 'SIN_CONFIRMAR').length;
-    const canceladas = appointments.filter((a) => a.estado === 'CANCELADA').length;
+    const total = citasVisibles.length;
+    const confirmadas = citasVisibles.filter((a) => a.estado === 'CONFIRMADA').length;
+    const sinConfirmar = citasVisibles.filter((a) => a.estado === 'SIN_CONFIRMAR').length;
+    const canceladas = citasVisibles.filter((a) => a.estado === 'CANCELADA').length;
     return { total, confirmadas, sinConfirmar, canceladas };
-  }, [appointments]);
+  }, [citasVisibles]);
 
   return (
     <div className="space-y-6">
@@ -188,7 +198,7 @@ export function AgendaPage() {
             Agenda Médica y Control de Citas
           </h1>
           <p className="text-xs text-[#64748B] mt-1">
-            Programación de consultas, estados de recepción y recordatorios WhatsApp en tiempo real.
+            Programación de consultas.
           </p>
         </div>
 
@@ -304,20 +314,24 @@ export function AgendaPage() {
               />
             </div>
 
-            <div>
-              <Select
-                label="Médico Responsable"
-                value={selectedDoctorId}
-                onChange={(e) => setSelectedDoctorId(e.target.value)}
-                options={[
-                  { value: 'all', label: 'Todos los Médicos' },
-                  ...doctors.map((d) => ({
-                    value: d.id,
-                    label: `${d.nombre} (${d.especialidad || 'Gral.'})`,
-                  })),
-                ]}
-              />
-            </div>
+            {/* Un médico ya solo ve su propia agenda: elegir "médico responsable" no tendría nada
+                entre qué filtrar. */}
+            {sesionRole !== 'MEDICO' && (
+              <div>
+                <Select
+                  label="Médico Responsable"
+                  value={selectedDoctorId}
+                  onChange={(e) => setSelectedDoctorId(e.target.value)}
+                  options={[
+                    { value: 'all', label: 'Todos los Médicos' },
+                    ...doctors.map((d) => ({
+                      value: d.id,
+                      label: `${d.nombre} (${d.especialidad || 'Gral.'})`,
+                    })),
+                  ]}
+                />
+              </div>
+            )}
 
             <div>
               <Select
@@ -360,10 +374,6 @@ export function AgendaPage() {
         <div className="flex items-center justify-between text-xs text-[#64748B] px-1">
           <span>
             Mostrando <strong>{filteredAppointments.length}</strong> consultas programadas
-          </span>
-          <span className="flex items-center gap-1.5 text-[11px]">
-            <span className="w-2 h-2 rounded-full bg-[#059669]" />
-            Sincronización activa con WhatsApp Job 48h/24h
           </span>
         </div>
 
