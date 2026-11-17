@@ -66,6 +66,8 @@ const MEDICO: Medico = {
 const HORARIO: HorarioMedico = {
   id: 'hor-0001',
   medicoId: MEDICO.id,
+  consultorioId: CONSULTORIO.id,
+  consultorioNombre: CONSULTORIO.nombre,
   diaSemana: 1,
   horaInicio: '09:00:00',
   horaFin: '13:00:00',
@@ -73,12 +75,14 @@ const HORARIO: HorarioMedico = {
 };
 
 const RUTA_HORARIOS = `/medicos/${MEDICO.id}/horarios`;
+const RUTA_CONSULTORIOS_ASIGNADOS = `/medicos/${MEDICO.id}/consultorios`;
 
-/** Deja listas las tres lecturas de la pantalla: médicos, consultorios y una agenda concreta. */
+/** Deja listas las cuatro lecturas de la pantalla: médicos, consultorios, asignados y una agenda. */
 function cargarCon(horarios: HorarioMedico[] = []) {
   getMock.mockImplementation((url: string) => {
     if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
     if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
+    if (url === RUTA_CONSULTORIOS_ASIGNADOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
     if (url === RUTA_HORARIOS) return Promise.resolve(respuestaCon(horarios));
     return Promise.reject(new Error(`URL inesperada: ${url}`));
   });
