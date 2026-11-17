@@ -925,9 +925,12 @@ rol. Esa mitad se ejerce en los tests de service y en el 403 del controller.
 01-03; las celdas de horarios se documentaron en un párrafo aparte. Deuda de redacción.
 - **Hoy no se emiten tokens `PACIENTE`**: el rol existe en `usuario_rol_check` y se **conserva**
 para una implementación futura, pero no hay cuentas de paciente (decisión de producto,
-2026-11-03). `RECEPCIONISTA` es un rol de personal **nuevo** que se **agregará** al
-mismo CHECK —**sin retirar** `PACIENTE`—, así que la migración es aditiva y no toca datos.
-Mientras tanto, `PACIENTE` recibe 403 en las cinco rutas por deny-by-default.
+2026-11-03). Recibe 403 en las cinco rutas por deny-by-default.
+- **`RECEPCIONISTA` ya forma parte del contrato de claims** (decisión de producto, 2026-11-16):
+  un token con ese rol es válido en el emisor y en el borde. Consulta consultorios, médicos,
+  horarios y consultorios asignados, y administra el ciclo completo del paciente; **no** escribe
+  agenda, no registra ni da de baja consultorios o médicos, y no accede a cuentas ni a la
+  organización. La escritura sobre la agenda queda en administración y en el propio médico.
 
 ### Checklist de lectura
 
@@ -1072,9 +1075,11 @@ el path, 404 para el recurso pedido por id) y vive en `PacienteService`, no en l
   pacientes por id solo se prueba en `PacienteServiceTest`, no contra la base.
 - **La página de pacientes del frontend sigue en rutas planas sobre el adaptador de mocks**;
   la adaptación a la colección anidada está pendiente y hoy no la cubre ningún test.
-- **`PACIENTE` no tiene celdas** porque no se emiten tokens de ese rol. `RECEPCIONISTA`
-  sigue sin existir: se agregará al `CHECK` de `usuario_rol` en V2 y hasta entonces la cadena
-  lo cerrará por deny-by-default; no se agregó al código.
+- **`PACIENTE` no tiene celdas** porque no se emiten tokens de ese rol. **`RECEPCIONISTA` sí
+  las tiene**: las seis operaciones de pacientes —alta, consulta, actualización, baja y
+  reactivación— son suyas, además de la lectura de consultorios, médicos y horarios. De ahí que
+  la pantalla de cuentas ofrezca tres roles para asignar y no cuatro: una cuenta `PACIENTE`
+  quedaría sin una sola operación permitida (decisión de producto, 2026-11-16).
 
 ### Checklist de lectura
 

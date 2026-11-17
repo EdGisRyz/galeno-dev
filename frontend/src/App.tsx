@@ -45,10 +45,11 @@ function App() {
         <Route path="/login" element={<LoginForm />} />
       </Route>
 
-      {/* Rutas protegidas de la estación clínica. ADR-013: la agenda es de `ADMIN` y `MEDICO`;
-          `PACIENTE` no tiene pantalla todavía y ProtectedRoute lo devuelve al login con
-          `reason=sin_acceso`. */}
-      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'MEDICO']} />}>
+      {/* Rutas protegidas de la estación clínica. ADR-013 más S5: agenda, pacientes, consultorios,
+          médicos y expediente son de `ADMIN`, `MEDICO` y `RECEPCIONISTA`; recepción consulta para
+          responder en el mostrador. `PACIENTE` no tiene pantalla todavía y ProtectedRoute lo
+          devuelve al login con `reason=sin_acceso`. */}
+      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'MEDICO', 'RECEPCIONISTA']} />}>
         <Route element={<MainLayout />}>
           <Route path="/agenda" element={<AgendaPage />} />
           <Route path="/pacientes" element={<PacientesPage />} />
@@ -57,7 +58,8 @@ function App() {
           <Route path="/expediente" element={<ExpedientePage />} />
 
           {/* Marca y usuarios: solo ADMIN. ProtectedRoute anidado porque el grupo exterior ya
-              admite ADMIN y MEDICO; aquí se acota más. */}
+              admite ADMIN, MEDICO y RECEPCIONISTA; aquí se acota más. Recepción no tiene celdas
+              sobre las cuentas del personal ni sobre la organización. */}
           <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
             <Route path="/administracion/marca" element={<MarcaClinicaPage />} />
             <Route path="/administracion/usuarios" element={<UsuariosPage />} />

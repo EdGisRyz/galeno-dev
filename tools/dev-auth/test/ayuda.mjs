@@ -15,12 +15,14 @@ export const CONTRASENA = 'contrasena-sintetica-de-prueba';
 export const CORREO_ADMIN = 'admin@dev-auth.local';
 export const CORREO_MEDICO = 'medico@dev-auth.local';
 export const CORREO_PACIENTE = 'paciente@dev-auth.local';
+export const CORREO_RECEPCIONISTA = 'recepcion@dev-auth.local';
 
 export const ORGANIZACION_A = '11111111-1111-4111-8111-111111111111';
 export const ORGANIZACION_B = '22222222-2222-4222-8222-222222222222';
 export const AUTH_USER_ADMIN = 'a1b2c3d4-0000-4000-8000-000000000001';
 export const AUTH_USER_MEDICO = 'a1b2c3d4-0000-4000-8000-000000000002';
 export const AUTH_USER_PACIENTE = 'a1b2c3d4-0000-4000-8000-000000000003';
+export const AUTH_USER_RECEPCIONISTA = 'a1b2c3d4-0000-4000-8000-000000000004';
 export const MEDICO_ACTIVO = 'b2c3d4e5-0000-4000-8000-000000000002';
 
 /**
@@ -54,6 +56,15 @@ export const FILAS_SEMILLA = [
     email: CORREO_PACIENTE,
     rol: 'PACIENTE',
     organizacion_id: ORGANIZACION_B,
+    medico_id: null,
+    activo: true,
+    medico_activo: null,
+  },
+  {
+    auth_user_id: AUTH_USER_RECEPCIONISTA,
+    email: CORREO_RECEPCIONISTA,
+    rol: 'RECEPCIONISTA',
+    organizacion_id: ORGANIZACION_A,
     medico_id: null,
     activo: true,
     medico_activo: null,

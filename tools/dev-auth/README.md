@@ -136,7 +136,7 @@ comprobación es mecánica:
 | | `403` | La cuenta existe y la contraseña es correcta, pero la **cuenta está dada de baja** (`usuario.activo = false`). |
 | | `403` | La cuenta es de un **médico que ya no está activo** (`medico.activo = false`). Decisión de producto: el acceso se cierra en el borde y la cuenta no se toca; reactivar al médico devuelve el acceso. |
 | | `409` | El correo está registrado en **dos organizaciones**. El esquema lo permite (el correo es único por organización) y el emisor de desarrollo no tiene con qué desambiguar. |
-| | `500` | No se pudo consultar la tabla `usuario`, o hay una fila que no puede convertirse en claims (por ejemplo `rol = RECEPCIONISTA`, que la base admite y el contrato de claims del backend no). |
+| | `500` | No se pudo consultar la tabla `usuario`, o hay una fila que no puede convertirse en claims (por ejemplo `rol` nulo o fuera del contrato de claims, un `email` sin `@`, o un identificador que no es un UUID canónico). |
 | `POST /auth/refresh` | `200` `{ accessToken }` | Lee la cookie de refresco, verifica firma, tipo, `iss`/`aud` y vencimiento, y **rota** la cookie (deslizante: vuelve a 30 minutos). **Relee la fila de `usuario`**, así que un cambio de organización o una baja se reflejan aquí. |
 | | `401` | Cookie ausente, falsificada, de otro tipo (por ejemplo el access token), vencida, o de una cuenta que ya no existe, está dada de baja o es de un médico inactivo. |
 | | `500` | No se pudo consultar la tabla `usuario`. |
@@ -233,6 +233,7 @@ Correos sintéticos (`dev-auth.local` no existe) y **sin contraseña**: la de to
 | `admin@dev-auth.local` | `ADMIN` | `1111…1111` (clínica A) | — |
 | `medico@dev-auth.local` | `MEDICO` | `1111…1111` (clínica A) | `b2c3…0002` |
 | `paciente@dev-auth.local` | `PACIENTE` | `2222…2222` (clínica B) | — |
+| `recepcion@dev-auth.local` | `RECEPCIONISTA` | `1111…1111` (clínica A) | — |
 
 Para cargarla hace falta que existan antes la organización y el médico referenciados (los crea
 la migración o la propia aplicación):

@@ -72,35 +72,35 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <table>
  *   <caption>Matriz aplicada a las treinta y cinco operaciones de la API</caption>
- *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th></tr>
- *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET|PUT|DELETE /organizaciones/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
- *   <tr><td>{@code GET /consultorios/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
- *   <tr><td>{@code PUT|DELETE /consultorios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
- *   <tr><td>{@code GET /medicos/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
- *   <tr><td>{@code PUT|DELETE /medicos/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
- *   <tr><td>{@code GET /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
- *   <tr><td>{@code GET|PUT|DELETE /horarios/{id}}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td></tr>
- *   <tr><td>{@code GET /medicos/{id}/consultorios}</td><td>propio tenant</td><td>solo los propios</td><td>403</td></tr>
- *   <tr><td>{@code POST /medicos/{id}/consultorios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code DELETE /medicos/{id}/consultorios/{consultorioId}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
- *   <tr><td>{@code GET /pacientes/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td></tr>
- *   <tr><td>{@code PUT|DELETE /pacientes/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /pacientes/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /organizaciones/{orgId}/usuarios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET /organizaciones/{orgId}/usuarios}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code PUT /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code DELETE /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code POST /usuarios/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td></tr>
+ *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th><th>RECEPCIONISTA</th></tr>
+ *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET|PUT|DELETE /organizaciones/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code GET /consultorios/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code PUT|DELETE /consultorios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code GET /medicos/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code PUT|DELETE /medicos/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code GET|PUT|DELETE /horarios/{id}}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td><td>{@code GET} sí; {@code PUT|DELETE} 403</td></tr>
+ *   <tr><td>{@code GET /medicos/{id}/consultorios}</td><td>propio tenant</td><td>solo los propios</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code POST /medicos/{id}/consultorios}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code DELETE /medicos/{id}/consultorios/{consultorioId}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>403</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{orgId}/pacientes}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code GET /pacientes/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code PUT|DELETE /pacientes/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code POST /pacientes/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code POST /organizaciones/{orgId}/usuarios}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{orgId}/usuarios}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code PUT /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code DELETE /usuarios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /usuarios/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
  * </table>
  *
  * <p>«Propio tenant» tiene dos mitades y las aplican dos piezas distintas: aquí se exige el
@@ -114,7 +114,9 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>Las cinco rutas de bloques de disponibilidad aparecen en la tabla como «su propia
  * agenda» para {@code MEDICO}: esa columna no la aplica esta cadena, la aplica
- * {@code HorarioMedicoService} (ver abajo).
+ * {@code HorarioMedicoService} (ver abajo). {@code RECEPCIONISTA} solo tiene las dos lecturas:
+ * el horario del médico es suyo y de la administración, y recepción lo consulta para responder
+ * dónde y cuándo atiende y derivar, pero no lo modifica.
  * La autorización de estas rutas tiene <strong>dos capas</strong> y esta cadena solo aplica la
  * primera: el rol abre la ruta, y {@code HorarioMedicoService} comprueba contra el token que
  * el médico —o el médico dueño del bloque— pertenezca al {@code tenantId} del claim
@@ -126,7 +128,8 @@ import tools.jackson.databind.json.JsonMapper;
  * <h2>Consultorios del médico: la matriz concede el rol, el service acota el tenant y la propiedad</h2>
  *
  * <p>Las tres rutas de la asignación de consultorios aparecen en la tabla como «solo los
- * propios» en la lectura y como {@code 403} para {@code MEDICO} en las dos escrituras. Como en
+ * propios» en la lectura y como {@code 403} para {@code MEDICO} en las dos escrituras, y
+ * {@code RECEPCIONISTA} tiene la lectura para responder dónde atiende. Como en
  * horarios, esta cadena solo aplica la mitad del rol: {@code MedicoConsultorioService} comprueba
  * contra el {@code tenantId} del claim que el médico del path pertenezca a la organización del
  * token ({@code 404} si no, para no revelar que existe) y que un token {@code MEDICO} consulte
@@ -143,8 +146,10 @@ import tools.jackson.databind.json.JsonMapper;
  * <h2>Pacientes: la matriz concede el rol, el service acota la organización y la pertenencia</h2>
  *
  * <p>Las seis rutas de pacientes aparecen en la tabla como «propio tenant» para
- * {@code ADMIN} y, en las dos lecturas, para {@code MEDICO}: esa columna tampoco la aplica
- * esta cadena. Aquí se concede el rol —{@code ADMIN} escribe, {@code MEDICO} solo lee— y
+ * {@code ADMIN} y {@code RECEPCIONISTA} —recepción administra las fichas de paciente del
+ * mostrador— y, en las dos lecturas, para {@code MEDICO}: esa columna tampoco la aplica
+ * esta cadena. Aquí se concede el rol —{@code ADMIN} y {@code RECEPCIONISTA} escriben,
+ * {@code MEDICO} solo lee— y
  * {@code PacienteService} comprueba contra el {@code tenantId} del claim que la
  * organización del path sea la del token y que el paciente pertenezca a esa organización,
  * respondiendo {@code 404} cuando no, para no revelar que existe en otra clínica.</p>
@@ -162,9 +167,9 @@ import tools.jackson.databind.json.JsonMapper;
  * <h2>Usuarios: la matriz concede el rol, el service acota la organización y protege las cuentas</h2>
  *
  * <p>Las seis rutas de cuentas aparecen en la tabla como «propio tenant» solo para {@code ADMIN},
- * que es el único rol que administra cuentas (R9 de la card 06); {@code MEDICO} y
- * {@code PACIENTE} no tienen ninguna celda y {@code RECEPCIONISTA} tampoco, de modo que hoy no
- * existe un token con el que puedan alcanzarse. Como en los módulos anteriores, esta cadena solo
+ * que es el único rol que administra cuentas (R9 de la card 06); {@code MEDICO},
+ * {@code PACIENTE} y {@code RECEPCIONISTA} no tienen ninguna celda de cuentas. Como en los
+ * módulos anteriores, esta cadena solo
  * concede el rol: {@code UsuarioService} comprueba contra el {@code tenantId} del claim que la
  * organización del path sea la del token ({@code 403} sin consultar la base), responde
  * {@code 404} por una cuenta o un médico de otra organización para no revelar que existen, y
@@ -175,7 +180,7 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <h2>El alta de organizaciones está bloqueada, y es deliberado</h2>
  *
- * <p>{@code POST /organizaciones} responde {@code 403} a <strong>los tres roles</strong>
+ * <p>{@code POST /organizaciones} responde {@code 403} a <strong>los cuatro roles</strong>
  * mediante {@code denyAll()} (decisión de producto, 2026-10-29). No es un
  * descuido ni una celda pendiente: con el aislamiento por tenant de esta misma matriz, la
  * organización recién creada quedaría <em>inalcanzable</em> para quien la creó —el {@code 201}
@@ -197,10 +202,13 @@ import tools.jackson.databind.json.JsonMapper;
  * candidatas. Cuando se emitan, necesitarán sus propias celdas acá, incluida la de sus
  * propios datos.</p>
  *
- * <p>El rol de personal {@code RECEPCIONISTA} <strong>aún no está implementado</strong>: se
- * <em>agregará</em> al CHECK de {@code usuario_rol} <strong>sin retirar</strong> {@code PACIENTE}.
- * Mientras no exista, un token con ese rol no puede emitirse; cuando se emita, la cadena lo
- * cerrará por deny-by-default hasta que tenga celdas explícitas.</p>
+ * <p>El rol de personal {@code RECEPCIONISTA} está en el contrato de claims y tiene sus celdas
+ * explícitas en esta matriz (ver la tabla): consulta consultorios, médicos, sus consultorios
+ * asignados, la agenda de horarios y los pacientes de su organización, y registra, actualiza, da
+ * de baja y reactiva pacientes. Lo que no tiene es escritura sobre la agenda ni sobre
+ * consultorios, médicos y sus asignaciones, ni cuentas del personal, ni la organización: todas
+ * esas celdas le responden {@code 403} con el contrato de error, porque el rol está en el
+ * contrato y el rechazo es de matriz, no de token.</p>
  *
  * <h2>No hay rutas {@code /api/v1/auth/**} que permitir</h2>
  *
@@ -263,6 +271,13 @@ public class SecurityConfig {
     private static final String ROL_MEDICO = "MEDICO";
 
     /**
+     * Rol de personal del mostrador: consulta el catálogo, la agenda y los pacientes, y administra
+     * esas mismas fichas de paciente de su organización. No toca cuentas ni la configuración de la
+     * organización, y no escribe sobre la agenda ni el catálogo (S3).
+     */
+    private static final String ROL_RECEPCIONISTA = "RECEPCIONISTA";
+
+    /**
      * Define la única cadena de filtros de la aplicación: documentación y error públicos, la
      * matriz de autorización por rol, deny-by-default para el resto, CORS con credenciales y
      * errores de seguridad dentro del contrato {@code ErrorResponse}.
@@ -303,15 +318,17 @@ public class SecurityConfig {
                         // ErrorResponse del proyecto (404 si no hay error que representar).
                         .requestMatchers(RUTA_ERROR).permitAll()
                         .requestMatchers(RUTAS_PUBLICAS).permitAll()
-                        // Lecturas compartidas por ADMIN y MEDICO de su propio tenant.
+                        // Lecturas compartidas por ADMIN, MEDICO y RECEPCIONISTA de su propio
+                        // tenant. Recepción las necesita para responder dónde y cuándo atiende
+                        // cada médico y para atender el mostrador.
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*/consultorios")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*/medicos")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.GET, RUTA_CONSULTORIOS + "/*")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.GET, RUTA_MEDICOS + "/*")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         // Altas y mutaciones anidadas: solo ADMIN de su propio tenant.
                         .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES + "/*/consultorios")
                         .hasRole(ROL_ADMIN)
@@ -322,7 +339,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, RUTA_CONSULTORIOS + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.PUT, RUTA_MEDICOS + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_MEDICOS + "/*").hasRole(ROL_ADMIN)
-                        // Organizaciones: el alta está bloqueada para los tres roles
+                        // Organizaciones: el alta está bloqueada para los cuatro roles
                         // (decisión de producto del 2026-10-29: la organización creada
                         // quedaría inalcanzable por el aislamiento por tenant). Se declara con
                         // denyAll() y no se deja a la ausencia de regla: la celda queda
@@ -333,50 +350,57 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.PUT, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
-                        // Horarios: ADMIN y MEDICO. Esta regla solo concede el rol; el
-                        // acotamiento por organización (404) y la propiedad de la agenda (403
-                        // si un MEDICO toca la de otro médico) los aplica HorarioMedicoService
-                        // contra el tenantId y el medicoId del token. Se declaran los cinco
-                        // verbos por separado porque cada uno es una operación de la matriz.
+                        // Horarios: ADMIN y MEDICO escriben, y RECEPCIONISTA solo lee. La lectura
+                        // es suya porque necesita responder dónde y cuándo atiende cada médico y
+                        // derivar; la escritura de la agenda no entra en ninguna historia de
+                        // recepción (decisión de producto, 2026-11-16). Esta regla solo concede el
+                        // rol; el acotamiento por organización (404) y la propiedad de la agenda
+                        // (403 si un MEDICO toca la de otro médico) los aplica HorarioMedicoService
+                        // contra el tenantId y el medicoId del token. Se declaran los cinco verbos
+                        // por separado porque cada uno es una operación de la matriz.
                         .requestMatchers(HttpMethod.GET, RUTA_MEDICOS + "/*/horarios")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.POST, RUTA_MEDICOS + "/*/horarios")
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
                         .requestMatchers(HttpMethod.GET, RUTA_HORARIOS + "/*")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.PUT, RUTA_HORARIOS + "/*")
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
                         .requestMatchers(HttpMethod.DELETE, RUTA_HORARIOS + "/*")
                         .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
                         // Consultorios asignados al médico: el ADMIN los asigna y los retira y
-                        // comparte la lectura con MEDICO, que solo ve los de su propio médico.
+                        // comparte la lectura con MEDICO —que solo ve los de su propio médico— y
+                        // con RECEPCIONISTA, que los consulta para responder dónde atiende.
                         // Esta regla solo concede el rol; el acotamiento por organización (404) y
                         // la propiedad (403 si un MEDICO pide los de otro médico) los aplica
                         // MedicoConsultorioService contra el tenantId y el medicoId del token. Se
                         // declaran los tres verbos por separado porque cada uno es una operación
                         // de la matriz.
                         .requestMatchers(HttpMethod.GET, RUTA_MEDICOS + "/*/consultorios")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.POST, RUTA_MEDICOS + "/*/consultorios")
                         .hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_MEDICOS + "/*/consultorios/*")
                         .hasRole(ROL_ADMIN)
-                        // Pacientes: ADMIN escribe y MEDICO solo lee. Esta regla solo concede
-                        // el rol; que la organización del path sea la del token y que el
-                        // paciente pertenezca a esa organización (404 si no) lo aplica
+                        // Pacientes: ADMIN y RECEPCIONISTA escriben, y MEDICO solo lee. Esta regla
+                        // solo concede el rol; que la organización del path sea la del token y que
+                        // el paciente pertenezca a esa organización (404 si no) lo aplica
                         // PacienteService contra el tenantId del claim. Se declaran las seis
                         // operaciones por separado porque cada una es una celda de la matriz;
                         // la reactivación se nombra aparte porque POST /pacientes/* no la
                         // alcanza (son dos segmentos después de la base).
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*/pacientes")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.GET, RUTA_PACIENTES + "/*")
-                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO)
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES + "/*/pacientes")
-                        .hasRole(ROL_ADMIN)
-                        .requestMatchers(HttpMethod.PUT, RUTA_PACIENTES + "/*").hasRole(ROL_ADMIN)
-                        .requestMatchers(HttpMethod.DELETE, RUTA_PACIENTES + "/*").hasRole(ROL_ADMIN)
-                        .requestMatchers(HttpMethod.POST, RUTA_PACIENTES + "/*/activar").hasRole(ROL_ADMIN)
+                        .hasAnyRole(ROL_ADMIN, ROL_RECEPCIONISTA)
+                        .requestMatchers(HttpMethod.PUT, RUTA_PACIENTES + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_RECEPCIONISTA)
+                        .requestMatchers(HttpMethod.DELETE, RUTA_PACIENTES + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_RECEPCIONISTA)
+                        .requestMatchers(HttpMethod.POST, RUTA_PACIENTES + "/*/activar")
+                        .hasAnyRole(ROL_ADMIN, ROL_RECEPCIONISTA)
                         // Usuarios: la administración de cuentas es exclusiva de ADMIN (R9 de la
                         // card 06). Esta regla solo concede el rol; el acotamiento por
                         // organización (403 si el path no es el del claim, 404 si la cuenta o el
@@ -395,7 +419,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, RUTA_USUARIOS + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.POST, RUTA_USUARIOS + "/*/activar").hasRole(ROL_ADMIN)
                         // Fallback: deny-by-default (R-SEG-09). Toda ruta con controlador que no
-                        // esté declarada arriba queda cerrada para los tres roles; una ruta
+                        // esté declarada arriba queda cerrada para los cuatro roles del contrato —
+                        // ADMIN, MEDICO, PACIENTE y RECEPCIONISTA—; una ruta
                         // inexistente conserva el 401/404 normal del framework.
                         .anyRequest().access(new DenyByDefaultAuthorizationManager(mapeosDeHandler)))
                 .exceptionHandling(excepciones -> excepciones

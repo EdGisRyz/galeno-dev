@@ -13,9 +13,11 @@ import { evaluarCuenta, normalizarCorreo, traducirFilaAClaims } from '../usuario
 import {
   AUTH_USER_ADMIN,
   AUTH_USER_MEDICO,
+  AUTH_USER_RECEPCIONISTA,
   CONTRASENA,
   CORREO_ADMIN,
   CORREO_MEDICO,
+  CORREO_RECEPCIONISTA,
   MEDICO_ACTIVO,
   ORGANIZACION_A,
   ORGANIZACION_B,
@@ -81,13 +83,33 @@ test('traducirFilaAClaims omite medicoId fuera del rol MEDICO aunque la fila lo 
   assert.equal(claims.role, 'ADMIN');
 });
 
+test('traducirFilaAClaims traduce el rol RECEPCIONISTA sin agregarle medicoId', () => {
+  const claims = traducirFilaAClaims({
+    auth_user_id: AUTH_USER_RECEPCIONISTA,
+    email: CORREO_RECEPCIONISTA,
+    rol: 'RECEPCIONISTA',
+    organizacion_id: ORGANIZACION_A,
+    medico_id: MEDICO_ACTIVO,
+    activo: true,
+    medico_activo: true,
+  });
+
+  assert.deepEqual(claims, {
+    sub: AUTH_USER_RECEPCIONISTA,
+    email: CORREO_RECEPCIONISTA,
+    role: 'RECEPCIONISTA',
+    tenantId: ORGANIZACION_A,
+  });
+  assert.ok(!('medicoId' in claims), 'el contrato solo lleva medicoId con rol MEDICO');
+});
+
 test('traducirFilaAClaims rechaza un rol que el contrato de claims no admite', () => {
   assert.throws(
     () =>
       traducirFilaAClaims({
         auth_user_id: AUTH_USER_ADMIN,
         email: CORREO_ADMIN,
-        rol: 'RECEPCIONISTA',
+        rol: 'SUPERADMIN',
         organizacion_id: ORGANIZACION_A,
         medico_id: null,
         activo: true,
@@ -142,7 +164,11 @@ test('evaluarCuenta decide el estado a partir de las filas devueltas', () => {
   assert.equal(ambiguo.resultado, 'ambiguo');
   assert.equal(ambiguo.cantidad, 2);
 
-  assert.equal(evaluarCuenta([{ ...activa, rol: 'RECEPCIONISTA' }]).resultado, 'fila-invalida');
+  const recepcion = evaluarCuenta([{ ...activa, rol: 'RECEPCIONISTA' }]);
+  assert.equal(recepcion.resultado, 'ok');
+  assert.equal(recepcion.claims.role, 'RECEPCIONISTA');
+
+  assert.equal(evaluarCuenta([{ ...activa, rol: 'SUPERADMIN' }]).resultado, 'fila-invalida');
 });
 
 // ===============================
@@ -161,6 +187,19 @@ test('el login resuelve el correo normalizado a minúsculas y sin espacios', asy
   assert.equal(carga.tenantId, ORGANIZACION_A, 'tenantId sale de organizacion_id');
 
   assert.deepEqual(emisor.repositorio.consultas.at(-1), ['correo', CORREO_ADMIN]);
+});
+
+test('el login del rol RECEPCIONISTA emite un token con el rol del contrato', async (t) => {
+  const emisor = await levantarEmisor(t);
+
+  const respuesta = await iniciarSesion(emisor, CORREO_RECEPCIONISTA);
+  assert.equal(respuesta.status, 200, 'el rol RECEPCIONISTA entra al contrato de claims del emisor');
+
+  const { carga } = decodificarJwt((await cuerpoJson(respuesta)).accessToken);
+  assert.equal(carga.sub, AUTH_USER_RECEPCIONISTA);
+  assert.equal(carga.role, 'RECEPCIONISTA');
+  assert.equal(carga.tenantId, ORGANIZACION_A);
+  assert.ok(!('medicoId' in carga), 'el contrato solo lleva medicoId con rol MEDICO');
 });
 
 test('una cuenta que no existe responde 401 con el mensaje genérico', async (t) => {
@@ -254,7 +293,7 @@ test('si la base de datos falla en el login, responde 500 con un mensaje claro y
 });
 
 test('una fila que no puede convertirse en claims responde 500 nombrando el campo', async (t) => {
-  const emisor = await levantarEmisor(t, { filas: filasPropias([[0, { rol: 'RECEPCIONISTA' }]]) });
+  const emisor = await levantarEmisor(t, { filas: filasPropias([[0, { rol: 'SUPERADMIN' }]]) });
 
   const respuesta = await iniciarSesion(emisor, CORREO_ADMIN);
   assert.equal(respuesta.status, 500);

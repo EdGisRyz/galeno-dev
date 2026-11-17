@@ -42,7 +42,11 @@ const MENSAJE_ERROR_BAJA =
 const MENSAJE_ERROR_ACTIVAR =
   'No fue posible reactivar la cuenta. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
-const ROLES: RolUsuario[] = ['ADMIN', 'MEDICO', 'PACIENTE', 'RECEPCIONISTA'];
+// S6: la historia de usuario nombra tres roles —administrador, recepcionista y médico—, así que
+// `PACIENTE` no se ofrece: no tiene ninguna celda en la matriz y la cuenta quedaría creada sin
+// poder hacer nada. El tipo `RolUsuario` conserva los cuatro valores porque la base y las
+// respuestas del backend los admiten; lo que cambia es lo que el selector **ofrece**.
+const ROLES: RolUsuario[] = ['ADMIN', 'MEDICO', 'RECEPCIONISTA'];
 
 const VARIANTE_POR_ROL: Record<RolUsuario, 'primary' | 'secondary' | 'warning' | 'default'> = {
   ADMIN: 'primary',

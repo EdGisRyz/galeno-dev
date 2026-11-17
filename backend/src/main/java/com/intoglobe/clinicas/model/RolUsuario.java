@@ -7,8 +7,8 @@ package com.intoglobe.clinicas.model;
  * {@code usuario} —la migración V2 agregó {@code RECEPCIONISTA} de forma aditiva sobre el
  * CHECK de V1—. No se agregan valores aquí sin migrar primero dicho constraint, y no se
  * retira ninguno: {@code PACIENTE} existe en el esquema aunque hoy no tenga ninguna celda en
- * la matriz de autorización, y {@code RECEPCIONISTA} se admite como rol sin concederle
- * todavía ninguna operación.</p>
+ * la matriz de autorización, y {@code RECEPCIONISTA} tiene sus celdas explícitas en esa misma
+ * matriz.</p>
  *
  * <p>Es un enum y no un {@code String} porque el rol es un conjunto cerrado: con el tipo, un
  * JSON que traiga un rol desconocido no se puede deserializar y la petición responde 400
@@ -26,6 +26,6 @@ public enum RolUsuario {
     /** Paciente con acceso propio a sus datos. */
     PACIENTE,
 
-    /** Personal de recepción. Admitido por el esquema, todavía sin operaciones concedidas. */
+    /** Personal de recepción: consulta el catálogo, la agenda y los pacientes de su organización. */
     RECEPCIONISTA
 }

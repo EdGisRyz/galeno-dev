@@ -3,7 +3,10 @@
 // (ADR / plan sección 4.3, excepción declarada).
 // Reflejo tipado de la tabla `usuario` del esquema V1 y de los claims del token.
 
-export type UserRole = 'ADMIN' | 'MEDICO' | 'PACIENTE';
+// Los cuatro roles del contrato de claims (S1): `ADMIN`, `MEDICO`, `PACIENTE` y
+// `RECEPCIONISTA`. El rol es una proyección del token, no una decisión de acceso: quién entra a
+// qué lo deciden las listas `allowedRoles` de las rutas y el backend con su matriz.
+export type UserRole = 'ADMIN' | 'MEDICO' | 'PACIENTE' | 'RECEPCIONISTA';
 
 // Sesión del cliente: proyección de los claims del token (`sub`, `email`, `role`, `tenantId`,
 // `medicoId`) más los datos de presentación que la UI guarda junto al usuario.

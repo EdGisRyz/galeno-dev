@@ -28,7 +28,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
  *
  * @param id       claim {@code sub}: identificador UUID del usuario
  * @param email    claim {@code email}; puede faltar en el token
- * @param role     claim {@code role}: {@code ADMIN}, {@code MEDICO} o {@code PACIENTE}
+ * @param role     claim {@code role}: {@code ADMIN}, {@code MEDICO}, {@code PACIENTE} o
+ *                 {@code RECEPCIONISTA}
  * @param tenantId claim {@code tenantId}: UUID de la organización a la que pertenece el
  *                 usuario, ya resuelto desde el slug si el token lo traía así
  * @param medicoId claim {@code medicoId}: UUID opcional, solo presente para usuarios médicos

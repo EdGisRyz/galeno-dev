@@ -118,6 +118,19 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    @DisplayName("Un token con rol RECEPCIONISTA es válido y el rol se refleja en las autoridades")
+    void tokenConRolRecepcionistaAutentica() throws Exception {
+        String token = ClaveRsaDePrueba.token().conRol("RECEPCIONISTA").compactar();
+
+        sonda("Bearer " + token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.autenticado").value(true))
+                .andExpect(jsonPath("$.rol").value("RECEPCIONISTA"))
+                .andExpect(jsonPath("$.medicoId").doesNotExist())
+                .andExpect(jsonPath("$.autoridades[0]").value("ROLE_RECEPCIONISTA"));
+    }
+
+    @Test
     @DisplayName("Un token firmado con otra clave privada responde 401 con ErrorResponse")
     void firmaInvalidaResponde401() throws Exception {
         String token = ClaveRsaDePrueba.token().firmadoConOtraClavePrivada().compactar();
