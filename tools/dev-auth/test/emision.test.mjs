@@ -12,6 +12,7 @@ import {
   CORREO_ADMIN,
   CORREO_MEDICO,
   CORREO_PACIENTE,
+  CORREO_RECEPCIONISTA,
   cabeceraDeCookie,
   cookiesDe,
   cuerpoJson,
@@ -29,10 +30,10 @@ const RUTA_SEMILLA = path.join(
   'usuarios.json',
 );
 
-test('la semilla de usuarios declara un usuario por rol y no guarda contraseñas', () => {
+test('la semilla de usuarios declara un usuario por rol del contrato y no guarda contraseñas', () => {
   const semilla = JSON.parse(readFileSync(RUTA_SEMILLA, 'utf8'));
   const roles = new Set(semilla.usuarios.map((usuario) => usuario.role));
-  assert.deepEqual([...roles].sort(), ['ADMIN', 'MEDICO', 'PACIENTE']);
+  assert.deepEqual([...roles].sort(), ['ADMIN', 'MEDICO', 'PACIENTE', 'RECEPCIONISTA']);
   for (const usuario of semilla.usuarios) {
     assert.match(usuario.email, /@dev-auth\.local$/, 'los correos deben ser sintéticos');
     assert.ok(!Object.keys(usuario).some((clave) => /password|contrasena|hash/i.test(clave)));
@@ -74,7 +75,7 @@ test('login con credenciales válidas devuelve un token que verifica con la clav
 test('el token lleva los claims obligatorios, iss/aud configurados y exp de 30 minutos', async (t) => {
   const emisor = await levantarEmisor(t);
 
-  for (const correo of [CORREO_ADMIN, CORREO_MEDICO, CORREO_PACIENTE]) {
+  for (const correo of [CORREO_ADMIN, CORREO_MEDICO, CORREO_PACIENTE, CORREO_RECEPCIONISTA]) {
     const respuesta = await iniciarSesion(emisor, correo);
     assert.equal(respuesta.status, 200, `el login de ${correo} debe responder 200`);
 

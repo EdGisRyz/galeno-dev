@@ -53,9 +53,11 @@ import tools.jackson.databind.json.JsonMapper;
  *       descarta es la comprobación explícita de {@code alg=RS256}. Esa es la prueba real
  *       del pin; el caso HS256 no, porque jjwt ya lo rechaza antes.</li>
  *   <li>Los claims {@code sub}, {@code role}, {@code tenantId} y {@code exp} son
- *       obligatorios y {@code role} debe pertenecer a {@code ADMIN}, {@code MEDICO} o
- *       {@code PACIENTE}; {@code email} y {@code medicoId} son opcionales. Cualquier claim
- *       obligatorio ausente o de tipo inválido también produce {@code 401}.</li>
+ *       obligatorios y {@code role} debe pertenecer a {@code ADMIN}, {@code MEDICO},
+ *       {@code PACIENTE} o {@code RECEPCIONISTA}; {@code email} y {@code medicoId} son
+ *       opcionales. Cualquier claim obligatorio ausente o de tipo inválido también produce
+ *       {@code 401}. Un rol fuera de ese conjunto —{@code SUPERADMIN}, por ejemplo— se rechaza
+ *       igual: el contrato admite un rol más, no deja de validar.</li>
  *   <li>{@code exp} es obligatorio: un token sin {@code exp} no caduca nunca y
  *       contradiría el TTL de 30 minutos (D7) y la ventana de inactividad HIPAA, así que
  *       se rechaza aquí aunque jjwt lo acepte.</li>
@@ -109,7 +111,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String CLAIM_MEDICO = "medicoId";
 
     /** Roles admitidos por el contrato de claims de R-SEG-02. */
-    private static final Set<String> ROLES_PERMITIDOS = Set.of("ADMIN", "MEDICO", "PACIENTE");
+    private static final Set<String> ROLES_PERMITIDOS = Set.of("ADMIN", "MEDICO", "PACIENTE", "RECEPCIONISTA");
 
     /**
      * Forma canónica de un UUID (8-4-4-4-12 hexadecimal). Se exige explícitamente porque

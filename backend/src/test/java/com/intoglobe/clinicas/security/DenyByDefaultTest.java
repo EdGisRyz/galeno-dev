@@ -40,8 +40,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>El par de afirmaciones que hace que esto no rompa el contrato HTTP es el siguiente, y
  * se prueba junto a propósito:</p>
  * <ul>
- *   <li>Una ruta <strong>con controlador</strong> y sin regla → {@code 403} para los tres
- *       roles y {@code 401} sin token, con el {@code ErrorResponse} de la API.</li>
+ *   <li>Una ruta <strong>con controlador</strong> y sin regla → {@code 403} para todos los roles
+ *       del contrato de claims y {@code 401} sin token, con el {@code ErrorResponse} de la API.</li>
  *   <li>Una ruta <strong>inexistente</strong> → {@code 401} sin token y el {@code 404}
  *       normal del framework con token, no {@code 403}. El {@code 404} es la respuesta
  *       honesta: no hay ningún recurso protegido que denegar.</li>
@@ -92,9 +92,9 @@ class DenyByDefaultTest {
     }
 
     @Test
-    @DisplayName("Una ruta con controlador y sin regla responde 403 a los tres roles y no llega al controlador")
+    @DisplayName("Una ruta con controlador y sin regla responde 403 a todos los roles y no llega al controlador")
     void unaRutaSinReglaResponde403ParaLosTresRoles() throws Exception {
-        for (String rol : List.of("ADMIN", "MEDICO", "PACIENTE")) {
+        for (String rol : List.of("ADMIN", "MEDICO", "PACIENTE", "RECEPCIONISTA")) {
             String cuerpo = mockMvc.perform(get(RUTA_SIN_REGLA)
                             .header(HttpHeaders.AUTHORIZATION,
                                     "Bearer " + ClaveRsaDePrueba.tokenPara(rol, TENANT)))

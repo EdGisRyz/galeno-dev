@@ -57,10 +57,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code 201}, {@code 200} y {@code 204} según la operación, y el acotamiento por organización lo
  * aplica {@code UsuarioService} —aquí simulado—, cuya mitad está en {@code UsuarioServiceTest}.
  * {@code MEDICO} y {@code PACIENTE} reciben {@code 403} en las seis, y el service no se invoca.
- * {@code RECEPCIONISTA} <strong>no llega a la matriz</strong>: el contrato de claims del backend
- * solo admite {@code ADMIN}, {@code MEDICO} y {@code PACIENTE}, así que el filtro rechaza ese token
- * con {@code 401} antes de autorizar nada; la puerta queda cerrada igual, y cuando el rol se emita
- * de verdad necesitará sus propias celdas. Sin token, {@code 401}.</p>
+ * {@code RECEPCIONISTA} está en el contrato de claims —el token se autentica— pero no tiene
+ * ninguna celda de cuentas, así que recibe {@code 403} en las seis como los otros roles de
+ * personal sin celda, y el service tampoco se invoca. Sin token, {@code 401}.</p>
  *
  * <p>El contrato de cada respuesta —cuerpos de éxito y de error, incluidos los {@code 409} de la
  * última administradora y del correo repetido y el {@code 403} de la operación sobre la propia
@@ -186,20 +185,14 @@ class UsuarioControllerRbacTest {
     }
 
     @Test
-    @DisplayName("RECEPCIONISTA no puede obtener token todavía: el filtro falla cerrado con 401")
-    void rutasDeUsuario_shouldNotBeReachable_whenTheTokenClaimsReceptionist() throws Exception {
-        // El contrato de claims del backend admite ADMIN, MEDICO y PACIENTE; RECEPCIONISTA existe en
-        // el CHECK del esquema y todavía no se emite. Cuando se emita, el rol entrará en el contrato y
-        // esta prueba pasará a exigir 403 en las seis rutas, que es lo que le corresponde por no tener
-        // ninguna celda en la matriz.
+    @DisplayName("RECEPCIONISTA recibe 403 en las seis rutas de usuario sin llegar al service")
+    void rutasDeUsuario_shouldReturn403_whenTheTokenClaimsReceptionist() throws Exception {
+        // El rol está en el contrato de claims, así que el token es válido: el rechazo es de matriz
+        // (403 con el contrato de error), no de token (401). Recepción no tiene ninguna celda de
+        // cuentas del personal.
         var tokenRecepcionista = ClaveRsaDePrueba.tokenPara("RECEPCIONISTA", TENANT_ID);
 
-        mockMvc.perform(conToken(get("/api/v1/usuarios/{id}", CUENTA_ID), tokenRecepcionista))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.codigo").value(401))
-                .andExpect(jsonPath("$.error").value("Unauthorized"))
-                .andExpect(jsonPath("$.mensaje").value(SecurityErrorResponder.MENSAJE_TOKEN_INVALIDO));
-        verifyNoInteractions(usuarioService);
+        afirmarTodasLasRutasDenegadas(tokenRecepcionista);
     }
 
     @Test

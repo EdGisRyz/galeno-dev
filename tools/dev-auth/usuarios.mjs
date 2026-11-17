@@ -15,8 +15,8 @@
  * la conexión a la respuesta HTTP.</p>
  */
 
-/** Roles que el backend admite en el claim `role` (R-SEG-02). La base acepta más. */
-const ROLES_DEL_CONTRATO = new Set(['ADMIN', 'MEDICO', 'PACIENTE']);
+/** Roles que el backend admite en el claim `role` (R-SEG-02). La base acepta los mismos. */
+const ROLES_DEL_CONTRATO = new Set(['ADMIN', 'MEDICO', 'PACIENTE', 'RECEPCIONISTA']);
 
 /** Forma canónica de un UUID: el backend la exige para `tenantId` y compara contra columnas UUID. */
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -110,7 +110,7 @@ function uuidCanonico(valor, campo) {
 function rolDelContrato(valor) {
   if (!ROLES_DEL_CONTRATO.has(valor)) {
     throw new Error(
-      `el campo "rol" no es ADMIN, MEDICO ni PACIENTE, así que el token que produciría no sería válido para el backend`,
+      `el campo "rol" no es ADMIN, MEDICO, PACIENTE ni RECEPCIONISTA, así que el token que produciría no sería válido para el backend`,
     );
   }
   return valor;
