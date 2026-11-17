@@ -18,6 +18,7 @@ import {
   X,
   Clock,
   ChevronRight,
+  type LucideIcon,
   ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -39,12 +40,23 @@ export function MainLayout() {
     navigate('/login');
   };
 
-  const navItems = [
+  // Secciones del menú. `proximamente` marca las que todavía no tienen backend: se muestran para
+  // dejar el alcance a la vista, pero no navegan. Una pantalla que se abre con un error se lee
+  // como un defecto del sistema, no como algo que quedó fuera de esta entrega.
+  const navItems: Array<{
+    to: string;
+    label: string;
+    icon: LucideIcon;
+    description: string;
+    adminOnly?: boolean;
+    proximamente?: boolean;
+  }> = [
     {
       to: '/agenda',
       label: 'Agenda y Citas',
       icon: Calendar,
       description: 'Citas del día y calendario',
+      proximamente: true,
     },
     {
       to: '/pacientes',
@@ -69,12 +81,14 @@ export function MainLayout() {
       label: 'Expediente Clínico',
       icon: FileText,
       description: 'Historia clínica y notas SOAP',
+      proximamente: true,
     },
     {
       to: '/cobros',
       label: 'Cobros & Caja',
       icon: CreditCard,
       description: 'Ingresos y métodos de pago',
+      proximamente: true,
     },
     {
       to: '/administracion/marca',
@@ -148,6 +162,27 @@ export function MainLayout() {
               location.pathname === item.to ||
               location.pathname.startsWith(`${item.to}/`) ||
               (item.to === '/agenda' && location.pathname === '/');
+
+            // Las secciones anunciadas no navegan: se pintan como texto con su etiqueta, para no
+            // ofrecer un enlace que hoy lleva a una pantalla sin backend.
+            if (item.proximamente) {
+              return (
+                <div
+                  key={item.to}
+                  aria-disabled="true"
+                  title="Próximamente: esta sección no forma parte de esta entrega"
+                  className="flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[#94A3B8] cursor-default select-none"
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-[#F1F5F9] text-[#64748B]">
+                    Próximamente
+                  </span>
+                </div>
+              );
+            }
 
             return (
               <NavLink
