@@ -17,6 +17,7 @@ import org.springframework.security.access.AccessDeniedException;
 
 import com.intoglobe.clinicas.dto.request.PacienteRequest;
 import com.intoglobe.clinicas.dto.response.PacienteResponse;
+import com.intoglobe.clinicas.exception.CurpDuplicadaEnOrganizacionException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.Paciente;
@@ -58,6 +59,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 class PacienteServiceTest {
+
+    private static final String CURP = "SASC850101MDFRRN01";
 
     @Mock
     private PacienteRepository pacienteRepository;
@@ -229,7 +232,8 @@ class PacienteServiceTest {
         when(pacienteRepository.findById(idOriginal)).thenReturn(Optional.of(paciente));
         when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = new PacienteRequest("María López Ruiz", "+52 55 9999 8888",
-                LocalDate.of(1990, 7, 2), "M", "maria.ruiz@example.com", "Sin notas previas");
+                LocalDate.of(1990, 7, 2), "M", "maria.ruiz@example.com", "Sin notas previas",
+                null, null, null, null, null, null);
 
         var respuesta = pacienteService.actualizar(idOriginal, organizacionId, request);
 
@@ -402,7 +406,8 @@ class PacienteServiceTest {
         var paciente = pacientePersistido(organizacion);
         when(pacienteRepository.findById(paciente.getId())).thenReturn(Optional.of(paciente));
         when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
-        var request = new PacienteRequest("María López Ramírez", null, null, null, null, null);
+        var request = new PacienteRequest("María López Ramírez", null, null, null, null, null,
+                null, null, null, null, null, null);
 
         var respuesta = pacienteService.actualizar(paciente.getId(), organizacionId, request);
 
@@ -419,12 +424,188 @@ class PacienteServiceTest {
         assertThat(paciente.getNotas()).isNull();
     }
 
+    // ------------------------------------------------------------------
+    // Ficha administrativa y unicidad de la CURP (S2, S3, S5)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("crear sin CURP guarda al paciente con la ficha vacía y no consulta la unicidad")
+    void crear_shouldSaveWithoutCurp_whenTheRequestDoesNotBringIt() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = pacienteService.crear(organizacionId, organizacionId, requestSinCurp());
+
+        assertThat(respuesta.curp())
+                .as("registrar a alguien sin CURP —urgencia, menor, extranjero— es normal")
+                .isNull();
+        assertThat(respuesta.ocupacion()).isEqualTo("Comerciante");
+        assertThat(respuesta.nombreResponsable()).isEqualTo("Rosa Ramírez Silva");
+        verify(pacienteRepository, never()).buscarPorOrganizacionYCurp(any(), any());
+        verify(pacienteRepository).save(any(Paciente.class));
+    }
+
+    @Test
+    @DisplayName("crear con la CURP en minúsculas la guarda canónica, en mayúsculas y sin espacios")
+    void crear_shouldStoreTheCanonicalCurp_whenTheRequestBringsItInLowercase() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(pacienteRepository.buscarPorOrganizacionYCurp(organizacionId, CURP))
+                .thenReturn(Optional.empty());
+        when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = pacienteService.crear(organizacionId, organizacionId,
+                requestConCurp("  sasc850101mdfrrn01 "));
+
+        assertThat(respuesta.curp())
+                .as("la respuesta devuelve la forma canónica, no lo que escribió el cliente")
+                .isEqualTo(CURP);
+        var captor = ArgumentCaptor.forClass(Paciente.class);
+        verify(pacienteRepository).save(captor.capture());
+        assertThat(captor.getValue().getCurp())
+                .as("la columna guarda una sola forma: sin ella, la unicidad no protegería nada")
+                .isEqualTo(CURP);
+    }
+
+    @Test
+    @DisplayName("crear con una CURP ya usada en la organización lanza conflicto y no persiste")
+    void crear_shouldThrowCurpDuplicadaAndNotSave_whenTheCurpIsAlreadyUsedInTheOrganization() {
+        var organizacionId = UUID.randomUUID();
+        // Entidades transitorias a propósito: en el alta, el servicio solo necesita saber que la
+        // organización existe y que la consulta de unicidad encontró una fila. La identidad de esa
+        // fila no se consulta —la exclusión del propio paciente solo aplica al actualizar—, así que
+        // simular identificadores aquí sería código que nadie lee.
+        var organizacion = organizacionTransitoria();
+        var existente = pacienteTransitorio(organizacion, "Paciente Ya Registrado");
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(pacienteRepository.buscarPorOrganizacionYCurp(organizacionId, CURP))
+                .thenReturn(Optional.of(existente));
+
+        assertThatThrownBy(() -> pacienteService.crear(organizacionId, organizacionId, requestConCurp(CURP)))
+                .as("la petición está bien formada: lo que la impide es el estado de la organización")
+                .isInstanceOf(CurpDuplicadaEnOrganizacionException.class)
+                .hasMessageContaining(CURP)
+                .hasMessageContaining("organización");
+        verify(pacienteRepository, never()).save(any(Paciente.class));
+    }
+
+    @Test
+    @DisplayName("crear con la misma CURP de otra organización se acepta: son dos registros independientes")
+    void crear_shouldAcceptTheSameCurp_whenItBelongsToAnotherOrganization() {
+        var otraOrganizacionId = UUID.randomUUID();
+        var otraOrganizacion = organizacionConId(otraOrganizacionId);
+        when(organizacionRepository.findById(otraOrganizacionId)).thenReturn(Optional.of(otraOrganizacion));
+        when(pacienteRepository.buscarPorOrganizacionYCurp(otraOrganizacionId, CURP))
+                .thenReturn(Optional.empty());
+        when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = pacienteService.crear(otraOrganizacionId, otraOrganizacionId, requestConCurp(CURP));
+
+        assertThat(respuesta.curp()).isEqualTo(CURP);
+        assertThat(respuesta.organizacionId()).isEqualTo(otraOrganizacionId);
+        // La comprobación se acota a la organización: nunca entre organizaciones.
+        verify(pacienteRepository).buscarPorOrganizacionYCurp(otraOrganizacionId, CURP);
+        verify(pacienteRepository).save(any(Paciente.class));
+    }
+
+    @Test
+    @DisplayName("actualizar hacia una CURP que usa otro paciente de la organización lanza conflicto")
+    void actualizar_shouldThrowCurpDuplicada_whenAnotherPatientUsesTheCurp() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var paciente = pacientePersistido(organizacion);
+        var otro = pacientePersistidoConNombre(organizacion, "Otro Paciente");
+        when(pacienteRepository.findById(paciente.getId())).thenReturn(Optional.of(paciente));
+        when(pacienteRepository.buscarPorOrganizacionYCurp(organizacionId, CURP))
+                .thenReturn(Optional.of(otro));
+
+        assertThatThrownBy(() -> pacienteService.actualizar(paciente.getId(), organizacionId,
+                requestConCurp(CURP)))
+                .as("actualizar hacia una CURP ocupada es el mismo conflicto que registrarla dos veces")
+                .isInstanceOf(CurpDuplicadaEnOrganizacionException.class)
+                .hasMessageContaining(CURP);
+        verify(pacienteRepository, never()).save(any(Paciente.class));
+        assertThat(paciente.getCurp()).isNull();
+    }
+
+    @Test
+    @DisplayName("actualizar conservando la propia CURP no es un duplicado")
+    void actualizar_shouldAcceptTheOwnCurp_whenItIsNotChanging() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var paciente = pacientePersistido(organizacion);
+        paciente.registrarFicha(CURP, null, null, null, null, null);
+        when(pacienteRepository.findById(paciente.getId())).thenReturn(Optional.of(paciente));
+        when(pacienteRepository.buscarPorOrganizacionYCurp(organizacionId, CURP))
+                .thenReturn(Optional.of(paciente));
+        when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = pacienteService.actualizar(paciente.getId(), organizacionId,
+                requestConCurp(CURP));
+
+        assertThat(respuesta.curp())
+                .as("editar el teléfono de un paciente no puede chocar con su propia CURP")
+                .isEqualTo(CURP);
+        verify(pacienteRepository).save(any(Paciente.class));
+    }
+
+    @Test
+    @DisplayName("actualizar con la ficha vacía la borra: el PUT es un reemplazo")
+    void actualizar_shouldClearTheFicha_whenTheRequestSendsItEmpty() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var paciente = pacientePersistido(organizacion);
+        paciente.registrarFicha(CURP, "Comerciante", "Av. Reforma 123, Col. Centro",
+                "Rosa Ramírez Silva", "+52 55 5555 8765", "Madre");
+        when(pacienteRepository.findById(paciente.getId())).thenReturn(Optional.of(paciente));
+        when(pacienteRepository.save(any(Paciente.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = pacienteService.actualizar(paciente.getId(), organizacionId, requestCompleto());
+
+        assertThat(respuesta.curp()).isNull();
+        assertThat(respuesta.ocupacion()).isNull();
+        assertThat(respuesta.domicilio()).isNull();
+        assertThat(respuesta.nombreResponsable()).isNull();
+        assertThat(respuesta.telefonoResponsable()).isNull();
+        assertThat(respuesta.parentesco()).isNull();
+        verify(pacienteRepository, never()).buscarPorOrganizacionYCurp(any(), any());
+    }
+
     /**
-     * Request completo y válido con los seis campos editables poblados.
+     * Request completo y válido con los seis campos editables poblados y la ficha vacía.
      */
     private static PacienteRequest requestCompleto() {
         return new PacienteRequest("María López Ramírez", "+52 55 5555 4321",
-                LocalDate.of(1985, 3, 14), "F", "maria.lopez@example.com", "Alergia a la penicilina");
+                LocalDate.of(1985, 3, 14), "F", "maria.lopez@example.com", "Alergia a la penicilina",
+                null, null, null, null, null, null);
+    }
+
+    /**
+     * Request con la ficha llena, para las pruebas de la CURP.
+     *
+     * @param curp CURP tal como la envía el cliente, posiblemente en minúsculas
+     * @return el request completo con la CURP indicada
+     */
+    private static PacienteRequest requestConCurp(String curp) {
+        return new PacienteRequest("María López Ramírez", "+52 55 5555 4321",
+                LocalDate.of(1985, 3, 14), "F", "maria.lopez@example.com", "Alergia a la penicilina",
+                curp, "Comerciante", "Av. Reforma 123, Col. Centro", "Rosa Ramírez Silva",
+                "+52 55 5555 8765", "Madre");
+    }
+
+    /**
+     * Request con el resto de la ficha y sin CURP, para el alta de urgencia.
+     *
+     * @return el request con la CURP en nulo
+     */
+    private static PacienteRequest requestSinCurp() {
+        return new PacienteRequest("María López Ramírez", "+52 55 5555 4321",
+                LocalDate.of(1985, 3, 14), "F", "maria.lopez@example.com", "Alergia a la penicilina",
+                null, "Comerciante", "Av. Reforma 123, Col. Centro", "Rosa Ramírez Silva",
+                "+52 55 5555 8765", "Madre");
     }
 
     /**

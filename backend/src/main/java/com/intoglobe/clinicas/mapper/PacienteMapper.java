@@ -27,13 +27,21 @@ public final class PacienteMapper {
      * {@code activo} ni {@code createdAt} son parámetros, porque el cliente no los
      * fija.</p>
      *
+     * <p>La ficha administrativa se aplica después del constructor con
+     * {@link Paciente#registrarFicha(String, String, String, String, String, String)}: el
+     * constructor conserva su firma y la ficha es un dato que puede faltar. La CURP se normaliza
+     * aquí también —es idempotente— para que la entidad reciba siempre la forma canónica aunque
+     * la petición no haya pasado por el DTO.</p>
+     *
      * @param organizacion organización dueña, ya resuelta por el service
      * @param request      datos de entrada validados
      * @return entidad transitoria activa con los campos editables asignados
      */
     public static Paciente aEntidad(Organizacion organizacion, PacienteRequest request) {
-        return new Paciente(organizacion, request.nombre(), request.telefono(),
+        var paciente = new Paciente(organizacion, request.nombre(), request.telefono(),
                 request.fechaNacimiento(), request.sexo(), request.email(), request.notas());
+        aplicarFicha(paciente, request);
+        return paciente;
     }
 
     /**
@@ -46,7 +54,7 @@ public final class PacienteMapper {
      * es plana.</p>
      *
      * @param paciente entidad de origen
-     * @return DTO de respuesta con los diez campos del registro
+     * @return DTO de respuesta con los dieciséis campos del registro
      */
     public static PacienteResponse aResponse(Paciente paciente) {
         return new PacienteResponse(
@@ -58,6 +66,12 @@ public final class PacienteMapper {
                 paciente.getSexo(),
                 paciente.getEmail(),
                 paciente.getNotas(),
+                paciente.getCurp(),
+                paciente.getOcupacion(),
+                paciente.getDomicilio(),
+                paciente.getNombreResponsable(),
+                paciente.getTelefonoResponsable(),
+                paciente.getParentesco(),
                 paciente.isActivo(),
                 paciente.getCreatedAt());
     }
@@ -66,7 +80,8 @@ public final class PacienteMapper {
      * Aplica los campos editables del request sobre una entidad existente.
      *
      * <p>Delega en {@code actualizarDatos} del modelo, que solo modifica nombre,
-     * teléfono, fecha de nacimiento, sexo, correo y notas. Nunca toca {@code id},
+     * teléfono, fecha de nacimiento, sexo, correo y notas, y en
+     * {@code registrarFicha} para los seis campos de la ficha. Nunca toca {@code id},
      * {@code activo}, {@code createdAt} ni {@code organizacion}: un valor {@code null}
      * en los opcionales borra el valor anterior, un paciente inactivo no se reactiva
      * y la fecha de alta no se reescribe.</p>
@@ -77,5 +92,21 @@ public final class PacienteMapper {
     public static void actualizarEntidad(Paciente paciente, PacienteRequest request) {
         paciente.actualizarDatos(request.nombre(), request.telefono(), request.fechaNacimiento(),
                 request.sexo(), request.email(), request.notas());
+        aplicarFicha(paciente, request);
+    }
+
+    /**
+     * Vuelca la ficha del request sobre el paciente, con la CURP ya canónica.
+     *
+     * <p>Es el único punto donde las dos operaciones —alta y actualización— traducen la ficha, para
+     * que la lista de campos no se duplique y no pueda divergir entre ellas.</p>
+     *
+     * @param paciente entidad a modificar
+     * @param request  datos de entrada validados
+     */
+    private static void aplicarFicha(Paciente paciente, PacienteRequest request) {
+        paciente.registrarFicha(Paciente.normalizarCurp(request.curp()), request.ocupacion(),
+                request.domicilio(), request.nombreResponsable(), request.telefonoResponsable(),
+                request.parentesco());
     }
 }

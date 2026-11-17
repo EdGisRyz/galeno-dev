@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.intoglobe.clinicas.dto.request.PacienteRequest;
 import com.intoglobe.clinicas.dto.response.PacienteResponse;
+import com.intoglobe.clinicas.exception.CurpDuplicadaEnOrganizacionException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.mapper.PacienteMapper;
 import com.intoglobe.clinicas.model.Paciente;
@@ -40,11 +41,22 @@ import com.intoglobe.clinicas.repository.PacienteRepository;
  * inexistente: aquí un {@code 403} confirmaría que el recurso existe en otra clínica.
  * Las operaciones por id obtienen la fila con {@code findById} y comparan
  * {@code paciente.getOrganizacion().getId()} en memoria, el mismo mecanismo que usa
- * {@code HorarioMedicoService}. <strong>No se agregan consultas a
- * {@link PacienteRepository}</strong> para lograrlo: el acotamiento por organización
- * vive en este servicio y el repositorio conserva un único método propio, el listado.
+ * {@code HorarioMedicoService}. Las consultas propias del repositorio son tres: los dos listados
+ * ({@code listarActivosPorOrganizacion} y {@code listarPorOrganizacion}, este último para que la
+ * pantalla pueda ofrecer la reactivación) y la búsqueda por CURP
+ * ({@code buscarPorOrganizacionYCurp}) que sostiene la unicidad; el acotamiento por organización de
+ * las operaciones por id vive en este servicio.
  * En {@code crear} y {@code listarPorOrganizacion} el acotamiento se comprueba comparando
  * la organización del path con el tenant del token, antes de tocar la base.</p>
+ *
+ * <p><strong>Unicidad de la CURP (S2 y S5).</strong> La CURP es opcional: un paciente sin CURP
+ * —urgencia, menor, extranjero— se registra sin problema. Cuando viene, no puede repetirse dentro
+ * de la organización y el intento responde
+ * {@link CurpDuplicadaEnOrganizacionException}, que el handler traduce a 409. Se comprueba en dos
+ * capas a propósito: aquí, antes de guardar, para que el mensaje sea preciso y determinista; y en la
+ * base ({@code paciente_organizacion_id_curp_key}), para que dos altas simultáneas no puedan colar
+ * el duplicado. La comparación es dentro de la organización y nunca entre organizaciones: dos
+ * clínicas distintas pueden tener al mismo paciente.</p>
  *
  * <p>La baja es lógica mediante {@link Paciente#desactivar()}. El borrado físico está
  * descartado porque {@code cita.paciente_id} y {@code adjunto.paciente_id} son
@@ -68,8 +80,10 @@ public class PacienteService {
      *
      * <p>El orden de las comprobaciones es contractual: primero se exige que la
      * organización del path sea la del token —un id de otra clínica responde 403 sin
-     * consultar nada— y después que la organización exista, para responder 404 en vez
-     * de dejar que la clave foránea produzca un 500.</p>
+     * consultar nada—, después que la organización exista, para responder 404 en vez
+     * de dejar que la clave foránea produzca un 500, y recién entonces que la CURP
+     * —si viene— esté libre dentro de la organización, porque la unicidad es del
+     * espacio de la organización y no se puede comprobar sin resolverla antes.</p>
      *
      * @param organizacionId organización dueña: el tenant del token, ya validado contra el
      *                       path por el controlador
@@ -79,12 +93,15 @@ public class PacienteService {
      * @throws AccessDeniedException     si la organización del path no es la del token; el
      *                                   handler lo traduce a 403 sin consultar la base
      * @throws ResourceNotFoundException si no existe una organización con ese id
+     * @throws CurpDuplicadaEnOrganizacionException si la CURP indicada ya existe en la
+     *                                   organización; el handler lo traduce a 409
      */
     @Transactional
     public PacienteResponse crear(UUID organizacionId, UUID tenantId, PacienteRequest request) {
         exigirOrganizacionDelTenant(organizacionId, tenantId);
         var organizacion = organizacionRepository.findById(organizacionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Organizacion", organizacionId));
+        exigirCurpDisponible(organizacionId, request.curp(), null);
         var guardado = pacienteRepository.save(PacienteMapper.aEntidad(organizacion, request));
         return PacienteMapper.aResponse(guardado);
     }
@@ -151,22 +168,29 @@ public class PacienteService {
     }
 
     /**
-     * Reemplaza los seis campos editables de un paciente existente.
+     * Reemplaza los seis campos editables de un paciente existente y su ficha administrativa.
      *
      * <p>La organización nunca cambia: el request no la contiene y el mapper no toca la
      * asociación, porque mover a un paciente de organización dejaría su historial clínico
      * en otra clínica. {@code id}, {@code activo} y {@code createdAt} tampoco se tocan:
      * actualizar un paciente inactivo no lo reactiva y la fecha de alta no se reescribe.</p>
      *
+     * <p>Si el request trae una CURP, se comprueba que no la use <em>otro</em> paciente de la
+     * organización: reenviar la propia CURP al editar el resto de los datos no es un duplicado.
+     * La comprobación va antes de escribir y el esquema sigue siendo la última palabra.</p>
+     *
      * @param id       identificador del paciente a actualizar
      * @param tenantId organización del token de la petición
      * @param request  datos de entrada validados
      * @return representación del paciente actualizado
      * @throws ResourceNotFoundException si no existe un paciente con ese id en ese tenant
+     * @throws CurpDuplicadaEnOrganizacionException si la CURP indicada ya la usa otro paciente de
+     *                                   la organización; el handler lo traduce a 409
      */
     @Transactional
     public PacienteResponse actualizar(UUID id, UUID tenantId, PacienteRequest request) {
         var paciente = buscarDelTenant(id, tenantId);
+        exigirCurpDisponible(paciente.getOrganizacion().getId(), request.curp(), paciente);
         PacienteMapper.actualizarEntidad(paciente, request);
         return PacienteMapper.aResponse(pacienteRepository.save(paciente));
     }
@@ -213,6 +237,40 @@ public class PacienteService {
         var paciente = buscarDelTenant(id, tenantId);
         paciente.activar();
         pacienteRepository.save(paciente);
+    }
+
+    /**
+     * Exige que la CURP esté libre dentro de la organización (S2 y S5).
+     *
+     * <p>Sin CURP no hay nada que comprobar: el registro sin CURP es válido y no compite por ningún
+     * hueco. La CURP se busca canónica —recortada y en mayúsculas, la misma definición que usa la
+     * entidad al guardar—, de modo que {@code sasc850101mdfrrn01} y {@code SASC850101MDFRRN01}
+     * compiten por el mismo lugar. La consulta está acotada a la organización: la misma CURP en otra
+     * clínica es otro registro y no un duplicado.</p>
+     *
+     * <p>La comprobación previa da un 409 entendible; la restricción
+     * {@code paciente_organizacion_id_curp_key} de la base sigue siendo la última palabra si dos
+     * peticiones llegan a la vez.</p>
+     *
+     * @param organizacionId organización en cuyo espacio de CURP se comprueba
+     * @param curp           CURP tal como llegó en el cuerpo, o {@code null}
+     * @param pacienteActual paciente que se está actualizando —su propia CURP no es un duplicado— o
+     *                       {@code null} al crear
+     * @throws CurpDuplicadaEnOrganizacionException si la CURP ya la usa otro paciente de la
+     *                                              organización
+     */
+    private void exigirCurpDisponible(UUID organizacionId, String curp, Paciente pacienteActual) {
+        var canonica = Paciente.normalizarCurp(curp);
+        if (canonica == null) {
+            return;
+        }
+        var ocupada = pacienteRepository.buscarPorOrganizacionYCurp(organizacionId, canonica)
+                .filter(otro -> pacienteActual == null
+                        || !Objects.equals(otro.getId(), pacienteActual.getId()))
+                .isPresent();
+        if (ocupada) {
+            throw new CurpDuplicadaEnOrganizacionException(canonica);
+        }
     }
 
     /**

@@ -60,6 +60,15 @@ public class GlobalExceptionHandler {
             "usuario_organizacion_id_email_key";
 
     /**
+     * Restricción de unicidad de la CURP dentro de la organización
+     * ({@code paciente_organizacion_id_curp_key}, migración V8). Es la última frontera de S2: el
+     * servicio comprueba la CURP antes de guardar, pero dos altas simultáneas pueden pasar las dos
+     * la comprobación.
+     */
+    private static final String RESTRICCION_CURP_UNICA_POR_ORGANIZACION =
+            "paciente_organizacion_id_curp_key";
+
+    /**
      * Responde 404 cuando la organización solicitada no existe.
      *
      * @param excepcion excepción de negocio con el mensaje seguro
@@ -104,6 +113,25 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(CorreoDuplicadoEnOrganizacionException.class)
     public ResponseEntity<ErrorResponse> manejarCorreoDuplicado(
             CorreoDuplicadoEnOrganizacionException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 409 cuando la CURP ya está ocupada dentro de la organización (S5).
+     *
+     * <p>Igual que el correo repetido, el conflicto no es de sintaxis: la petición está bien formada
+     * —el formato de la CURP se validó en el DTO— y lo que choca es el estado actual de la
+     * organización. Por eso 409 y no 400. El mensaje viene de la excepción porque explica
+     * <em>qué</em> CURP está ocupada y por qué el mismo paciente sí puede estar registrado en otra
+     * organización.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(CurpDuplicadaEnOrganizacionException.class)
+    public ResponseEntity<ErrorResponse> manejarCurpDuplicada(
+            CurpDuplicadaEnOrganizacionException excepcion, HttpServletRequest peticion) {
         return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
     }
 
@@ -239,16 +267,17 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Responde 409 cuando la restricción de correo único por organización es la que rechazó la
-     * escritura.
+     * Responde 409 cuando una restricción de unicidad por organización rechazó la escritura.
      *
-     * <p>Es la red de seguridad de R2. El servicio comprueba el correo antes de guardar, pero dos
-     * altas simultáneas pueden pasar las dos la comprobación: entonces la última palabra la tiene
-     * {@code usuario_organizacion_id_email_key} y el cliente debe recibir el mismo 409 que en el
-     * camino normal, no un 500 por error de integridad.</p>
+     * <p>Cubre las dos unicidades de negocio que el servicio comprueba antes de guardar: el correo
+     * de una cuenta ({@code usuario_organizacion_id_email_key}, R2) y la CURP de un paciente
+     * ({@code paciente_organizacion_id_curp_key}, S2). El servicio comprueba las dos antes de
+     * escribir, pero dos peticiones simultáneas pueden pasar la comprobación: entonces la última
+     * palabra la tiene el esquema y el cliente debe recibir el mismo 409 que en el camino normal, no
+     * un 500 por error de integridad.</p>
      *
      * <p><strong>Esta rama es la única de todo el traductor que atiende {@code DataIntegrityViolationException},
-     * y no cambia nada fuera de este módulo:</strong> si la restricción violada es cualquier otra
+     * y no cambia nada fuera de estos dos módulos:</strong> si la restricción violada es cualquier otra
      * —una clave foránea, otro {@code UNIQUE}, un {@code CHECK}— la excepción se relanza intacta y
      * sigue el camino que ya seguía, que es el error del contenedor. Traducirla en bloque a 409 sería
      * peor: convertiría en conflicto de negocio cualquier fallo de integridad de cualquier módulo.</p>
@@ -260,21 +289,28 @@ public class GlobalExceptionHandler {
      *
      * @param excepcion error de integridad lanzado al escribir
      * @param peticion  petición que originó el error
-     * @return respuesta 409 con {@link ErrorResponse} si la restricción es la del correo
+     * @return respuesta 409 con {@link ErrorResponse} si la restricción es una de las dos unicidades
      * @throws DataIntegrityViolationException si la restricción violada es cualquier otra
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ErrorResponse> manejarCorreoDuplicadoEnCarrera(
+    public ResponseEntity<ErrorResponse> manejarUnicidadDuplicadaEnCarrera(
             DataIntegrityViolationException excepcion, HttpServletRequest peticion) {
-        if (!violaLaUnicidadDelCorreo(excepcion)) {
-            // Cualquier otra violación de integridad conserva su comportamiento: no se traduce aquí.
-            throw excepcion;
+        if (violaAlgunaUnicidad(excepcion, RESTRICCION_CORREO_UNICO_POR_ORGANIZACION)) {
+            return construir(HttpStatus.CONFLICT,
+                    "Ya existe una cuenta con ese correo en esta organización. El correo es único dentro "
+                            + "de la organización, aunque el mismo correo pueda tener cuentas independientes "
+                            + "en otras organizaciones",
+                    peticion);
         }
-        return construir(HttpStatus.CONFLICT,
-                "Ya existe una cuenta con ese correo en esta organización. El correo es único dentro "
-                        + "de la organización, aunque el mismo correo pueda tener cuentas independientes "
-                        + "en otras organizaciones",
-                peticion);
+        if (violaAlgunaUnicidad(excepcion, RESTRICCION_CURP_UNICA_POR_ORGANIZACION)) {
+            return construir(HttpStatus.CONFLICT,
+                    "Ya existe un paciente con esa CURP en esta organización. La CURP es única dentro "
+                            + "de la organización, aunque el mismo paciente pueda estar registrado en "
+                            + "otras organizaciones",
+                    peticion);
+        }
+        // Cualquier otra violación de integridad conserva su comportamiento: no se traduce aquí.
+        throw excepcion;
     }
 
     /**
@@ -388,19 +424,20 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Indica si el error de integridad proviene de la restricción de correo único por organización.
+     * Indica si el error de integridad proviene de alguna de las restricciones de unicidad indicadas.
      *
      * <p>Recorre la cadena de causas porque el mensaje útil no está en la excepción de Spring, sino en
-     * la de JDBC o en la del proveedor. El nombre de la restricción es único en el esquema, así que
-     * encontrarlo en la cadena identifica la violación sin ambigüedad.</p>
+     * la de JDBC o en la del proveedor. Los nombres de las restricciones son únicos en el esquema, así
+     * que encontrar uno en la cadena identifica la violación sin ambigüedad.</p>
      *
-     * @param excepcion error de integridad lanzado al escribir
-     * @return {@code true} si la restricción violada es {@code usuario_organizacion_id_email_key}
+     * @param excepcion    error de integridad lanzado al escribir
+     * @param restricciones nombres de restricción que se quieren reconocer
+     * @return {@code true} si la violación es de alguna de esas restricciones
      */
-    private static boolean violaLaUnicidadDelCorreo(Throwable excepcion) {
+    private static boolean violaAlgunaUnicidad(Throwable excepcion, String... restricciones) {
         for (var actual = excepcion; actual != null; actual = actual.getCause()) {
-            if (actual.getMessage() != null
-                    && actual.getMessage().contains(RESTRICCION_CORREO_UNICO_POR_ORGANIZACION)) {
+            var mensaje = actual.getMessage();
+            if (mensaje != null && java.util.Arrays.stream(restricciones).anyMatch(mensaje::contains)) {
                 return true;
             }
             if (actual.getCause() == actual) {
