@@ -97,24 +97,51 @@ export const mockDoctors: (Medico & { duracionConsultaMin?: number })[] = [
 ];
 
 export const mockDoctorSchedules: HorarioMedico[] = [
-  // Dra. Elena (Lunes a Viernes 09:00 a 14:00)
-  ...[1, 2, 3, 4, 5].map((dia) => ({
+  // Dra. Elena atiende de lunes a viernes 09:00 a 14:00, y el jueves en el consultorio 102: el
+  // caso que motivó el consultorio por bloque (cuatro días en un aula, uno en otra).
+  ...[1, 2, 3, 5].map((dia) => ({
     id: `sch-elena-${dia}`,
     medicoId: 'med-001',
+    consultorioId: 'room-101',
+    consultorioNombre: 'Consultorio 101 - Medicina General',
     diaSemana: dia,
     horaInicio: '09:00:00',
     horaFin: '14:00:00',
     duracionConsulta: 30 as const,
   })),
+  {
+    id: 'sch-elena-4',
+    medicoId: 'med-001',
+    consultorioId: 'room-102',
+    consultorioNombre: 'Consultorio 102 - Pediatría y Nutrición',
+    diaSemana: 4,
+    horaInicio: '09:00:00',
+    horaFin: '14:00:00',
+    duracionConsulta: 30 as const,
+  },
   // Dr. Roberto (Lunes, Miércoles, Viernes 10:00 a 16:00)
   ...[1, 3, 5].map((dia) => ({
     id: `sch-roberto-${dia}`,
     medicoId: 'med-002',
+    consultorioId: 'room-102',
+    consultorioNombre: 'Consultorio 102 - Pediatría y Nutrición',
     diaSemana: dia,
     horaInicio: '10:00:00',
     horaFin: '16:00:00',
     duracionConsulta: 45 as const,
   })),
+];
+
+/**
+ * Vínculos médico-consultorio del mock: refleja la tabla `medico_consultorio` del backend.
+ *
+ * El consultorio principal de cada médico figura asignado —el backend lo asigna al crear el
+ * médico— y la Dra. Elena tiene además el 102, que es donde atiende el jueves.
+ */
+export const mockMedicoConsultorios: { medicoId: string; consultorioId: string }[] = [
+  { medicoId: 'med-001', consultorioId: 'room-101' },
+  { medicoId: 'med-001', consultorioId: 'room-102' },
+  { medicoId: 'med-002', consultorioId: 'room-102' },
 ];
 
 export const mockPatients: (Paciente & { ficha?: PatientIdentification })[] = [

@@ -4,6 +4,7 @@ import {
   mockPatients,
   mockDoctors,
   mockDoctorSchedules,
+  mockMedicoConsultorios,
   mockClinicRooms,
   mockOrganization,
   mockAppointments,
@@ -76,6 +77,10 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
   const medicos: MedicoMock[] = [...mockDoctors];
   const horarios: HorarioMedico[] = [...mockDoctorSchedules];
   const usuarios: Usuario[] = [...mockUsers];
+  // Vínculos médico-consultorio: refleja `medico_consultorio`, que el backend escribe al crear el
+  // médico (su principal) y al asignar. Es la lista que la pantalla de médicos muestra y la que
+  // limita las opciones de cada bloque de horario.
+  const asignaciones: { medicoId: string; consultorioId: string }[] = [...mockMedicoConsultorios];
   let appointments = [...mockAppointments];
   let soapNotes = [...mockSoapNotes];
   const diagnosticos: Diagnostico[] = [...mockDiagnoses];
@@ -746,6 +751,156 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     }
 
     // ─────────────────────────────────────────
+    // CONSULTORIOS ASIGNADOS A UN MÉDICO (contrato real)
+    // ─────────────────────────────────────────
+    // Colección anidada al médico (`/medicos/{medicoId}/consultorios`) e ítem que es el par
+    // médico-consultorio (`/medicos/{medicoId}/consultorios/{consultorioId}`). Las rutas son
+    // exactas, como el resto de este archivo, y no llevan organización: el tenant sale del token,
+    // igual que en la agenda de horarios.
+    //
+    // El listado ordena por nombre, que es parte del contrato: la pantalla lo pinta tal como llega.
+    // Las dos escrituras responden 204 sin cuerpo y son idempotentes. El borrado reproduce los dos
+    // conflictos del backend —consultorio principal y bloques de horario— porque es el motivo que
+    // la pantalla muestra al administrador: un mock que siempre respondiera 204 escondería justo
+    // la regla que la interfaz tiene que explicar.
+    const coleccionDeConsultoriosDelMedico = url.match(/^\/medicos\/([^/]+)\/consultorios\/?$/);
+    const consultorioAsignadoDelMedico = url.match(/^\/medicos\/([^/]+)\/consultorios\/([^/]+)\/?$/);
+
+    if (coleccionDeConsultoriosDelMedico && method === 'get') {
+      await delay();
+      const medicoId = coleccionDeConsultoriosDelMedico[1];
+      // Un id mal escrito responde 404 y no una lista vacía que ocultaría el error, igual que el
+      // backend.
+      if (!medicos.some((m) => m.id === medicoId)) {
+        config.adapter = async () => ({
+          data: { mensaje: 'Médico no encontrado' },
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+      const asignados = asignaciones
+        .filter((a) => a.medicoId === medicoId)
+        .map((a) => consultorios.find((c) => c.id === a.consultorioId))
+        .filter((c): c is Consultorio => c !== undefined)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
+      config.adapter = async () => ({
+        data: asignados,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (coleccionDeConsultoriosDelMedico && method === 'post') {
+      await delay();
+      const medicoId = coleccionDeConsultoriosDelMedico[1];
+      const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const consultorio = consultorios.find((c) => c.id === body.consultorioId);
+
+      if (!medicos.some((m) => m.id === medicoId) || !consultorio) {
+        config.adapter = async () => ({
+          data: { mensaje: 'Médico o consultorio no encontrado' },
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+
+      // Idempotente: el par ya asignado no se duplica y la respuesta es la misma.
+      if (
+        !asignaciones.some((a) => a.medicoId === medicoId && a.consultorioId === consultorio.id)
+      ) {
+        asignaciones.push({ medicoId, consultorioId: consultorio.id });
+      }
+
+      config.adapter = async () => ({
+        data: undefined,
+        status: 204,
+        statusText: 'No Content',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    if (consultorioAsignadoDelMedico && method === 'delete') {
+      await delay();
+      const medicoId = consultorioAsignadoDelMedico[1];
+      const consultorioId = consultorioAsignadoDelMedico[2];
+      const medico = medicos.find((m) => m.id === medicoId);
+
+      if (!medico || !consultorios.some((c) => c.id === consultorioId)) {
+        config.adapter = async () => ({
+          data: { mensaje: 'Consultorio no encontrado' },
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+
+      if (medico.consultorioId === consultorioId) {
+        config.adapter = async () => ({
+          data: {
+            mensaje:
+              `No se puede quitar el consultorio ${consultorioId} del médico ${medicoId}` +
+              ': es su consultorio principal, la referencia por defecto de su agenda y de sus ' +
+              'pacientes. El consultorio principal no se retira',
+          },
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+
+      const bloques = horarios.filter(
+        (h) => h.medicoId === medicoId && h.consultorioId === consultorioId,
+      );
+      if (bloques.length > 0) {
+        config.adapter = async () => ({
+          data: {
+            mensaje:
+              `No se puede quitar el consultorio ${consultorioId} del médico ${medicoId}` +
+              `: todavía tiene ${bloques.length} ` +
+              (bloques.length === 1 ? 'bloque de horario' : 'bloques de horario') +
+              ' del médico. Cambiá esos bloques a otro consultorio asignado o eliminálos antes de ' +
+              'retirar este',
+          },
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+
+      const idx = asignaciones.findIndex(
+        (a) => a.medicoId === medicoId && a.consultorioId === consultorioId,
+      );
+      // Borrado físico e idempotente: retirar un vínculo que ya no estaba responde igual.
+      if (idx !== -1) asignaciones.splice(idx, 1);
+
+      config.adapter = async () => ({
+        data: undefined,
+        status: 204,
+        statusText: 'No Content',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
+    // ─────────────────────────────────────────
     // HORARIOS DE MEDICO (HU3-5, contrato real)
     // ─────────────────────────────────────────
     // Colección anidada al médico dueño de la agenda (`/medicos/{medicoId}/horarios`) e ítem plano
@@ -756,6 +911,14 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     const coleccionDeHorarios = ruta.match(/^\/medicos\/([^/]+)\/horarios\/?$/);
     const horarioPorId = ruta.match(/^\/horarios\/([^/]+)\/?$/);
     const DURACIONES_VALIDAS = new Set([20, 30, 45, 60]);
+
+    /** Nombre del consultorio del mock, para no prometer un nombre que el store no tiene. */
+    const nombreDelConsultorio = (id: string | undefined) =>
+      consultorios.find((c) => c.id === id)?.nombre ?? '';
+
+    /** Un bloque solo puede apuntar a un consultorio asignado al médico (regla de la V6). */
+    const consultorioEstaAsignado = (medicoId: string, consultorioId: string) =>
+      asignaciones.some((a) => a.medicoId === medicoId && a.consultorioId === consultorioId);
 
     if (coleccionDeHorarios && method === 'get') {
       await delay();
@@ -789,10 +952,34 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
         return config;
       }
 
+      // `consultorioId` es opcional en el alta: sin él el bloque va al consultorio principal del
+      // médico, igual que el backend. Si viene, tiene que estar asignado —es la regla «primero
+      // asignar, después agendar»— o el bloque mentiría sobre dónde se atiende.
+      const medico = medicos.find((m) => m.id === medicoId);
+      const consultorioId: string | undefined = body.consultorioId ?? medico?.consultorioId;
+      if (!consultorioId || !consultorioEstaAsignado(medicoId, consultorioId)) {
+        config.adapter = async () => ({
+          data: {
+            mensaje:
+              `El consultorio ${consultorioId ?? ''} no está asignado al médico ${medicoId}` +
+              ': primero hay que asignarlo al médico y después crear o mover el bloque' +
+              ' de horario a ese consultorio',
+          },
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config,
+        });
+        return config;
+      }
+
       const newHorario: HorarioMedico = {
         id: `horario-${Date.now()}`,
         ...body,
         medicoId,
+        // El nombre viaja en el DTO para que la fila lo pinte sin pedir el consultorio aparte.
+        consultorioId,
+        consultorioNombre: nombreDelConsultorio(consultorioId),
       };
       horarios.unshift(newHorario);
       config.adapter = async () => ({
@@ -823,9 +1010,36 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
       }
 
       if (idx !== -1) {
+        // En la edición, un cuerpo sin `consultorioId` conserva el consultorio actual del bloque:
+        // el PUT reemplaza día, horas y duración, no muda el bloque de consultorio en silencio.
+        const consultorioId = body.consultorioId ?? horarios[idx].consultorioId;
+        if (
+          body.consultorioId &&
+          !consultorioEstaAsignado(horarios[idx].medicoId, body.consultorioId)
+        ) {
+          config.adapter = async () => ({
+            data: {
+              mensaje:
+                `El consultorio ${body.consultorioId} no está asignado al médico ` +
+                `${horarios[idx].medicoId}: primero hay que asignarlo al médico y después crear o` +
+                ' mover el bloque de horario a ese consultorio',
+            },
+            status: 409,
+            statusText: 'Conflict',
+            headers: {},
+            config,
+          });
+          return config;
+        }
         // El médico dueño de la agenda no se envía ni se puede cambiar.
         const editable = body as Partial<HorarioMedico>;
-        horarios[idx] = { ...horarios[idx], ...editable, medicoId: horarios[idx].medicoId };
+        horarios[idx] = {
+          ...horarios[idx],
+          ...editable,
+          medicoId: horarios[idx].medicoId,
+          consultorioId,
+          consultorioNombre: nombreDelConsultorio(consultorioId),
+        };
       }
 
       config.adapter = async () => ({

@@ -32,6 +32,7 @@ import {
   RefreshCw,
   Clock,
   CalendarClock,
+  MapPin,
 } from 'lucide-react';
 
 const MENSAJE_ERROR_CARGA =
@@ -46,6 +47,12 @@ const MENSAJE_ERROR_HORARIO_BAJA =
   'No fue posible eliminar el bloque de disponibilidad. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_HORARIO_GUARDADO =
   'No fue posible guardar el bloque de disponibilidad. Revisa que la hora de inicio sea anterior a la de fin y que la duración sea válida.';
+const MENSAJE_ERROR_CONSULTORIOS_ASIGNADOS =
+  'No fue posible obtener los consultorios asignados a este médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
+const MENSAJE_ERROR_ASIGNAR_CONSULTORIO =
+  'No fue posible asignar el consultorio al médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
+const MENSAJE_ERROR_QUITAR_CONSULTORIO =
+  'No fue posible quitar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
 const DIAS_SEMANA = [
   { value: 0, label: 'Domingo' },
@@ -73,7 +80,21 @@ const EMPTY_HORARIO_FORM = {
   horaInicio: '09:00',
   horaFin: '14:00',
   duracionConsulta: '30',
+  consultorioId: '',
 };
+
+/**
+ * Mensaje que el backend adjunta a un error de negocio (`ErrorResponse.mensaje`), si viene.
+ *
+ * El 409 al quitar un consultorio explica el motivo —es el principal del médico o todavía tiene
+ * bloques de horario—: reemplazarlo por un texto genérico dejaría al administrador sin saber qué
+ * tiene que cambiar antes de reintentar.
+ */
+function mensajeDelBackend(error: unknown, respaldo: string): string {
+  const posible = error as { response?: { data?: { mensaje?: string } } } | null | undefined;
+  const mensaje = posible?.response?.data?.mensaje;
+  return typeof mensaje === 'string' && mensaje.trim() !== '' ? mensaje : respaldo;
+}
 
 export function MedicosPage() {
   /**
@@ -120,11 +141,28 @@ export function MedicosPage() {
   const [horarioFormError, setHorarioFormError] = useState<string | null>(null);
   const [horarioAEliminar, setHorarioAEliminar] = useState<string | null>(null);
 
+  // Consultorios asignados al médico del panel: es el conjunto del que cada bloque elige uno y la
+  // lista que el administrador amplía o reduce.
+  const [consultoriosAsignados, setConsultoriosAsignados] = useState<Consultorio[]>([]);
+  const [isLoadingAsignados, setIsLoadingAsignados] = useState(false);
+  const [asignadosError, setAsignadosError] = useState<string | null>(null);
+  const [consultorioAAgregar, setConsultorioAAgregar] = useState('');
+  const [isAsignandoConsultorio, setIsAsignandoConsultorio] = useState(false);
+  const [quitandoConsultorioId, setQuitandoConsultorioId] = useState<string | null>(null);
+  const [asignacionError, setAsignacionError] = useState<string | null>(null);
+
   // Los horarios sí son del médico: el backend permite a MEDICO crear, editar y borrar bloques de
   // **su propia** agenda, y responde 403 con la de otro. La UI replica esa regla con el claim
   // `medicoId` de la sesión en lugar de esconder el panel entero.
   const puedeGestionarHorarios =
     rolDeSesion === 'ADMIN' || (rolDeSesion === 'MEDICO' && medicoIdDeSesion === horariosDeId);
+
+  // La lectura de los consultorios asignados admite al ADMIN y al propio MEDICO; asignar y quitar
+  // son solo de ADMIN. Con la agenda de otro médico no se pide la lista: el backend respondería 403
+  // y la pantalla mostraría un error por un dato que no se va a ofrecer.
+  const puedeConsultarAsignadosDe = (medicoId: string) =>
+    rolDeSesion === 'ADMIN' || (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medicoId);
+  const puedeAsignarConsultorios = puedeEditarMedicos;
 
   // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
   // render, el efecto se dispararía en bucle.
@@ -256,14 +294,60 @@ export function MedicosPage() {
     }
   };
 
+  /** Consultorio principal del médico: es el valor por defecto de un bloque nuevo. */
+  const principalDeMedico = (medicoId: string | null) =>
+    medicos.find((m) => m.id === medicoId)?.consultorioId ?? '';
+
+  /** Formulario de bloque en blanco, con el principal del médico ya elegido. */
+  const formularioDeHorarioVacio = () => ({
+    ...EMPTY_HORARIO_FORM,
+    consultorioId: principalDeMedico(horariosDeId),
+  });
+
+  /**
+   * Carga los consultorios asignados del médico del panel. Devuelve la promesa para poder releer la
+   * lista después de asignar o quitar: las dos escrituras responden 204 sin cuerpo, así que la
+   * forma canónica —ordenada por nombre por el backend— solo la da esta lectura.
+   */
+  const cargarConsultoriosAsignados = (medicoId: string) => {
+    setIsLoadingAsignados(true);
+    setAsignadosError(null);
+    return api
+      .get<Consultorio[]>(`/medicos/${medicoId}/consultorios`)
+      .then((res) => {
+        setConsultoriosAsignados(res.data);
+        // Si el consultorio elegido en el formulario dejó de estar asignado —lo acaba de quitar el
+        // administrador—, el bloque no puede seguir apuntando a él: vuelve al principal.
+        setHorarioForm((f) => {
+          if (res.data.some((c) => c.id === f.consultorioId)) return f;
+          const principal = res.data.find((c) => c.id === principalDeMedico(medicoId))?.id;
+          return { ...f, consultorioId: principal ?? res.data[0]?.id ?? '' };
+        });
+      })
+      .catch((err) => {
+        console.error('Error al cargar consultorios asignados:', resumenDeErrorHttp(err));
+        setConsultoriosAsignados([]);
+        setAsignadosError(MENSAJE_ERROR_CONSULTORIOS_ASIGNADOS);
+      })
+      .finally(() => setIsLoadingAsignados(false));
+  };
+
   const openHorarios = (medicoId: string) => {
     setHorariosDeId(medicoId);
     setHorarios([]);
     setHorariosError(null);
-    setHorarioForm(EMPTY_HORARIO_FORM);
+    setHorarioForm({
+      ...EMPTY_HORARIO_FORM,
+      consultorioId: principalDeMedico(medicoId),
+    });
     setEditingHorarioId(null);
     setHorarioFormError(null);
+    setConsultoriosAsignados([]);
+    setAsignadosError(null);
+    setAsignacionError(null);
+    setConsultorioAAgregar('');
     setIsLoadingHorarios(true);
+    if (puedeConsultarAsignadosDe(medicoId)) cargarConsultoriosAsignados(medicoId);
     api
       .get<HorarioMedico[]>(`/medicos/${medicoId}/horarios`)
       .then((res) => setHorarios(res.data))
@@ -274,6 +358,46 @@ export function MedicosPage() {
       .finally(() => setIsLoadingHorarios(false));
   };
 
+  /** Asigna un consultorio de la organización al médico. La respuesta es 204 sin cuerpo. */
+  const handleAsignarConsultorio = async () => {
+    if (!horariosDeId || !consultorioAAgregar) return;
+    try {
+      setIsAsignandoConsultorio(true);
+      setAsignacionError(null);
+      await api.post(`/medicos/${horariosDeId}/consultorios`, {
+        consultorioId: consultorioAAgregar,
+      });
+      await cargarConsultoriosAsignados(horariosDeId);
+      setConsultorioAAgregar('');
+    } catch (err) {
+      console.error('Error al asignar consultorio:', resumenDeErrorHttp(err));
+      setAsignacionError(MENSAJE_ERROR_ASIGNAR_CONSULTORIO);
+    } finally {
+      setIsAsignandoConsultorio(false);
+    }
+  };
+
+  /**
+   * Retira un consultorio del médico. El backend responde 409 cuando es el principal o cuando
+   * todavía tiene bloques de horario, y su mensaje explica cuál de las dos reglas lo impide: es el
+   * texto que se muestra, porque un aviso genérico no diría qué hay que cambiar antes de
+   * reintentar.
+   */
+  const handleQuitarConsultorio = async (consultorioId: string) => {
+    if (!horariosDeId) return;
+    try {
+      setQuitandoConsultorioId(consultorioId);
+      setAsignacionError(null);
+      await api.delete(`/medicos/${horariosDeId}/consultorios/${consultorioId}`);
+      await cargarConsultoriosAsignados(horariosDeId);
+    } catch (err) {
+      console.error('Error al quitar consultorio:', resumenDeErrorHttp(err));
+      setAsignacionError(mensajeDelBackend(err, MENSAJE_ERROR_QUITAR_CONSULTORIO));
+    } finally {
+      setQuitandoConsultorioId(null);
+    }
+  };
+
   const openEditHorario = (h: HorarioMedico) => {
     setEditingHorarioId(h.id);
     setHorarioForm({
@@ -281,6 +405,7 @@ export function MedicosPage() {
       horaInicio: h.horaInicio.slice(0, 5),
       horaFin: h.horaFin.slice(0, 5),
       duracionConsulta: String(h.duracionConsulta),
+      consultorioId: h.consultorioId,
     });
     setHorarioFormError(null);
   };
@@ -294,6 +419,9 @@ export function MedicosPage() {
       horaInicio: `${horarioForm.horaInicio}:00`,
       horaFin: `${horarioForm.horaFin}:00`,
       duracionConsulta: Number(horarioForm.duracionConsulta),
+      // Opcional en el backend: sin él el alta usa el principal y la edición conserva el actual.
+      // La pantalla siempre manda el elegido, para que el bloque diga dónde se atiende.
+      ...(horarioForm.consultorioId ? { consultorioId: horarioForm.consultorioId } : {}),
     };
 
     try {
@@ -312,7 +440,7 @@ export function MedicosPage() {
           ),
         );
       }
-      setHorarioForm(EMPTY_HORARIO_FORM);
+      setHorarioForm(formularioDeHorarioVacio());
       setEditingHorarioId(null);
     } catch (err) {
       console.error('Error al guardar horario:', resumenDeErrorHttp(err));
@@ -335,6 +463,13 @@ export function MedicosPage() {
       setHorarioAEliminar(null);
     }
   };
+
+  // Solo los consultorios de la organización que todavía no están asignados pueden ofrecerse: la
+  // lista de asignados es un conjunto, no un historial.
+  const consultoriosPorAsignar = useMemo(
+    () => consultorios.filter((c) => !consultoriosAsignados.some((a) => a.id === c.id)),
+    [consultorios, consultoriosAsignados],
+  );
 
   const filteredMedicos = useMemo(() => {
     const term = search.toLowerCase();
@@ -359,6 +494,10 @@ export function MedicosPage() {
 
   const medicoADesactivar = medicos.find((m) => m.id === deactivatingId);
   const medicoDeHorarios = medicos.find((m) => m.id === horariosDeId);
+  // La sección de asignados solo se pinta donde su lectura está permitida: ADMIN, o el MEDICO de
+  // su propia agenda. Con la de otro médico el backend respondería 403 y no hay nada que ofrecer.
+  const puedeConsultarAsignados =
+    horariosDeId !== null && puedeConsultarAsignadosDe(horariosDeId);
   const horarioAEliminarDatos = horarios.find((h) => h.id === horarioAEliminar);
 
   return (
@@ -768,6 +907,108 @@ export function MedicosPage() {
         maxWidth="lg"
       >
         <div className="space-y-4">
+          {/* ─────────────────────────────────────────
+              CONSULTORIOS ASIGNADOS AL MÉDICO
+              ───────────────────────────────────────── */}
+          {/* Es el conjunto del que cada bloque elige uno: primero se asigna, después se agenda.
+              La lectura la ve también el propio médico; asignar y quitar son solo de ADMIN, igual
+              que en el backend. */}
+          {puedeConsultarAsignados && (
+            <section className="space-y-2">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-[#0B1C30]">
+                  Consultorios del médico
+                </h4>
+                <p className="text-[11px] text-[#64748B] mt-1">
+                  Cada bloque se dicta en uno de estos consultorios. El principal no se puede quitar.
+                </p>
+              </div>
+
+              {asignadosError && (
+                <Alert variant="error" title="Error">
+                  {asignadosError}
+                </Alert>
+              )}
+              {asignacionError && (
+                <Alert variant="error" title="No se pudo completar la operación">
+                  {asignacionError}
+                </Alert>
+              )}
+
+              {isLoadingAsignados ? (
+                <span
+                  role="status"
+                  aria-live="polite"
+                  className="inline-flex items-center gap-2 text-[#64748B] text-sm py-2"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Cargando consultorios asignados...
+                </span>
+              ) : consultoriosAsignados.length > 0 ? (
+                <ul aria-label="Consultorios asignados" className="space-y-1.5">
+                  {consultoriosAsignados.map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]"
+                    >
+                      <span className="text-xs text-[#41484D] flex items-center gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-[#64748B]" />
+                        <span className="text-[#0B1C30]">{c.nombre}</span>
+                        {medicoDeHorarios?.consultorioId === c.id && (
+                          <Badge variant="primary" showDot={false}>
+                            Principal
+                          </Badge>
+                        )}
+                      </span>
+                      {puedeAsignarConsultorios && (
+                        <button
+                          type="button"
+                          onClick={() => handleQuitarConsultorio(c.id)}
+                          disabled={quitandoConsultorioId === c.id}
+                          aria-label={`Quitar ${c.nombre}`}
+                          title="Quitar consultorio"
+                          className="p-1.5 rounded-md text-[#E11D48] hover:bg-[#FEF2F2] disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-[#94A3B8] py-2">
+                  Este médico todavía no tiene consultorios asignados.
+                </p>
+              )}
+
+              {puedeAsignarConsultorios && consultoriosPorAsignar.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                  <Select
+                    label="Consultorio a asignar"
+                    value={consultorioAAgregar}
+                    onChange={(e) => setConsultorioAAgregar(e.target.value)}
+                    options={consultoriosPorAsignar.map((c) => ({
+                      value: c.id,
+                      label: c.nombre,
+                    }))}
+                    placeholder="Selecciona..."
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAsignarConsultorio}
+                    isLoading={isAsignandoConsultorio}
+                    disabled={!consultorioAAgregar}
+                    leftIcon={<Plus className="w-3.5 h-3.5" />}
+                  >
+                    Asignar consultorio
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
+
           {horariosError && (
             <Alert variant="error" title="Error">
               {horariosError}
@@ -784,19 +1025,23 @@ export function MedicosPage() {
               Cargando horarios...
             </span>
           ) : horarios.length > 0 ? (
-            <ul className="space-y-1.5">
+            <ul aria-label="Bloques de disponibilidad" className="space-y-1.5">
               {horarios.map((h) => (
                 <li
                   key={h.id}
                   className="flex items-center justify-between px-3 py-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]"
                 >
-                  <span className="text-xs text-[#41484D] flex items-center gap-2">
+                  <span className="text-xs text-[#41484D] flex items-center gap-2 flex-wrap">
                     <Clock className="w-3.5 h-3.5 text-[#64748B]" />
                     <strong className="text-[#0B1C30]">
                       {DIAS_SEMANA.find((d) => d.value === h.diaSemana)?.label}
                     </strong>
                     {h.horaInicio.slice(0, 5)}–{h.horaFin.slice(0, 5)} · citas de{' '}
                     {h.duracionConsulta} min
+                    <span className="text-[#0A4D68] flex items-center gap-1.5">
+                      <MapPin className="w-3 h-3" />
+                      {h.consultorioNombre}
+                    </span>
                   </span>
                   {puedeGestionarHorarios && (
                     <div className="inline-flex items-center gap-1">
@@ -838,6 +1083,16 @@ export function MedicosPage() {
                 </div>
               )}
               <Select
+                label="Consultorio del bloque"
+                value={horarioForm.consultorioId}
+                onChange={(e) => setHorarioForm((f) => ({ ...f, consultorioId: e.target.value }))}
+                // Solo los asignados: el backend rechaza con 409 un bloque en un consultorio que el
+                // médico no tiene. Si la lista no llegó, el campo queda vacío y el alta usa el
+                // principal, igual que el contrato.
+                options={consultoriosAsignados.map((c) => ({ value: c.id, label: c.nombre }))}
+                disabled={consultoriosAsignados.length === 0}
+              />
+              <Select
                 label="Día"
                 value={horarioForm.diaSemana}
                 onChange={(e) => setHorarioForm((f) => ({ ...f, diaSemana: e.target.value }))}
@@ -873,7 +1128,7 @@ export function MedicosPage() {
                     size="sm"
                     onClick={() => {
                       setEditingHorarioId(null);
-                      setHorarioForm(EMPTY_HORARIO_FORM);
+                      setHorarioForm(formularioDeHorarioVacio());
                       setHorarioFormError(null);
                     }}
                   >
