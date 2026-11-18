@@ -5,6 +5,21 @@ import { api, authApi } from '@/lib/axios';
 import { useAuthStore } from '@/store/auth.store';
 import { CLAIMS, expVigente, makeToken } from '../helpers/jwt';
 
+// La sesión consulta el nombre de la organización al abrirse (S2). Estas sondas sustituyen la red
+// con adaptadores propios y cuentan peticiones, así que esa consulta se resuelve con un mock: no
+// debe aparecer en `apiPeticiones` ni salir a la red.
+vi.mock('@/features/organizaciones/organizacion.service', () => ({
+  organizacionService: {
+    obtenerPorId: vi.fn().mockResolvedValue({
+      id: 'org-001',
+      nombre: 'Clínica de prueba',
+      plan: 'CLINICA',
+      activo: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }),
+  },
+}));
+
 /**
  * Sondas durables de la sesión en memoria (ADR-011, T6b). Cubren tres hechos observables que el
  * resto de la suite solo comprueba de forma indirecta:
@@ -88,6 +103,7 @@ beforeEach(() => {
     isAuthenticated: false,
     inicializando: false,
     tenantSlug: '',
+    organizacionNombre: '',
     showInactivityWarning: false,
     lastActivity: Date.now(),
   });

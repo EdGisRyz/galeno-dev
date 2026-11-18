@@ -161,6 +161,7 @@ describe('AgendaPage · rutas del contrato del backend (colección de pacientes 
       user: null,
       isAuthenticated: false,
       tenantSlug: '',
+      organizacionNombre: '',
       inicializando: false,
     });
 

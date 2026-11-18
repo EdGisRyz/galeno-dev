@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import { conectarSesionHttp } from '@/lib/axios';
 import { authService } from '@/features/auth/auth.service';
+import { organizacionService } from '@/features/organizaciones/organizacion.service';
 import type { AuthUser, UserRole } from '@/features/auth/auth.types';
 
 interface AuthState {
@@ -22,6 +23,12 @@ interface AuthState {
    * sesión.
    */
   tenantSlug: string;
+  /**
+   * Nombre de la organización de la sesión, para la cabecera. Es un dato de **presentación**:
+   * no viaja en el token (L2) y se consulta al backend una sola vez por sesión. Vacío cuando la
+   * consulta todavía no respondió o falló; la UI cae entonces al identificador del tenant (S5).
+   */
+  organizacionNombre: string;
   lastActivity: number;
   showInactivityWarning: boolean;
 
@@ -150,6 +157,7 @@ const SESION_CERRADA = {
   isAuthenticated: false,
   inicializando: false,
   tenantSlug: '',
+  organizacionNombre: '',
   showInactivityWarning: false,
 } as const;
 
@@ -160,14 +168,40 @@ const SESION_CERRADA = {
  */
 let refrescoEnVuelo: Promise<string | null> | null = null;
 
-export const useAuthStore = create<AuthState>((set) => {
+export const useAuthStore = create<AuthState>((set, get) => {
+  /**
+   * Pide el nombre de la organización del tenant, en segundo plano, una sola vez por sesión.
+   *
+   * La consulta corre después de que el token esté en el estado, porque el interceptor HTTP lo
+   * lee de ahí. No se espera para abrir la sesión ni para pintar: si el backend responde tarde,
+   * falla o el rol no tiene la celda —un PACIENTE recibe 403—, el nombre queda vacío y la
+   * cabecera usa el identificador del tenant (S5). Una respuesta que llegue después de un cierre
+   * o de un cambio de organización no se aplica, porque el tenant ya no es el mismo.
+   */
+  function solicitarNombreDeLaOrganizacion(tenantId: string): void {
+    void organizacionService
+      .obtenerPorId(tenantId)
+      .then((organizacion) => {
+        if (get().user?.tenantId !== tenantId) return;
+        set({ organizacionNombre: organizacion.nombre?.trim() ?? '' });
+      })
+      .catch(() => {
+        // S5: la consulta es de presentación; su fallo no cierra ni degrada la sesión.
+        if (get().user?.tenantId === tenantId) set({ organizacionNombre: '' });
+      });
+  }
+
   /**
    * Único camino por el que un token se convierte en sesión (fail-closed, R-SEG-07): si el
    * payload no se puede decodificar, si le falta la identidad, el tenant o un `exp` vigente, no se
    * abre sesión, se limpia la memoria y se devuelve el motivo. Login y refresco de arranque pasan
    * por aquí, así que ninguno puede saltarse la comprobación de vigencia (ADR-010, ADR-012).
+   *
+   * El nombre de la organización se pide en el mismo instante en que la sesión queda abierta:
+   * en todo login y en el refresco de arranque (cuando la sesión todavía no existía). La rotación
+   * de token de una sesión viva no repite esa consulta (S2).
    */
-  function establecerSesion(accessToken: string): SesionResuelta {
+  function establecerSesion(accessToken: string, origen: 'login' | 'refresco'): SesionResuelta {
     const resultado = resolverSesion(decodeJwtPayload(accessToken));
 
     if (!resultado.ok) {
@@ -176,6 +210,11 @@ export const useAuthStore = create<AuthState>((set) => {
     }
 
     const usuario = resultado.usuario;
+    const sesionAnterior = get();
+    // Solo se pide el nombre al abrir sesión: en todo login y en el refresco de arranque. La
+    // rotación de token de una sesión viva no lo repite: la guarda es la sesión, no el token.
+    const esSesionNueva = origen === 'login' || !sesionAnterior.isAuthenticated;
+
     set({
       accessToken,
       user: usuario,
@@ -183,9 +222,14 @@ export const useAuthStore = create<AuthState>((set) => {
       inicializando: false,
       // El tenant de la sesión sale del claim `tenantId`: no se inventa un nombre de clínica.
       tenantSlug: usuario.tenantId,
+      // El nombre es un dato de presentación aparte: `tenantSlug` sigue siendo el identificador
+      // que usan el filtro y las rutas, y una sesión nueva no hereda el nombre de la anterior.
+      organizacionNombre: esSesionNueva ? '' : get().organizacionNombre,
       lastActivity: Date.now(),
       showInactivityWarning: false,
     });
+
+    if (esSesionNueva) solicitarNombreDeLaOrganizacion(usuario.tenantId);
 
     return resultado;
   }
@@ -198,12 +242,13 @@ export const useAuthStore = create<AuthState>((set) => {
     // mostrar el login como si la sesión fuera anónima.
     inicializando: true,
     tenantSlug: '',
+    organizacionNombre: '',
     lastActivity: Date.now(),
     showInactivityWarning: false,
 
     login: async (email, password) => {
       const { accessToken } = await authService.login({ email, password });
-      const resultado = establecerSesion(accessToken);
+      const resultado = establecerSesion(accessToken, 'login');
 
       if (!resultado.ok) {
         // El emisor respondió 200 pero el token no sirve para abrir sesión: falla visible.
@@ -221,7 +266,7 @@ export const useAuthStore = create<AuthState>((set) => {
           const { accessToken } = await authService.refresh();
           // El refresco usa la misma puerta que el login: un token vencido o sin `exp` deja la
           // sesión anónima en lugar de renovarla a ciegas (ADR-012).
-          return establecerSesion(accessToken).ok ? accessToken : null;
+          return establecerSesion(accessToken, 'refresco').ok ? accessToken : null;
         } catch {
           return null;
         } finally {

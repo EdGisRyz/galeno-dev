@@ -269,6 +269,7 @@ describe('PacientesPage · rutas del contrato del backend (colección anidada, �
       user: null,
       isAuthenticated: false,
       tenantSlug: '',
+      organizacionNombre: '',
       inicializando: false,
     });
 

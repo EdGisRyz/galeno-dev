@@ -72,6 +72,7 @@ beforeEach(() => {
     isAuthenticated: false,
     inicializando: false,
     tenantSlug: '',
+    organizacionNombre: '',
     showInactivityWarning: false,
     lastActivity: Date.now(),
   });
