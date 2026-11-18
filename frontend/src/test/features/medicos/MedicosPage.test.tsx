@@ -102,7 +102,7 @@ function cargarCon(horarios: HorarioMedico[] = [], medicos: Medico[] = [MEDICO])
   });
 }
 
-function abrirSesion(role: 'ADMIN' | 'MEDICO', medicoId: string | null = null) {
+function abrirSesion(role: 'ADMIN' | 'MEDICO' | 'RECEPCIONISTA', medicoId: string | null = null) {
   useAuthStore.setState({
     accessToken: null,
     user: {
@@ -118,6 +118,13 @@ function abrirSesion(role: 'ADMIN' | 'MEDICO', medicoId: string | null = null) {
     lastActivity: Date.now(),
     showInactivityWarning: false,
   });
+}
+
+/** Fila de la tabla donde aparece el nombre del médico. */
+function filaDe(medico: Medico): HTMLElement {
+  const fila = screen.getByText(medico.nombre).closest('tr');
+  if (!fila) throw new Error(`El médico ${medico.nombre} no está en la tabla`);
+  return fila;
 }
 
 beforeEach(() => {
@@ -302,8 +309,58 @@ describe('MedicosPage · horarios según el rol', () => {
     expect(getMock).toHaveBeenCalledWith(RUTA_HORARIOS);
   });
 
-  it('no ofrece editar la agenda de otro médico', async () => {
+  it('no ofrece la agenda de otro médico: el botón no aparece en esa fila (S4)', async () => {
+    // Antes el botón estaba en todas las filas y abrirlo terminaba en un 403 del backend que la
+    // pantalla contaba como fallo de red. Donde la agenda no es accesible no hay nada que ofrecer.
     abrirSesion('MEDICO', 'med-ajeno');
+    cargarCon();
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    expect(screen.queryByRole('button', { name: /horarios/i })).not.toBeInTheDocument();
+    expect(getMock).not.toHaveBeenCalledWith(RUTA_HORARIOS);
+  });
+
+  it('muestra el botón en la fila del propio médico aunque haya otros en el directorio (S4)', async () => {
+    const OTRO_MEDICO: Medico = {
+      ...MEDICO,
+      id: 'med-0002',
+      nombre: 'Colega de prueba',
+    };
+    abrirSesion('MEDICO', MEDICO.id);
+    cargarCon([], [MEDICO, OTRO_MEDICO]);
+
+    render(<MedicosPage />);
+    await screen.findByText('Colega de prueba');
+
+    // Una sola fila ofrece la agenda: la del médico de la sesión.
+    const botones = screen.getAllByRole('button', { name: /horarios/i });
+    expect(botones).toHaveLength(1);
+    expect(within(filaDe(MEDICO)).getByRole('button', { name: /horarios/i })).toBe(botones[0]);
+  });
+
+  it('la administración ve la agenda de todas las filas (S4)', async () => {
+    const OTRO_MEDICO: Medico = {
+      ...MEDICO,
+      id: 'med-0002',
+      nombre: 'Colega de prueba',
+    };
+    abrirSesion('ADMIN');
+    cargarCon([], [MEDICO, OTRO_MEDICO]);
+
+    render(<MedicosPage />);
+    await screen.findByText('Colega de prueba');
+
+    expect(screen.getAllByRole('button', { name: /horarios/i })).toHaveLength(2);
+    expect(within(filaDe(MEDICO)).getByRole('button', { name: /horarios/i })).toBeInTheDocument();
+    expect(within(filaDe(OTRO_MEDICO)).getByRole('button', { name: /horarios/i })).toBeInTheDocument();
+  });
+
+  it('recepción sigue consultando la agenda de cualquier médico (S4)', async () => {
+    // El backend le concede la lectura: recepción necesita responder dónde y cuándo atiende cada
+    // médico. Esconder el botón donde la lectura está permitida sería quitarle una capacidad.
+    abrirSesion('RECEPCIONISTA');
     cargarCon();
 
     render(<MedicosPage />);
@@ -311,9 +368,35 @@ describe('MedicosPage · horarios según el rol', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
 
-    // El panel se abre (el médico puede consultarlo), pero sin acciones de escritura.
     expect(await screen.findByText(/horarios de médico de prueba/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /agregar bloque/i })).not.toBeInTheDocument();
+  });
+
+  it('muestra el mensaje del backend cuando el rechazo de la agenda no es de red (S4)', async () => {
+    abrirSesion('MEDICO', MEDICO.id);
+    getMock.mockImplementation((url: string) => {
+      if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
+      if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
+      if (url === RUTA_CONSULTORIOS_ASIGNADOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
+      if (url === RUTA_HORARIOS) {
+        return Promise.reject({
+          response: { status: 403, data: { mensaje: 'No puedes consultar la agenda de otro médico' } },
+        });
+      }
+      return Promise.reject(new Error(`URL inesperada: ${url}`));
+    });
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
+
+    // Un rechazo de permisos no se cuenta como fallo de conexión: se muestra lo que dijo el
+    // backend, que es lo único que explica el motivo.
+    expect(
+      await screen.findByText('No puedes consultar la agenda de otro médico'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/revisa la conexión con el servicio/i)).not.toBeInTheDocument();
   });
 });
 

@@ -157,6 +157,20 @@ export function MedicosPage() {
     rolDeSesion === 'ADMIN' || (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medicoId);
   const puedeAsignarConsultorios = puedeEditarMedicos;
 
+  /**
+   * Agendas que la sesión puede **leer**: las de toda la organización para administración y
+   * recepción, y la propia para un médico. Es la mitad de lectura de la matriz del backend
+   * (`GET /medicos/{id}/horarios`, ADMIN, MEDICO y RECEPCIONISTA, con la agenda del médico acotada
+   * a la suya), y la condición que decide si el botón «Horarios» aparece en la fila.
+   *
+   * Ofrecerlo en una fila ajena a un médico abría un panel que el servicio rechaza con 403 y la
+   * pantalla contaba ese rechazo como un problema de conexión (S4).
+   */
+  const puedeConsultarAgendaDe = (medicoId: string) =>
+    rolDeSesion === 'ADMIN' ||
+    rolDeSesion === 'RECEPCIONISTA' ||
+    (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medicoId);
+
   // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
   // render, el efecto se dispararía en bucle.
   const loadData = useCallback((ruta: string, rutaConsultorios: string | null) => {
@@ -369,7 +383,9 @@ export function MedicosPage() {
       .then((res) => setHorarios(res.data))
       .catch((err) => {
         console.error('Error al cargar horarios:', resumenDeErrorHttp(err));
-        setHorariosError(MENSAJE_ERROR_HORARIOS);
+        // Un rechazo de permisos o de pertenencia no es un fallo de red: el mensaje del backend es
+        // el único que dice qué pasó. El texto de conexión queda solo para cuando no hay mensaje.
+        setHorariosError(mensajeDelBackend(err, MENSAJE_ERROR_HORARIOS));
       })
       .finally(() => setIsLoadingHorarios(false));
   };
@@ -700,15 +716,17 @@ export function MedicosPage() {
 
                   <TableCell className="text-right">
                     <div className="inline-flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => openHorarios(m.id)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#CBD5E1] text-[#0A4D68] hover:bg-[#EFF4FF] text-xs font-medium transition-all"
-                        title="Ver horarios de disponibilidad"
-                      >
-                        <CalendarClock className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Horarios</span>
-                      </button>
+                      {puedeConsultarAgendaDe(m.id) && (
+                        <button
+                          type="button"
+                          onClick={() => openHorarios(m.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#CBD5E1] text-[#0A4D68] hover:bg-[#EFF4FF] text-xs font-medium transition-all"
+                          title="Ver horarios de disponibilidad"
+                        >
+                          <CalendarClock className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Horarios</span>
+                        </button>
+                      )}
                       {puedeEditarMedicos && (
                         <>
                           <button
