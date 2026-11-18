@@ -5,6 +5,21 @@ import { api, authApi, API_BASE_URL, AUTH_BASE_URL } from '@/lib/axios';
 import { useAuthStore } from '@/store/auth.store';
 import { CLAIMS, expVigente, makeToken } from '../helpers/jwt';
 
+// La consulta del nombre de la organización (S2) sale al backend al abrir sesión. Aquí se mide el
+// contrato de los clientes HTTP, no esa consulta: se resuelve con un nombre fijo para que no
+// agregue peticiones al contador ni salga a la red.
+vi.mock('@/features/organizaciones/organizacion.service', () => ({
+  organizacionService: {
+    obtenerPorId: vi.fn().mockResolvedValue({
+      id: 'org-001',
+      nombre: 'Clínica de prueba',
+      plan: 'CLINICA',
+      activo: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }),
+  },
+}));
+
 /**
  * Contrato de los dos clientes HTTP y del manejo del 401 (ADR-011, T6b).
  *
@@ -115,6 +130,7 @@ beforeEach(() => {
     isAuthenticated: false,
     inicializando: false,
     tenantSlug: '',
+    organizacionNombre: '',
     showInactivityWarning: false,
     lastActivity: Date.now(),
   });

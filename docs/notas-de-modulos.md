@@ -257,6 +257,22 @@ versión** (la gestiona el BOM). Ninguna otra dependencia fue tocada.
       **NO está aprobada**: documentar no es corregir.
 - [ ] Confirmé que no hay conteos de tests ni éxito de suite completa inventados.
 
+### Nota (2026-11-17) — el nombre de la organización en la cabecera
+
+- **Celda nueva en la matriz:** `GET /api/v1/organizaciones/{id}` admite `ADMIN`, `MEDICO` y
+  `RECEPCIONISTA` (S3). La colección `GET /api/v1/organizaciones` sigue siendo solo de `ADMIN` y
+  `PACIENTE` queda fuera de ambas. La segunda mitad de «propio tenant» no cambia para nadie:
+  `GET`, `PUT` y `DELETE` por id exigen que el id del path sea el del claim y responden `403`
+  **sin consultar la base**, también para `ADMIN` (S4, D5). La garantía vive en
+  `OrganizacionService.exigirOrganizacionDelTenant`, no solo en una clase auxiliar: el javadoc que
+  la atribuía a `TenantAccessGuard` se corrigió porque describía una comprobación que el servicio
+  no hacía.
+- **El nombre no viaja en el token:** el token es un artefacto de autorización, no de
+  presentación (L2). Por eso la sesión pide la organización de su tenant una sola vez al iniciar
+  y guarda el `nombre` en el estado junto al `tenantSlug`, que sigue siendo el identificador. Si la
+  consulta falla o el rol no tiene la celda —`PACIENTE` recibe `403`—, la cabecera cae al
+  identificador del tenant: nunca a un nombre inventado ni a un espacio vacío (S1, S5).
+
 ---
 
 ## configuracion-tenant

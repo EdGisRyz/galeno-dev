@@ -81,6 +81,7 @@ function reiniciarSesion() {
     isAuthenticated: false,
     inicializando: true,
     tenantSlug: '',
+    organizacionNombre: '',
     showInactivityWarning: false,
     lastActivity: Date.now(),
   });

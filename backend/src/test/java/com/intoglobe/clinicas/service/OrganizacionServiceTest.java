@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.intoglobe.clinicas.dto.request.OrganizacionRequest;
 import com.intoglobe.clinicas.dto.response.ErrorResponse;
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -84,7 +86,7 @@ class OrganizacionServiceTest {
                 OffsetDateTime.parse("2026-06-30T12:00:00Z"), true);
         when(organizacionRepository.findById(organizacion.getId())).thenReturn(Optional.of(organizacion));
 
-        var respuesta = organizacionService.buscarPorId(organizacion.getId());
+        var respuesta = organizacionService.buscarPorId(organizacion.getId(), organizacion.getId());
 
         assertThat(respuesta.id()).isEqualTo(organizacion.getId());
         assertThat(respuesta.nombre()).isEqualTo("Clínica Norte");
@@ -101,7 +103,7 @@ class OrganizacionServiceTest {
         var id = UUID.randomUUID();
         when(organizacionRepository.findById(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> organizacionService.buscarPorId(id))
+        assertThatThrownBy(() -> organizacionService.buscarPorId(id, id))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Organizacion")
                 .hasMessageContaining(id.toString());
@@ -145,7 +147,7 @@ class OrganizacionServiceTest {
         var trialHasta = OffsetDateTime.parse("2026-09-30T18:00:00Z");
         var request = new OrganizacionRequest("Clínica Renombrada", PlanTipo.ENTERPRISE, "sub-nueva", trialHasta);
 
-        var respuesta = organizacionService.actualizar(organizacion.getId(), request);
+        var respuesta = organizacionService.actualizar(organizacion.getId(), organizacion.getId(), request);
 
         assertThat(respuesta.nombre()).isEqualTo("Clínica Renombrada");
         assertThat(respuesta.plan()).isEqualTo(PlanTipo.ENTERPRISE);
@@ -165,7 +167,7 @@ class OrganizacionServiceTest {
                 .thenAnswer(invocacion -> invocacion.getArgument(0));
         var request = new OrganizacionRequest("Clínica Baja", PlanTipo.SOLO, null, null);
 
-        var respuesta = organizacionService.actualizar(organizacion.getId(), request);
+        var respuesta = organizacionService.actualizar(organizacion.getId(), organizacion.getId(), request);
 
         assertThat(respuesta.subscriptionId()).isNull();
         assertThat(respuesta.trialHasta()).isNull();
@@ -179,7 +181,7 @@ class OrganizacionServiceTest {
         when(organizacionRepository.findById(id)).thenReturn(Optional.empty());
         var request = new OrganizacionRequest("Clínica Fantasma", PlanTipo.SOLO, null, null);
 
-        assertThatThrownBy(() -> organizacionService.actualizar(id, request))
+        assertThatThrownBy(() -> organizacionService.actualizar(id, id, request))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Organizacion")
                 .hasMessageContaining(id.toString());
@@ -193,8 +195,8 @@ class OrganizacionServiceTest {
         when(organizacionRepository.save(any(Organizacion.class)))
                 .thenAnswer(invocacion -> invocacion.getArgument(0));
 
-        organizacionService.desactivar(organizacion.getId());
-        organizacionService.desactivar(organizacion.getId());
+        organizacionService.desactivar(organizacion.getId(), organizacion.getId());
+        organizacionService.desactivar(organizacion.getId(), organizacion.getId());
 
         assertThat(organizacion.isActivo()).isFalse();
         verify(organizacionRepository, times(2)).findById(organizacion.getId());
@@ -207,10 +209,64 @@ class OrganizacionServiceTest {
         var id = UUID.randomUUID();
         when(organizacionRepository.findById(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> organizacionService.desactivar(id))
+        assertThatThrownBy(() -> organizacionService.desactivar(id, id))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Organizacion")
                 .hasMessageContaining(id.toString());
+    }
+
+    // ------------------------------------------------------------------
+    // S4 / D5: el path de otro tenant responde 403 sin consultar el repositorio
+    // ------------------------------------------------------------------
+
+    /**
+     * La comprobación de S4 vive en el service, así que la denegación no depende de que un
+     * llamador use el controller ni la guardia de tenant: el repositorio no se toca. Vale para
+     * {@code ADMIN}, {@code MEDICO} y {@code RECEPCIONISTA}, porque el service no exime a ningún
+     * rol; el rol se ejerce en la cadena de filtros.
+     */
+    @Test
+    @DisplayName("buscarPorId de otro tenant responde 403 y no consulta el repositorio")
+    void buscarPorId_shouldDenyBeforeTheRepository_whenTheTenantDiffers() {
+        UUID idDeLaRuta = UUID.randomUUID();
+        UUID tenantDelToken = UUID.randomUUID();
+
+        assertThatThrownBy(() -> organizacionService.buscarPorId(idDeLaRuta, tenantDelToken))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("tenant del token");
+        verifyNoInteractions(organizacionRepository);
+    }
+
+    /**
+     * La misma comprobación protege la actualización: un id ajeno responde 403 antes de resolver
+     * la entidad o guardar nada.
+     */
+    @Test
+    @DisplayName("actualizar la organización de otro tenant responde 403 y no consulta el repositorio")
+    void actualizar_shouldDenyBeforeTheRepository_whenTheTenantDiffers() {
+        UUID idDeLaRuta = UUID.randomUUID();
+        UUID tenantDelToken = UUID.randomUUID();
+        var request = new OrganizacionRequest("Clínica Ajena", PlanTipo.SOLO, null, null);
+
+        assertThatThrownBy(() -> organizacionService.actualizar(idDeLaRuta, tenantDelToken, request))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("tenant del token");
+        verifyNoInteractions(organizacionRepository);
+    }
+
+    /**
+     * Y la baja lógica: un id ajeno responde 403 sin leer ni desactivar ninguna fila.
+     */
+    @Test
+    @DisplayName("desactivar la organización de otro tenant responde 403 y no consulta el repositorio")
+    void desactivar_shouldDenyBeforeTheRepository_whenTheTenantDiffers() {
+        UUID idDeLaRuta = UUID.randomUUID();
+        UUID tenantDelToken = UUID.randomUUID();
+
+        assertThatThrownBy(() -> organizacionService.desactivar(idDeLaRuta, tenantDelToken))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("tenant del token");
+        verifyNoInteractions(organizacionRepository);
     }
 
     @Test

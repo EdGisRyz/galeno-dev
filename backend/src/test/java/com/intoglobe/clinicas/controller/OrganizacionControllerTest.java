@@ -3,6 +3,7 @@ package com.intoglobe.clinicas.controller;
 import java.lang.reflect.Method;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -92,6 +93,11 @@ class OrganizacionControllerTest {
      * contrato del endpoint, no la guardia de tenant.
      */
     private static final String TOKEN = ClaveRsaDePrueba.tokenPara("ADMIN", ID);
+
+    /** Tokens de los roles que desde S3 pueden leer la propia organización por id. */
+    private static final String TOKEN_MEDICO = ClaveRsaDePrueba.tokenPara("MEDICO", ID);
+    private static final String TOKEN_RECEPCIONISTA = ClaveRsaDePrueba.tokenPara("RECEPCIONISTA", ID);
+    private static final String TOKEN_PACIENTE = ClaveRsaDePrueba.tokenPara("PACIENTE", ID);
     @Autowired
     private MockMvc mockMvc;
 
@@ -173,7 +179,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("GET /{id} devuelve 200 con la organización encontrada")
     void buscarPorId_shouldReturn200WithBody() throws Exception {
-        when(organizacionService.buscarPorId(ID))
+        when(organizacionService.buscarPorId(ID, ID))
                 .thenReturn(respuesta(ID, "Clínica Norte", PlanTipo.ENTERPRISE, "sub-norte", TRIAL_HASTA, true));
 
         perform(get("/api/v1/organizaciones/{id}", ID))
@@ -234,9 +240,54 @@ class OrganizacionControllerTest {
     }
 
     @Test
+    @DisplayName("GET /{id} con rol MEDICO devuelve 200 con el nombre de la propia organización")
+    void buscarPorId_shouldReturn200WithTheOrganizationName_whenRoleIsMedicoAndTenantMatches()
+            throws Exception {
+        when(organizacionService.buscarPorId(ID, ID))
+                .thenReturn(respuesta(ID, "Clínica Norte", PlanTipo.ENTERPRISE, null, null, true));
+
+        performCon(get("/api/v1/organizaciones/{id}", ID), TOKEN_MEDICO)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(ID.toString()))
+                .andExpect(jsonPath("$.nombre").value("Clínica Norte"));
+        verify(organizacionService).buscarPorId(ID, ID);
+    }
+
+    @Test
+    @DisplayName("GET /{id} de otro tenant con MEDICO o RECEPCIONISTA responde 403 sin llegar al service")
+    void buscarPorId_shouldReturn403WithoutTheService_whenThePathTenantDiffersForMedicoAndRecepcion()
+            throws Exception {
+        UUID organizacionAjena = UUID.randomUUID();
+        String ruta = "/api/v1/organizaciones/" + organizacionAjena;
+
+        // S4 y D5: la comparación es contra el claim y ocurre antes del service, así que la
+        // negativa no consulta el repositorio ni revela si la organización ajena existe.
+        for (String token : List.of(TOKEN_MEDICO, TOKEN_RECEPCIONISTA)) {
+            afirmarAccesoDenegado(
+                    performCon(get("/api/v1/organizaciones/{id}", organizacionAjena), token), ruta);
+        }
+
+        verifyNoInteractions(organizacionService);
+    }
+
+    @Test
+    @DisplayName("La colección sigue cerrada a MEDICO y RECEPCIONISTA, y PACIENTE queda fuera de las dos rutas")
+    void coleccion_sigueCerrada_yPacienteQuedaFueraDeLasDosRutas() throws Exception {
+        for (String token : List.of(TOKEN_MEDICO, TOKEN_RECEPCIONISTA, TOKEN_PACIENTE)) {
+            afirmarAccesoDenegado(performCon(get("/api/v1/organizaciones"), token),
+                    "/api/v1/organizaciones");
+        }
+
+        afirmarAccesoDenegado(performCon(get("/api/v1/organizaciones/{id}", ID), TOKEN_PACIENTE),
+                "/api/v1/organizaciones/" + ID);
+
+        verifyNoInteractions(organizacionService);
+    }
+
+    @Test
     @DisplayName("PUT /{id} devuelve 200 con el request validado aplicado")
     void actualizar_shouldReturn200_whenRequestIsValid() throws Exception {
-        when(organizacionService.actualizar(any(UUID.class), any(OrganizacionRequest.class)))
+        when(organizacionService.actualizar(any(UUID.class), any(UUID.class), any(OrganizacionRequest.class)))
                 .thenReturn(respuesta(ID, "Clínica Renombrada", PlanTipo.ENTERPRISE, null, null, true));
 
         perform(put("/api/v1/organizaciones/{id}", ID)
@@ -249,7 +300,7 @@ class OrganizacionControllerTest {
                 .andExpect(jsonPath("$.plan").value("ENTERPRISE"))
                 .andExpect(jsonPath("$.subscriptionId").doesNotExist())
                 .andExpect(jsonPath("$.id").value(ID.toString()));
-        verify(organizacionService).actualizar(any(UUID.class), any(OrganizacionRequest.class));
+        verify(organizacionService).actualizar(any(UUID.class), any(UUID.class), any(OrganizacionRequest.class));
     }
 
     @Test
@@ -259,21 +310,21 @@ class OrganizacionControllerTest {
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
-        when(organizacionService.buscarPorId(ID))
+        when(organizacionService.buscarPorId(ID, ID))
                 .thenReturn(respuesta(ID, "Clínica Baja", PlanTipo.SOLO, null, null, false));
 
         perform(delete("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
-        verify(organizacionService, times(2)).desactivar(ID);
+        verify(organizacionService, times(2)).desactivar(ID, ID);
     }
 
     @Test
     @DisplayName("GET /{id} inexistente devuelve 404 con ErrorResponse completo")
     void buscarPorId_shouldReturn404WithErrorResponse_whenMissing() throws Exception {
         doThrow(new ResourceNotFoundException("Organizacion", ID))
-                .when(organizacionService).buscarPorId(ID);
+                .when(organizacionService).buscarPorId(ID, ID);
 
         perform(get("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNotFound())
@@ -288,7 +339,7 @@ class OrganizacionControllerTest {
     @DisplayName("PUT /{id} inexistente devuelve 404 con ErrorResponse")
     void actualizar_shouldReturn404_whenMissing() throws Exception {
         doThrow(new ResourceNotFoundException("Organizacion", ID))
-                .when(organizacionService).actualizar(any(UUID.class), any(OrganizacionRequest.class));
+                .when(organizacionService).actualizar(any(UUID.class), any(UUID.class), any(OrganizacionRequest.class));
 
         perform(put("/api/v1/organizaciones/{id}", ID)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -305,7 +356,7 @@ class OrganizacionControllerTest {
     @DisplayName("DELETE /{id} inexistente devuelve 404 con ErrorResponse")
     void desactivar_shouldReturn404_whenMissing() throws Exception {
         doThrow(new ResourceNotFoundException("Organizacion", ID))
-                .when(organizacionService).desactivar(ID);
+                .when(organizacionService).desactivar(ID, ID);
 
         perform(delete("/api/v1/organizaciones/{id}", ID))
                 .andExpect(status().isNotFound())
@@ -319,7 +370,7 @@ class OrganizacionControllerTest {
     @DisplayName("PUT /{id} acepta subscriptionId opcional de longitud máxima 100")
     void actualizar_shouldReturn200_whenSubscriptionIdHasMaxLength() throws Exception {
         String subscriptionId = "s".repeat(100);
-        when(organizacionService.actualizar(any(UUID.class), any(OrganizacionRequest.class)))
+        when(organizacionService.actualizar(any(UUID.class), any(UUID.class), any(OrganizacionRequest.class)))
                 .thenReturn(respuesta(ID, "Clínica Límite", PlanTipo.SOLO, subscriptionId, null, true));
 
         perform(put("/api/v1/organizaciones/{id}", ID)
@@ -334,7 +385,7 @@ class OrganizacionControllerTest {
     @Test
     @DisplayName("PUT /{id} deserializa el request y entrega los opcionales nulos cuando se omiten")
     void actualizar_shouldBindRequestWithNullOptionals_whenTheyAreOmitted() throws Exception {
-        when(organizacionService.actualizar(any(UUID.class), any(OrganizacionRequest.class)))
+        when(organizacionService.actualizar(any(UUID.class), any(UUID.class), any(OrganizacionRequest.class)))
                 .thenReturn(respuesta(ID, "Consultorio Solo", PlanTipo.SOLO, null, null, true));
         var captor = org.mockito.ArgumentCaptor.forClass(OrganizacionRequest.class);
 
@@ -345,7 +396,7 @@ class OrganizacionControllerTest {
                                 """))
                 .andExpect(status().isOk());
 
-        verify(organizacionService).actualizar(any(UUID.class), captor.capture());
+        verify(organizacionService).actualizar(any(UUID.class), any(UUID.class), captor.capture());
         var enviado = captor.getValue();
         assertThat(enviado.nombre()).isEqualTo("Consultorio Solo");
         assertThat(enviado.plan()).isEqualTo(PlanTipo.SOLO);
@@ -570,5 +621,19 @@ class OrganizacionControllerTest {
      */
     private ResultActions perform(MockHttpServletRequestBuilder peticion) throws Exception {
         return mockMvc.perform(peticion.header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN));
+    }
+
+    /**
+     * Ejecuta la petición con el token indicado, para ejercer la misma cadena de filtros con
+     * otros roles.
+     *
+     * @param peticion petición a ejecutar
+     * @param token    token Bearer del rol que se quiere ejercer
+     * @return resultado de la petición para encadenar aserciones
+     * @throws Exception si MockMvc no puede ejecutarla
+     */
+    private ResultActions performCon(MockHttpServletRequestBuilder peticion, String token)
+            throws Exception {
+        return mockMvc.perform(peticion.header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
     }
 }

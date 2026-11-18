@@ -1,8 +1,10 @@
 package com.intoglobe.clinicas.service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,13 +23,15 @@ import com.intoglobe.clinicas.repository.OrganizacionRepository;
  * y escritura. Cuando la organización no existe se lanza
  * {@link ResourceNotFoundException}, que el handler traduce a 404.</p>
  *
- * <p><strong>Aislamiento por tenant (R-SEG-04, R-SEG-06):</strong> el listado recibe el
- * {@code tenantId} del token y devuelve solo esa organización. Las operaciones por id no
- * necesitan un parámetro de tenant: en una organización el identificador del recurso
- * <em>es</em> el del tenant, y quien garantiza que coincida con el claim antes de llamar
- * aquí es {@code TenantAccessGuard}, que responde 403 ante cualquier discrepancia. Por eso
- * el {@code id} que reciben {@link #buscarPorId(UUID)}, {@link #actualizar(UUID, OrganizacionRequest)}
- * y {@link #desactivar(UUID)} es ya el del token, nunca el del path sin validar.</p>
+ * <p><strong>Aislamiento por tenant (R-SEG-04, R-SEG-06, D5):</strong> el listado recibe el
+ * {@code tenantId} del token y devuelve solo esa organización. Las operaciones por id reciben
+ * <em>dos</em> identificadores: el del path y el tenant del claim. Antes de consultar el
+ * repositorio se comparan, y una discrepancia responde {@link AccessDeniedException}, que el
+ * handler traduce a {@code 403} con el contrato de error. La comparación es pura —sin repositorio,
+ * sin base de datos— así que negar el path ajeno no revela si esa organización existe. Aplica a
+ * los tres roles que operan sobre organizaciones, {@code ADMIN} incluido: no existe un rol de
+ * plataforma que administre varias. El identificador que llega a {@link #buscarOFallar(UUID)} es
+ * el del path, pero solo después de haber demostrado que coincide con el claim.</p>
  */
 @Service
 public class OrganizacionService {
@@ -52,14 +56,18 @@ public class OrganizacionService {
     }
 
     /**
-     * Busca una organización por su identificador.
+     * Busca una organización por su identificador dentro del tenant indicado.
      *
-     * @param id identificador de la organización
+     * @param id       identificador de la organización tomado del path
+     * @param tenantId organización del token de la petición
      * @return representación de la organización encontrada
+     * @throws AccessDeniedException si el id del path no es el del token; el handler lo
+     *                               traduce a {@code 403} sin consultar el repositorio
      * @throws ResourceNotFoundException si no existe una organización con ese id
      */
     @Transactional(readOnly = true)
-    public OrganizacionResponse buscarPorId(UUID id) {
+    public OrganizacionResponse buscarPorId(UUID id, UUID tenantId) {
+        exigirOrganizacionDelTenant(id, tenantId);
         return OrganizacionMapper.aResponse(buscarOFallar(id));
     }
 
@@ -86,13 +94,17 @@ public class OrganizacionService {
     /**
      * Reemplaza los cuatro campos editables de una organización existente.
      *
-     * @param id      identificador de la organización a actualizar
-     * @param request datos de entrada validados
+     * @param id       identificador de la organización tomado del path
+     * @param tenantId organización del token de la petición
+     * @param request  datos de entrada validados
      * @return representación de la organización actualizada
+     * @throws AccessDeniedException si el id del path no es el del token; el handler lo
+     *                               traduce a {@code 403} sin consultar el repositorio
      * @throws ResourceNotFoundException si no existe una organización con ese id
      */
     @Transactional
-    public OrganizacionResponse actualizar(UUID id, OrganizacionRequest request) {
+    public OrganizacionResponse actualizar(UUID id, UUID tenantId, OrganizacionRequest request) {
+        exigirOrganizacionDelTenant(id, tenantId);
         var organizacion = buscarOFallar(id);
         OrganizacionMapper.actualizarEntidad(organizacion, request);
         var guardada = organizacionRepository.save(organizacion);
@@ -103,14 +115,39 @@ public class OrganizacionService {
      * Aplica la baja lógica de una organización. Es idempotente: desactivar una
      * organización ya inactiva no produce error.
      *
-     * @param id identificador de la organización a desactivar
+     * @param id       identificador de la organización tomado del path
+     * @param tenantId organización del token de la petición
+     * @throws AccessDeniedException si el id del path no es el del token; el handler lo
+     *                               traduce a {@code 403} sin consultar el repositorio
      * @throws ResourceNotFoundException si no existe una organización con ese id
      */
     @Transactional
-    public void desactivar(UUID id) {
+    public void desactivar(UUID id, UUID tenantId) {
+        exigirOrganizacionDelTenant(id, tenantId);
         var organizacion = buscarOFallar(id);
         organizacion.desactivar();
         organizacionRepository.save(organizacion);
+    }
+
+    /**
+     * Exige que el identificador del path sea el del tenant del token antes de consultar nada.
+     *
+     * <p>Es la misma regla de {@code PacienteService.exigirOrganizacionDelTenant} y de
+     * {@code TenantAccessGuard}, pero vive aquí porque esta capa es la que garantiza el aislamiento
+     * de las operaciones por id: quien llame al service —desde el controlador o desde otro
+     * servicio— no puede saltarse la comprobación. El path es una afirmación del cliente y la
+     * comparación es pura, así que un {@code 403} no confirma si la organización ajena existe.</p>
+     *
+     * @param organizacionId organización recibida por el path
+     * @param tenantId       organización del token de la petición
+     * @throws AccessDeniedException si no coinciden; el manejador global lo traduce a
+     *                               {@code 403} con {@code ErrorResponse}
+     */
+    private static void exigirOrganizacionDelTenant(UUID organizacionId, UUID tenantId) {
+        if (!Objects.equals(organizacionId, tenantId)) {
+            throw new AccessDeniedException(
+                    "El organizacionId de la ruta no corresponde al tenant del token");
+        }
     }
 
     /**

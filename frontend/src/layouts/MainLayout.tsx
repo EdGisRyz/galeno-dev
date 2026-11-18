@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
 export function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout, tenantSlug } = useAuthStore();
+  const { user, logout, tenantSlug, organizacionNombre } = useAuthStore();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Activación del temporizador HIPAA de 30 minutos
@@ -133,10 +133,13 @@ export function MainLayout() {
               <Stethoscope className="w-5 h-5 text-[#88BDDC]" />
             </div>
             <div>
-              {/* El tenant de la cabecera sale del claim de la sesión; si no hay, un guion neutro.
-                  Nunca el nombre de una clínica inventada (plan sección 2, guardarraíl 4). */}
+              {/* El nombre de la organización se consulta al backend una vez por sesión y se
+                  guarda en el estado (S1, S2). Si todavía no llegó o la consulta falló —un
+                  PACIENTE no tiene la celda—, se pinta el identificador del tenant, que sigue
+                  siendo el respaldo (S5): nunca el nombre de una clínica inventada ni un
+                  espacio vacío (plan sección 2, guardarraíl 4). */}
               <span className="font-heading font-bold text-sm tracking-tight text-[#0A4D68] block">
-                {tenantSlug || '—'}
+                {organizacionNombre || tenantSlug || '—'}
               </span>
               <span className="text-[11px] text-[#64748B] tracking-wide block uppercase font-medium">
                 Clínica

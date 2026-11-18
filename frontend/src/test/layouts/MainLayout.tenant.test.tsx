@@ -51,6 +51,7 @@ beforeEach(() => {
     isAuthenticated: false,
     inicializando: false,
     tenantSlug: '',
+    organizacionNombre: '',
     showInactivityWarning: false,
     lastActivity: Date.now(),
   });
@@ -78,6 +79,7 @@ describe('MainLayout · tenant de la sesión', () => {
       isAuthenticated: true,
       inicializando: false,
       tenantSlug: '',
+      organizacionNombre: '',
     });
 
     renderizarLayout();
