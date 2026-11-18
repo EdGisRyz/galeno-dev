@@ -39,7 +39,7 @@ import jakarta.validation.constraints.Size;
  * @param direccion dirección del consultorio (opcional y libre; la columna es {@code TEXT}
  *                  sin límite declarado, por eso no se impone un tamaño)
  * @param telefono  teléfono del consultorio (opcional, 7..20 caracteres con dígitos, {@code +}
- *                  inicial opcional, espacios y guiones)
+ *                  inicial opcional, espacios, guiones y paréntesis)
  */
 public record ConsultorioRequest(
 
@@ -62,7 +62,7 @@ public record ConsultorioRequest(
         String direccion,
 
         @Schema(description = "Teléfono de contacto del consultorio; null o vacío si no se registró. "
-                + "De 7 a 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.",
+                + "De 7 a 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.",
                 example = "+52 55 5555 1234")
         // El máximo de 20 vive dentro del patrón compartido: declarar además @Size produciría dos
         // mensajes para el mismo dato.

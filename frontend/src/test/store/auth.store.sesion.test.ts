@@ -143,6 +143,26 @@ describe('auth.store · refresco silencioso de arranque', () => {
     expect(resultados).toEqual([TOKEN, TOKEN, TOKEN, TOKEN, TOKEN]);
     expect(servicio.refresh).toHaveBeenCalledTimes(1);
   });
+
+  it('registra el motivo del cierre cuando el refresco de arranque no se recupera (S2)', async () => {
+    // Antes el motivo se perdía aquí y la guarda de ruta mandaba al login sin ningún aviso.
+    servicio.refresh.mockRejectedValue(new Error('401'));
+
+    await useAuthStore.getState().refresh();
+
+    expect(useAuthStore.getState().motivoDeSesionCerrada).toBe('sesion_cerrada');
+  });
+
+  it('olvida el motivo cuando una sesión vuelve a abrirse (S2)', async () => {
+    servicio.refresh.mockRejectedValueOnce(new Error('401'));
+    await useAuthStore.getState().refresh();
+    expect(useAuthStore.getState().motivoDeSesionCerrada).toBe('sesion_cerrada');
+
+    servicio.refresh.mockResolvedValue({ accessToken: TOKEN });
+    await useAuthStore.getState().refresh();
+
+    expect(useAuthStore.getState().motivoDeSesionCerrada).toBeNull();
+  });
 });
 
 describe('auth.store · logout', () => {
@@ -170,5 +190,17 @@ describe('auth.store · logout', () => {
 
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().accessToken).toBeNull();
+  });
+
+  it('cerrar sesión a propósito no deja motivo de sesión perdida (S2)', async () => {
+    // Irse por la puerta propia no es una sesión que no se pudo recuperar: el aviso del login
+    // hablaría de una baja que nadie pidió.
+    servicio.refresh.mockRejectedValueOnce(new Error('401'));
+    await useAuthStore.getState().refresh();
+
+    servicio.logout.mockResolvedValue(undefined);
+    await useAuthStore.getState().logout();
+
+    expect(useAuthStore.getState().motivoDeSesionCerrada).toBeNull();
   });
 });

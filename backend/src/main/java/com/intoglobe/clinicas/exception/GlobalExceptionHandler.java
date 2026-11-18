@@ -1,6 +1,10 @@
 package com.intoglobe.clinicas.exception;
 
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -12,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -47,6 +52,9 @@ public class GlobalExceptionHandler {
             "NotBlank", "no puede estar vacío",
             "NotNull", "es obligatorio",
             "Size", "tiene una longitud fuera del rango permitido");
+
+    /** Nombre del atributo que toda restricción de Jakarta Validation declara. */
+    private static final String ATRIBUTO_MENSAJE = "message";
 
     private static final String MENSAJE_CUERPO_INVALIDO =
             "El cuerpo de la petición no es válido o está mal formado";
@@ -306,7 +314,8 @@ public class GlobalExceptionHandler {
             return construir(HttpStatus.CONFLICT,
                     "Ya existe un paciente con esa CURP en esta organización. La CURP es única dentro "
                             + "de la organización, aunque el mismo paciente pueda estar registrado en "
-                            + "otras organizaciones",
+                            + "otras organizaciones. Si el paciente con esa CURP fue dado de baja, hay que "
+                            + "reactivarlo en lugar de registrarlo de nuevo",
                     peticion);
         }
         // Cualquier otra violación de integridad conserva su comportamiento: no se traduce aquí.
@@ -334,6 +343,19 @@ public class GlobalExceptionHandler {
     /**
      * Responde 400 con un resumen en español de los campos inválidos.
      *
+     * <p>Cada entrada del resumen es el mensaje que la restricción declara, si declara uno, o el
+     * resumen por código que ya usaba este traductor. La diferencia importa: el resumen por código
+     * nombra la propiedad —`El campo curp es inválido`— y sirve mientras el nombre del campo sea un
+     * dato del contrato, pero una regla de clase se reporta sobre el nombre de un método
+     * —`responsableInformadoCuandoHayParentesco`— y ese texto en la cara de quien consume la API no
+     * dice nada. Una restricción que trae su propio mensaje ya está explicada y se publica tal cual.</p>
+     *
+     * <p><strong>Ninguna restricción existente cambia su texto.</strong> Hoy ninguna anotación del
+     * proyecto declara `message`, así que todas siguen cayendo en {@link #MENSAJES_POR_CODIGO}, y
+     * una anotación que declare uno se publica sin el prefijo `El campo …`, porque su texto es una
+     * oración completa. Se comparan el valor y el valor por defecto del atributo: un mensaje
+     * heredado del valor por defecto de la anotación no es una decisión de este proyecto.</p>
+     *
      * @param excepcion excepción con el resultado del Bean Validation
      * @param peticion  petición que originó el error
      * @return respuesta 400 con {@link ErrorResponse}
@@ -341,15 +363,111 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> manejarValidacion(
             MethodArgumentNotValidException excepcion, HttpServletRequest peticion) {
+        Object objetivo = excepcion.getBindingResult().getTarget();
         String resumen = excepcion.getBindingResult().getFieldErrors().stream()
-                .map(error -> "El campo " + error.getField() + " "
-                        + MENSAJES_POR_CODIGO.getOrDefault(error.getCode(), "es inválido"))
+                .map(error -> describirCampoInvalido(error, objetivo))
                 .distinct()
                 .collect(Collectors.joining("; "));
         if (resumen.isBlank()) {
             resumen = "La petición contiene datos inválidos";
         }
         return construir(HttpStatus.BAD_REQUEST, resumen, peticion);
+    }
+
+    /**
+     * Texto de una entrada del resumen: el mensaje de la restricción o, si no declara uno, el
+     * resumen por código con el nombre del campo al frente.
+     *
+     * @param error   error de campo del Bean Validation
+     * @param objetivo cuerpo ya deserializado sobre el que se validó, o {@code null}
+     * @return texto que se publica para ese campo
+     */
+    private static String describirCampoInvalido(FieldError error, Object objetivo) {
+        String declarado = mensajeDeclarado(error, objetivo);
+        if (declarado != null) {
+            return declarado;
+        }
+        return "El campo " + error.getField() + " "
+                + MENSAJES_POR_CODIGO.getOrDefault(error.getCode(), "es inválido");
+    }
+
+    /**
+     * Mensaje que la restricción declara, o {@code null} si la anotación no declara ninguno.
+     *
+     * <p>Se lee la anotación que corresponde al código del error —que Spring nombra con el tipo de
+     * la restricción, `NotBlank`, `Pattern`, `AssertTrue`— y se compara su valor con el valor por
+     * defecto que la propia anotación declara. Iguales significa que el mensaje es el del framework
+     * y no una decisión del proyecto.</p>
+     *
+     * <p>Los campos anidados o indexados se dejan fuera: la anotación no está en el objeto que
+     * llega aquí y adivinar la ruta no aporta nada. Cualquier fallo de reflexión tampoco interrumpe
+     * la respuesta: se cae al resumen por código, que es el comportamiento anterior.</p>
+     *
+     * @param error    error de campo del Bean Validation
+     * @param objetivo cuerpo ya deserializado sobre el que se validó, o {@code null}
+     * @return mensaje declarado por la restricción, o {@code null}
+     */
+    private static String mensajeDeclarado(FieldError error, Object objetivo) {
+        String campo = error.getField();
+        String codigo = error.getCode();
+        if (objetivo == null || codigo == null || campo == null || campo.isBlank()
+                || campo.indexOf('.') >= 0 || campo.indexOf('[') >= 0) {
+            return null;
+        }
+        for (Annotation anotacion : anotacionesDeLaPropiedad(objetivo.getClass(), campo)) {
+            if (!anotacion.annotationType().getSimpleName().equals(codigo)) {
+                continue;
+            }
+            try {
+                Method atributo = anotacion.annotationType().getMethod(ATRIBUTO_MENSAJE);
+                Object valor = atributo.invoke(anotacion);
+                Object porDefecto = atributo.getDefaultValue();
+                if (valor instanceof String texto && !texto.isBlank() && !texto.equals(porDefecto)) {
+                    return texto;
+                }
+            } catch (ReflectiveOperationException | RuntimeException excepcion) {
+                // Una restricción sin atributo `message` —o una lectura imposible— no aporta texto:
+                // se usa el resumen por código, que es lo que el cliente recibía antes.
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Anotaciones que la validación puede haber leído para una propiedad.
+     *
+     * <p>Un campo del cuerpo se declara de varias formas y cada una se anota en un lugar distinto:
+     * un atributo de un `record` lleva sus anotaciones en el componente, que javac copia al campo y
+     * al accesor; y una restricción de clase como `@AssertTrue` se escribe sobre el método
+     * `isAlgo()`, de modo que Spring la reporta con el nombre de la propiedad y no del campo. Se
+     * recogen las tres formas para no depender de cómo se declaró cada DTO.</p>
+     *
+     * @param tipo  clase del cuerpo validado
+     * @param campo nombre del campo o de la propiedad tal como lo reporta Spring
+     * @return anotaciones encontradas, posiblemente vacías
+     */
+    private static List<Annotation> anotacionesDeLaPropiedad(Class<?> tipo, String campo) {
+        List<Annotation> anotaciones = new ArrayList<>();
+        try {
+            anotaciones.addAll(List.of(tipo.getDeclaredField(campo).getAnnotations()));
+        } catch (NoSuchFieldException | RuntimeException excepcion) {
+            // La propiedad puede no ser un campo: sigue con el accesor.
+        }
+        try {
+            anotaciones.addAll(List.of(tipo.getDeclaredMethod(campo).getAnnotations()));
+        } catch (NoSuchMethodException | RuntimeException excepcion) {
+            // No es un accesor de `record`; sigue con las formas `getX` / `isX`.
+        }
+        String capitalizado = Character.toUpperCase(campo.charAt(0)) + campo.substring(1);
+        for (String prefijo : new String[] {"get", "is"}) {
+            try {
+                anotaciones.addAll(List.of(tipo.getDeclaredMethod(prefijo + capitalizado).getAnnotations()));
+            } catch (NoSuchMethodException | RuntimeException excepcion) {
+                // La propiedad no se declara con ese prefijo.
+            }
+        }
+        return anotaciones;
     }
 
     /**

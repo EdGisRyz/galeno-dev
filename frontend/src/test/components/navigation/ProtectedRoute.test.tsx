@@ -39,6 +39,7 @@ beforeEach(() => {
     inicializando: true,
     tenantSlug: '',
     organizacionNombre: '',
+    motivoDeSesionCerrada: null,
     showInactivityWarning: false,
     lastActivity: Date.now(),
   });
@@ -156,6 +157,20 @@ describe('ProtectedRoute · roles permitidos (ADR-013)', () => {
 
     expect(screen.getByText('pantalla-de-login')).toBeInTheDocument();
     expect(screen.queryByText('agenda-clinica')).not.toBeInTheDocument();
+  });
+
+  it('con la sesión perdida lleva al login con el motivo del cierre (S2)', () => {
+    // El store registra que la sesión anterior se cerró y no se pudo recuperar; la guarda lo
+    // traslada al login en lugar de descartarlo, que es lo que dejaba la pantalla sin aviso.
+    useAuthStore.setState({
+      isAuthenticated: false,
+      inicializando: false,
+      motivoDeSesionCerrada: 'sesion_cerrada',
+    });
+
+    renderizarRutaConRoles(ROLES_DE_AGENDA);
+
+    expect(screen.getByText('pantalla-de-login?reason=sesion_cerrada')).toBeInTheDocument();
   });
 
   it('mientras inicializa no renderiza nada, ni siquiera con roles permitidos', () => {

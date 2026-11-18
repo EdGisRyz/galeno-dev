@@ -246,6 +246,83 @@ describe('PacientesPage · parentesco con sugerencias (S6)', () => {
   });
 });
 
+describe('PacientesPage · un parentesco exige un responsable (S5)', () => {
+  it('no envía el alta con parentesco y sin nombre del responsable', async () => {
+    // El caso de la captura: la fila decía responsable «—» y parentesco «amigo». Ninguna regla de
+    // campo individual lo detecta, porque cada valor por separado es válido.
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
+
+    render(<PacientesPage />);
+    await screen.findByText(/aún no hay pacientes registrados/i);
+    await abrirAlta();
+
+    escribir(/^nombre completo\b/i, 'Paciente de prueba');
+    escribir(/parentesco/i, 'Amigo');
+    fireEvent.click(screen.getByRole('button', { name: /registrar paciente/i }));
+
+    expect(
+      await screen.findByText('Si registras un parentesco, el nombre del responsable es obligatorio.'),
+    ).toBeInTheDocument();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it('no envía la edición con parentesco y sin nombre del responsable', async () => {
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
+
+    render(<PacientesPage />);
+    await screen.findByText(PACIENTE.nombre);
+    fireEvent.click(screen.getByRole('button', { name: /ficha/i }));
+
+    escribir(/nombre del responsable/i, '');
+    escribir(/parentesco/i, 'Amigo');
+    fireEvent.click(screen.getByRole('button', { name: /guardar cambios/i }));
+
+    expect(
+      await screen.findByText('Si registras un parentesco, el nombre del responsable es obligatorio.'),
+    ).toBeInTheDocument();
+    expect(putMock).not.toHaveBeenCalled();
+  });
+
+  it('envía el alta con parentesco y responsable informados', async () => {
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
+    postMock.mockResolvedValue(respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0009' }));
+
+    render(<PacientesPage />);
+    await screen.findByText(/aún no hay pacientes registrados/i);
+    await abrirAlta();
+
+    escribir(/^nombre completo\b/i, 'Paciente de prueba');
+    escribir(/nombre del responsable/i, 'Rosa Ramírez Silva');
+    escribir(/parentesco/i, 'Amigo');
+    fireEvent.click(screen.getByRole('button', { name: /registrar paciente/i }));
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+    const [, cuerpo] = postMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cuerpo.parentesco).toBe('Amigo');
+    expect(cuerpo.nombreResponsable).toBe('Rosa Ramírez Silva');
+  });
+
+  it('envía el alta sin parentesco ni responsable: es el caso de un paciente que llega solo', async () => {
+    getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
+    postMock.mockResolvedValue(respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0009' }));
+
+    render(<PacientesPage />);
+    await screen.findByText(/aún no hay pacientes registrados/i);
+    await abrirAlta();
+
+    escribir(/^nombre completo\b/i, 'Paciente de prueba');
+    fireEvent.click(screen.getByRole('button', { name: /registrar paciente/i }));
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+    const [, cuerpo] = postMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cuerpo.parentesco).toBeNull();
+    expect(cuerpo.nombreResponsable).toBeNull();
+    expect(
+      screen.queryByText('Si registras un parentesco, el nombre del responsable es obligatorio.'),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe('PacientesPage · lo ya guardado se sigue leyendo (S10)', () => {
   it('muestra el paciente con datos no conformes y no deja guardar la edición sin corregir', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE_NO_CONFORME]));
@@ -282,12 +359,12 @@ describe('PacientesPage · lo ya guardado se sigue leyendo (S10)', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'El teléfono debe tener entre 7 y 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.',
+        'El teléfono debe tener entre 7 y 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.',
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'El teléfono del responsable debe tener entre 7 y 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.',
+        'El teléfono del responsable debe tener entre 7 y 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.',
       ),
     ).toBeInTheDocument();
     expect(putMock).not.toHaveBeenCalled();

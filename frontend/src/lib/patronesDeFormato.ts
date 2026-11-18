@@ -49,9 +49,16 @@ export function mensajeDeNombreDeLocal(etiqueta: string): string {
   return `${etiqueta} solo admite letras, números, espacios, punto, guion y apóstrofo, y debe incluir al menos una letra.`;
 }
 
-/** Mensaje del teléfono, con la etiqueta del campo al frente. */
+/**
+ * Mensaje del teléfono, con la etiqueta del campo al frente.
+ *
+ * Enumeración y regla se mueven juntas: el mensaje nombra **todos** los separadores que
+ * `PATRON_TELEFONO` acepta —espacios, guiones y paréntesis—. Un mensaje que enumera menos de lo
+ * aceptado hace que la persona reescriba un dato que ya era válido para que el formulario lo
+ * deje pasar.
+ */
 export function mensajeDeTelefono(etiqueta: string): string {
-  return `${etiqueta} debe tener entre 7 y 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.`;
+  return `${etiqueta} debe tener entre 7 y 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.`;
 }
 
 /** Mensaje del límite de longitud, con la etiqueta del campo y el máximo. */

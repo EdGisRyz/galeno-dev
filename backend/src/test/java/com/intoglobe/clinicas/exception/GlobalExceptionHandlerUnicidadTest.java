@@ -53,10 +53,13 @@ class GlobalExceptionHandlerUnicidadTest {
 
             assertThat(respuesta.getStatusCode().value()).isEqualTo(409);
             assertThat(respuesta.getBody().mensaje())
-                    .as("el mensaje nombra el motivo: qué chocó y por qué el mismo dato sí puede "
-                            + "existir en otra organización")
+                    .as("el mensaje nombra el motivo: qué chocó, por qué el mismo dato sí puede "
+                            + "existir en otra organización y cuál es la salida")
                     .contains("CURP")
-                    .contains("organización");
+                    .contains("organización")
+                    // S3: es el mismo 409 que el de la comprobación previa del servicio, así que
+                    // las dos ramas sugieren la misma salida en lugar de divergir.
+                    .contains("reactiv");
         }
     }
 

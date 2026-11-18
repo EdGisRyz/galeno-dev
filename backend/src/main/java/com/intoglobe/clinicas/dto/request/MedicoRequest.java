@@ -74,7 +74,7 @@ import jakarta.validation.constraints.Size;
  * @param especialidad  especialidad del médico (opcional, máx. 80 caracteres, sin dígitos)
  * @param cedula        cédula profesional (opcional, solo dígitos, 5..10)
  * @param telefono      teléfono de contacto (opcional, 7..20 caracteres, dígitos, {@code +}
- *                      inicial opcional, espacios y guiones)
+ *                      inicial opcional, espacios, guiones y paréntesis)
  * @param tarifaBase    tarifa base de la consulta (opcional, hasta 8 enteros y 2
  *                      decimales, nunca negativa)
  */
@@ -111,7 +111,7 @@ public record MedicoRequest(
         String cedula,
 
         @Schema(description = "Teléfono de contacto del médico; null o vacío si no se registró. De 7 "
-                + "a 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.",
+                + "a 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.",
                 example = "+52 55 5555 9876")
         // De 7 a 20 caracteres contando el +: el largo lo acota el patrón compartido.
         @Pattern(regexp = PatronesDeFormato.TELEFONO)

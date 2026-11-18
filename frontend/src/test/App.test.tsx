@@ -112,8 +112,24 @@ beforeEach(() => {
   reiniciarSesion();
 });
 
-describe('App · /agenda según ADR-013', () => {
-  it('un ADMIN llega a la agenda', async () => {
+describe('App · sesión anterior no recuperada (S2)', () => {
+  it('un refresco de arranque fallido llega al login y explica el cierre', async () => {
+    // Es el camino completo del hallazgo: la cuenta se desactiva con la sesión abierta, la
+    // siguiente carga no puede refrescar y antes la pantalla volvía al login sin un solo mensaje.
+    servicio.refresh.mockRejectedValue(new Error('401'));
+
+    render(
+      <MemoryRouter initialEntries={['/agenda']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Iniciar Sesión')).toBeInTheDocument();
+    expect(screen.getByText(/no se pudo recuperar/i)).toBeInTheDocument();
+  });
+});
+
+describe('App · /agenda según ADR-013', () => {  it('un ADMIN llega a la agenda', async () => {
     montarAppConSesion('ADMIN');
 
     expect(await screen.findByText('agenda-clinica')).toBeInTheDocument();

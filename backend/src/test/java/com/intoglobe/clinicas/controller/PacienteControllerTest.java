@@ -35,6 +35,7 @@ import com.intoglobe.clinicas.service.PacienteService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -465,6 +466,9 @@ class PacienteControllerTest {
                 .andExpect(jsonPath("$.error").value("Conflict"))
                 .andExpect(jsonPath("$.mensaje").value(containsString(CURP)))
                 .andExpect(jsonPath("$.mensaje").value(containsString("La CURP es única")))
+                // S3: la baja es lógica justamente para esto, así que el 409 nombra la salida.
+                .andExpect(jsonPath("$.mensaje").value(containsString("reactiv")))
+                .andExpect(jsonPath("$.mensaje").value(containsString("otras organizaciones")))
                 .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
     }
 
@@ -644,7 +648,7 @@ class PacienteControllerTest {
         perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"nombre":"Paciente de prueba","parentesco":"54545454"}
+                                {"nombre":"Paciente de prueba","nombreResponsable":"Rosa Ramírez Silva","parentesco":"54545454"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
@@ -674,7 +678,7 @@ class PacienteControllerTest {
         perform(put("/api/v1/pacientes/{id}", PACIENTE_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"nombre":"Paciente de prueba","parentesco":"54545454"}
+                                {"nombre":"Paciente de prueba","nombreResponsable":"Rosa Ramírez Silva","parentesco":"54545454"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
@@ -726,10 +730,63 @@ class PacienteControllerTest {
             perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"nombre":"Paciente de prueba","parentesco":"%s"}
+                                    {"nombre":"Paciente de prueba","nombreResponsable":"Rosa Ramírez Silva","parentesco":"%s"}
                                     """.formatted(parentesco)))
                     .andExpect(status().isCreated());
         }
+    }
+
+    @Test
+    @DisplayName("POST con parentesco y sin nombre del responsable devuelve 400 (S5, S8)")
+    void crear_shouldReturn400_whenParentescoHasNoResponsable() throws Exception {
+        // La regla es de dos campos: «amigo» con el responsable vacío dice qué es esa persona del
+        // paciente, pero no quién es. El cuerpo del 400 dice la regla, no el nombre del método que
+        // la implementa (S8).
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","parentesco":"Amigo"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value(
+                        "Si se registra un parentesco, el nombre del responsable es obligatorio."))
+                .andExpect(jsonPath("$.mensaje").value(not(containsString("responsableInformado"))))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("PUT con parentesco y sin nombre del responsable devuelve 400 (S5, S8)")
+    void actualizar_shouldReturn400_whenParentescoHasNoResponsable() throws Exception {
+        perform(put("/api/v1/pacientes/{id}", PACIENTE_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","parentesco":"Amigo"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value(
+                        "Si se registra un parentesco, el nombre del responsable es obligatorio."))
+                .andExpect(jsonPath("$.mensaje").value(not(containsString("responsableInformado"))))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/pacientes/" + PACIENTE_ID));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST sin parentesco ni responsable devuelve 201 (S5)")
+    void crear_shouldReturn201_whenThereIsNeitherParentescoNorResponsable() throws Exception {
+        // El caso normal de un paciente que llega solo al mostrador no puede empezar a rechazarse.
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "Paciente de prueba", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba"}
+                                """))
+                .andExpect(status().isCreated());
+        verify(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class));
     }
 
     @Test

@@ -16,6 +16,20 @@ Sin un emisor no hay nada que validar, así que el login del frontend no se pued
 probar de extremo a extremo. Este proceso llena ese hueco mientras no exista el AuthService de
 InToGlobe, y nada más.
 
+### El emisor no debe ser más listo que la plataforma real
+
+Este proceso es un **sustituto**, no una fuente de verdad. Todo comportamiento que se le enseñe
+existe solo acá: si revelara algo que la plataforma real no revela —por ejemplo, el estado de una
+cuenta en el refresco, donde hoy responde un 401 genérico **a propósito**—, el frontend se
+escribiría contra un contrato que producción no cumple, y quedaría cubierto por pruebas que nunca
+se ejecutan. Peor todavía: este código es también **documentación ejecutable** de cómo se comporta
+el servicio de identidad, así que lo que invente se leerá como si fuera real.
+
+**Regla**: imitarlo, incluidas sus limitaciones; cuando falte un dato, resolverlo del lado del
+cliente con la información que sí existe, en lugar de inventarla acá. Un emisor que sabe más deja
+de ser un simulador y se convierte en una ficción cómoda: en local todo funciona y algo se rompe en
+el primer ambiente real.
+
 ## De dónde salen las cuentas
 
 De la tabla **`usuario` de PostgreSQL** (más el `activo` de su médico). **No** de un archivo: el
