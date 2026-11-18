@@ -48,6 +48,15 @@ function renderLoginFormConMotivo() {
   );
 }
 
+/** Login tal como queda cuando el refresco de arranque no pudo recuperar la sesión (S2). */
+function renderLoginFormConSesionCerrada() {
+  return render(
+    <MemoryRouter initialEntries={['/login?reason=sesion_cerrada']}>
+      <LoginForm />
+    </MemoryRouter>,
+  );
+}
+
 function enviarCredenciales() {
   fireEvent.change(screen.getByLabelText(/correo electrónico/i), {
     target: { value: 'medico@clinica.mx' },
@@ -108,12 +117,46 @@ describe('LoginForm · motivo del rechazo', () => {
     // vuelve al login como si se hubiera equivocado de contraseña.
     renderLoginFormConMotivo();
 
-    expect(screen.getByText(/no tiene acceso a ninguna sección/i)).toBeInTheDocument();
+    expect(screen.getByText(/no tiene ninguna sección/i)).toBeInTheDocument();
+  });
+
+  it('cubre las dos causas posibles sin afirmar que el rol es el problema (S6)', () => {
+    // Para una cuenta PACIENTE el rol es correcto y lo que no existe es un portal de pacientes:
+    // pedirle que «revise su rol» la manda a reclamar algo que está bien.
+    renderLoginFormConMotivo();
+
+    // La causa de quien trabaja en la clínica y la de quien llega como paciente, las dos dichas.
+    expect(screen.getByText(/si trabajas en la clínica/i)).toBeInTheDocument();
+    expect(screen.getByText(/portal para pacientes/i)).toBeInTheDocument();
+    // Y ya no se afirma que el rol sea el problema.
+    expect(screen.queryByText(/tu rol no tiene acceso/i)).not.toBeInTheDocument();
   });
 
   it('no muestra ese aviso cuando se entra al login sin motivo', () => {
     renderLoginForm();
 
-    expect(screen.queryByText(/no tiene acceso a ninguna sección/i)).toBeNull();
+    expect(screen.queryByText(/no tiene ninguna sección/i)).toBeNull();
+  });
+});
+
+describe('LoginForm · sesión anterior no recuperada (S2)', () => {
+  it('explica el cierre cubriendo las dos causas posibles', () => {
+    // El emisor responde un 401 genérico en el refresco también cuando la cuenta está dada de baja,
+    // así que la pantalla no puede afirmar la causa: dice que la sesión no se recuperó y nombra
+    // las dos salidas, incluida la reactivación por administración.
+    renderLoginFormConSesionCerrada();
+
+    expect(screen.getByText(/no se pudo recuperar/i)).toBeInTheDocument();
+    // La causa más frecuente —se dejó pasar el tiempo de inactividad— y la de la cuenta dada de baja.
+    expect(screen.getByText(/tiempo de inactividad/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/si un administrador dio de baja tu cuenta, tiene que reactivarla/i),
+    ).toBeInTheDocument();
+  });
+
+  it('no muestra ese aviso cuando se entra al login sin motivo', () => {
+    renderLoginForm();
+
+    expect(screen.queryByText(/no se pudo recuperar/i)).toBeNull();
   });
 });

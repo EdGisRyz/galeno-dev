@@ -18,6 +18,17 @@ interface AuthState {
   /** Hay un refresco de arranque en vuelo: la sesión todavía no es anónima ni autenticada. */
   inicializando: boolean;
   /**
+   * Motivo por el que la sesión se cerró **sin que la persona lo pidiera**, para que el login lo
+   * explique en lugar de recibirla como si se hubiera equivocado de contraseña.
+   *
+   * `sesion_cerrada` es el único valor: el emisor responde un `401` genérico cuando el refresco
+   * falla —también si la cuenta fue dada de baja, a propósito, sin detallar su estado—, así que el
+   * cliente no puede distinguir una baja de una cookie vencida y el aviso cubre las dos causas. Se
+   * limpia al abrir sesión y al cerrarla a propósito: irse por la puerta propia no es una sesión
+   * perdida.
+   */
+  motivoDeSesionCerrada: MotivoDeSesionCerrada | null;
+  /**
    * Slug/token del tenant de la sesión. Se deriva del claim `tenantId` al abrir la sesión y **nunca**
    * se rellena con un valor por defecto (GAL-Front001 sección 2, guardarraíl 4): si no hay claim, no hay
    * sesión.
@@ -105,6 +116,12 @@ function decodeJwtPayload(token: string): ClaimsToken | null {
 /** Motivo por el que un token no puede abrir sesión (R-SEG-07, fail-closed). */
 type MotivoRechazo = 'malformado' | 'identidad_incompleta' | 'sin_tenant' | 'sin_vencimiento' | 'vencido';
 
+/**
+ * Motivo por el que la sesión se cerró sin que la persona lo pidiera. Se transporta al login en el
+ * parámetro `reason` y lo interpreta `LoginForm`.
+ */
+export type MotivoDeSesionCerrada = 'sesion_cerrada';
+
 /** Resultado de intentar convertir un token en sesión: usuario, o el motivo del rechazo. */
 type SesionResuelta = { ok: true; usuario: AuthUser } | { ok: false; motivo: MotivoRechazo };
 
@@ -158,6 +175,7 @@ const SESION_CERRADA = {
   inicializando: false,
   tenantSlug: '',
   organizacionNombre: '',
+  motivoDeSesionCerrada: null,
   showInactivityWarning: false,
 } as const;
 
@@ -225,6 +243,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
       // El nombre es un dato de presentación aparte: `tenantSlug` sigue siendo el identificador
       // que usan el filtro y las rutas, y una sesión nueva no hereda el nombre de la anterior.
       organizacionNombre: esSesionNueva ? '' : get().organizacionNombre,
+      // Una sesión abierta deja de ser una sesión perdida: el aviso del login no puede reaparecer
+      // en el siguiente cierre.
+      motivoDeSesionCerrada: null,
       lastActivity: Date.now(),
       showInactivityWarning: false,
     });
@@ -243,6 +264,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     inicializando: true,
     tenantSlug: '',
     organizacionNombre: '',
+    motivoDeSesionCerrada: null,
     lastActivity: Date.now(),
     showInactivityWarning: false,
 
@@ -266,8 +288,19 @@ export const useAuthStore = create<AuthState>((set, get) => {
           const { accessToken } = await authService.refresh();
           // El refresco usa la misma puerta que el login: un token vencido o sin `exp` deja la
           // sesión anónima en lugar de renovarla a ciegas (ADR-012).
-          return establecerSesion(accessToken, 'refresco').ok ? accessToken : null;
+          const resultado = establecerSesion(accessToken, 'refresco');
+          if (!resultado.ok) {
+            // El emisor respondió con un token que no abre sesión: la sesión anterior se perdió.
+            set({ motivoDeSesionCerrada: 'sesion_cerrada' });
+            return null;
+          }
+          return accessToken;
         } catch {
+          // Sin cookie válida —o con la cuenta ya dada de baja, que el emisor responde igual— la
+          // sesión anterior no se puede recuperar. Es el único lugar donde se sabe que había una
+          // sesión y se perdió, así que aquí se registra el motivo para que la guarda de ruta lo
+          // lleve al login y el login lo explique (S2).
+          set({ motivoDeSesionCerrada: 'sesion_cerrada' });
           return null;
         } finally {
           // Resuelto el intento —con o sin sesión— ya no hay nada que esperar en el arranque.
