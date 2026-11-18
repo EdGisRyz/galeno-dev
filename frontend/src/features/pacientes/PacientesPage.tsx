@@ -90,6 +90,11 @@ export function PacientesPage() {
    * del tenant, y **nunca** se rellena con un valor por defecto (plan sección 2, guardarraíl 4).
    */
   const organizacionId = useAuthStore((state) => state.user?.tenantId ?? '');
+  // Las escrituras de paciente son de administración y recepción; el médico la consulta. Ofrecerle
+  // botones que el backend rechaza con 403 es peor que no mostrarlos: la pantalla promete algo que
+  // el servidor va a negar.
+  const rolDeSesion = useAuthStore((state) => state.user?.role);
+  const puedeGestionar = rolDeSesion === 'ADMIN' || rolDeSesion === 'RECEPCIONISTA';
 
   /**
    * La colección cuelga de la organización dueña: `GET/POST /organizaciones/{id}/pacientes`. El
@@ -347,14 +352,16 @@ export function PacientesPage() {
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={openCreateModal}
-          leftIcon={<UserPlus className="w-4 h-4 text-[#88BDDC]" />}
-        >
-          Nuevo Paciente
-        </Button>
+        {puedeGestionar && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={openCreateModal}
+            leftIcon={<UserPlus className="w-4 h-4 text-[#88BDDC]" />}
+          >
+            Nuevo Paciente
+          </Button>
+        )}
       </div>
 
       {alertNotice && (
@@ -479,13 +486,13 @@ export function PacientesPage() {
               <TableHead>CURP</TableHead>
               <TableHead>Responsable</TableHead>
               <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
+              {puedeGestionar && <TableHead className="text-right">Acciones</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-12">
+                <TableCell colSpan={puedeGestionar ? 7 : 6} className="text-center py-12">
                   <span
                     role="status"
                     aria-live="polite"
@@ -498,7 +505,7 @@ export function PacientesPage() {
               </TableRow>
             ) : loadError ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-8">
+                <TableCell colSpan={puedeGestionar ? 7 : 6} className="py-8">
                   <Alert variant="error" title="No se pudieron cargar los pacientes">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <span>{loadError}</span>
@@ -571,7 +578,8 @@ export function PacientesPage() {
                     </Badge>
                   </TableCell>
 
-                  <TableCell className="text-right">
+                  {puedeGestionar && (
+                    <TableCell className="text-right">
                     <div className="inline-flex items-center justify-end gap-2">
                       {/* La baja es lógica, así que una fila inactiva se puede reactivar sin
                           duplicar al paciente. Mismo tamaño y forma que el resto de acciones de
@@ -608,12 +616,13 @@ export function PacientesPage() {
                         <span className="hidden sm:inline">Ficha</span>
                       </button>
                     </div>
-                  </TableCell>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-12">
+                <TableCell colSpan={puedeGestionar ? 7 : 6} className="text-center py-12">
                   {search ? (
                     <span className="text-[#94A3B8]">
                       No se encontraron pacientes con ese criterio.
