@@ -6,6 +6,7 @@ import com.intoglobe.clinicas.model.Paciente;
 import com.intoglobe.clinicas.validation.PatronesDeFormato;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -68,11 +69,18 @@ import jakarta.validation.constraints.Size;
  * una dirección lleva número de casa —{@code Av. Juárez 210}— y aplicarle el alfabeto del nombre
  * rechazaría la mitad de las direcciones reales.</p>
  *
+ * <p><strong>El parentesco y el nombre del responsable se validan juntos.</strong> Cada campo por
+ * separado puede ser correcto —`parentesco = "amigo"` es un valor válido y `nombreResponsable`
+ * vacío es un campo opcional— y aun así la ficha no describe nada: dice qué es esa persona del
+ * paciente sin decir quién es. La regla es de clase ({@link #isResponsableInformadoCuandoHayParentesco()})
+ * porque cruza dos campos, y va en **una sola dirección**: los dos campos vacíos son el caso normal
+ * —un paciente que llega solo al mostrador— y un responsable sin parentesco también es válido.</p>
+ *
  * <p>Las validaciones Jakarta viven aquí, nunca en la entidad.</p>
  *
  * @param nombre          nombre del paciente (obligatorio, 1..160 caracteres, sin dígitos)
  * @param telefono        teléfono de contacto (opcional, 7..20 caracteres con dígitos, {@code +}
- *                        inicial opcional, espacios y guiones)
+ *                        inicial opcional, espacios, guiones y paréntesis)
  * @param fechaNacimiento fecha de nacimiento (opcional, {@code DATE} sin hora ni zona)
  * @param sexo            sexo registrado (opcional, uno de {@code M}, {@code F}, {@code O})
  * @param email           correo electrónico (opcional, máx. 180 caracteres, sin
@@ -85,7 +93,8 @@ import jakarta.validation.constraints.Size;
  * @param telefonoResponsable teléfono del responsable (opcional, 7..20 caracteres, misma regla
  *                        que {@code telefono})
  * @param parentesco      parentesco del responsable con el paciente (opcional, máx. 40
- *                        caracteres, sin dígitos)
+ *                        caracteres, sin dígitos); si viene informado, exige
+ *                        {@code nombreResponsable}
  */
 public record PacienteRequest(
 
@@ -99,7 +108,7 @@ public record PacienteRequest(
         String nombre,
 
         @Schema(description = "Teléfono de contacto del paciente; null o vacío si no se registró. "
-                + "De 7 a 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.",
+                + "De 7 a 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.",
                 example = "+52 55 5555 4321")
         // El máximo de 20 vive dentro del patrón compartido: declarar además @Size produciría dos
         // mensajes para el mismo dato.
@@ -161,7 +170,7 @@ public record PacienteRequest(
         String nombreResponsable,
 
         @Schema(description = "Teléfono del responsable; null o vacío si no se registró. De 7 a 20 "
-                + "caracteres: dígitos, un + inicial opcional, espacios y guiones.",
+                + "caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.",
                 example = "+52 55 5555 8765")
         @Pattern(regexp = PatronesDeFormato.TELEFONO)
         String telefonoResponsable,
@@ -188,5 +197,27 @@ public record PacienteRequest(
      */
     public PacienteRequest {
         curp = Paciente.normalizarCurp(curp);
+    }
+
+    /**
+     * Regla de dos campos de la ficha: si hay parentesco, el nombre del responsable es obligatorio.
+     *
+     * <p>El nombre del método se lee como la regla —«responsable informado cuando hay
+     * parentesco»— porque es el nombre que el resumen de errores de validación usa para señalar la
+     * regla: {@code El campo responsableInformadoCuandoHayParentesco es inválido}. El texto propio
+     * del rechazo es el del mensaje de la restricción.</p>
+     *
+     * <p>Un parentesco en blanco cuenta como «no registrado», igual que el resto de los campos
+     * opcionales del contrato. Un responsable en blanco no cuenta como informado: es justamente lo
+     * que la regla prohíbe. El camino inverso no se valida a propósito —un responsable sin
+     * parentesco es un dato real— y los dos campos vacíos tampoco producen error.</p>
+     *
+     * @return {@code true} si la ficha cumple la regla de los dos campos
+     */
+    @AssertTrue(message = "Si se registra un parentesco, el nombre del responsable es obligatorio.")
+    public boolean isResponsableInformadoCuandoHayParentesco() {
+        boolean hayParentesco = parentesco != null && !parentesco.isBlank();
+        boolean hayResponsable = nombreResponsable != null && !nombreResponsable.isBlank();
+        return !hayParentesco || hayResponsable;
     }
 }
