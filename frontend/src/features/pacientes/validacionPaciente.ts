@@ -59,11 +59,24 @@ export type CampoDePaciente = keyof CamposDePaciente;
 export type ErroresDePaciente = Partial<Record<CampoDePaciente, string>>;
 
 /**
+ * Regla de dos campos (S5): si se informa un parentesco, el nombre del responsable es obligatorio.
+ *
+ * Cada campo por separado es válido —`parentesco = "amigo"` es un valor real y el responsable es
+ * opcional— y aun así la ficha no describe nada: dice qué es esa persona del paciente sin decir
+ * quién es. El mensaje se muestra junto al campo que falta, que es el que hay que completar.
+ */
+export const MENSAJE_RESPONSABLE_OBLIGATORIO =
+  'Si registras un parentesco, el nombre del responsable es obligatorio.';
+
+/**
  * Aplica las reglas de formato y devuelve el mensaje de cada campo que no las cumple.
  *
  * Los opcionales vacíos no producen error: un campo en blanco es «no registrado», igual que en el
  * contrato del backend. El parentesco no se compara con ninguna lista: las sugerencias de la
  * pantalla son una ayuda, no un catálogo cerrado («amigo», «vecino» son casos reales).
+ *
+ * La única regla que cruza dos campos es la del parentesco con su responsable (S5): los dos en
+ * blanco son el caso normal y no producen error; el parentesco informado sin responsable sí.
  */
 export function erroresDePaciente(campos: CamposDePaciente): ErroresDePaciente {
   const errores: ErroresDePaciente = {};
@@ -96,6 +109,12 @@ export function erroresDePaciente(campos: CamposDePaciente): ErroresDePaciente {
     LONGITUD_MAXIMA_NOMBRE_RESPONSABLE,
   );
   if (errorNombreResponsable) errores.nombreResponsable = errorNombreResponsable;
+
+  // S5: el parentesco sin responsable no se envía. Va después de la regla de formato porque el
+  // campo vacío no produce error propio: lo que falta no es un formato, es el dato completo.
+  if (campos.parentesco.trim() !== '' && campos.nombreResponsable.trim() === '') {
+    errores.nombreResponsable = MENSAJE_RESPONSABLE_OBLIGATORIO;
+  }
 
   const errorTelefonoResponsable = errorDeTelefono(
     'El teléfono del responsable',

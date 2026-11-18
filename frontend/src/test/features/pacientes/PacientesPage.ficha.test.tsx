@@ -82,7 +82,7 @@ const PACIENTE_CON_CURP_EN_MINUSCULAS: Paciente = {
 
 /** Mensaje de negocio que el backend adjunta al 409 (`ErrorResponse.mensaje`). */
 const MENSAJE_DEL_BACKEND =
-  'Ya existe un paciente con la CURP SAGC880514MOCMRL09 en esta organización. La CURP es única dentro de la organización, aunque el mismo paciente pueda estar registrado en otra';
+  'Ya existe un paciente con la CURP SAGC880514MOCMRL09 en esta organización. La CURP es única dentro de la organización, aunque el mismo paciente pueda estar registrado en otra. Si el paciente con esa CURP fue dado de baja, hay que reactivarlo en lugar de registrarlo de nuevo';
 
 /** Rechazo con la forma real del backend: `ErrorResponse` con `mensaje`. */
 function rechazoPorCurpDuplicada() {
@@ -344,7 +344,7 @@ describe('PacientesPage · rechazo por CURP duplicada (S7)', () => {
     await abrirAlta();
 
     escribir(/nombre completo/i, 'Paciente de prueba');
-    llenarFicha({ curp: CURP_CANONICA, parentesco: 'Hermana' });
+    llenarFicha({ curp: CURP_CANONICA, nombreResponsable: 'Responsable de prueba', parentesco: 'Hermana' });
     fireEvent.click(screen.getByRole('button', { name: /registrar paciente/i }));
 
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));

@@ -104,7 +104,9 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
           error: 'Conflict',
           mensaje:
             `Ya existe un paciente con la CURP ${curp} en esta organización. La CURP es única ` +
-            'dentro de la organización, aunque el mismo paciente pueda estar registrado en otra',
+            'dentro de la organización, aunque el mismo paciente pueda estar registrado en otra. ' +
+            'Si el paciente con esa CURP fue dado de baja, hay que reactivarlo en lugar de ' +
+            'registrarlo de nuevo',
         },
         status: 409,
         statusText: 'Conflict',
