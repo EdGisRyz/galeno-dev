@@ -2,6 +2,8 @@ package com.intoglobe.clinicas.exception;
 
 import java.time.LocalTime;
 
+import com.intoglobe.clinicas.model.DiasDeLaSemana;
+
 /**
  * Excepción de negocio para un bloque de disponibilidad que se solapa con otro del mismo
  * médico y día.
@@ -29,7 +31,8 @@ public class SolapamientoDeHorarioException extends RuntimeException {
      * @param horaFin    hora de fin del bloque
      */
     public SolapamientoDeHorarioException(short diaSemana, LocalTime horaInicio, LocalTime horaFin) {
-        super("El bloque de " + horaInicio + " a " + horaFin + " del día " + diaSemana
-                + " (0=Domingo, 6=Sábado) se solapa con otro bloque ya agendado de este médico");
+        super("El bloque de " + horaInicio + " a " + horaFin + " del "
+                + DiasDeLaSemana.nombre(diaSemana)
+                + " se solapa con otro bloque ya agendado de este médico");
     }
 }

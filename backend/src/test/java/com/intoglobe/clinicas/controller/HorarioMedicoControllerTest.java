@@ -101,7 +101,7 @@ class HorarioMedicoControllerTest {
             "La duración de la consulta no es válida: 25 minutos."
                     + " Las duraciones permitidas son 20, 30, 45 o 60 minutos";
     private static final String MENSAJE_SOLAPAMIENTO =
-            "El bloque de 09:00 a 11:00 del día 1 (0=Domingo, 6=Sábado)"
+            "El bloque de 09:00 a 11:00 del lunes"
                     + " se solapa con otro bloque ya agendado de este médico";
     private static final String MENSAJE_CONSULTORIO_NO_ASIGNADO =
             "El consultorio " + CONSULTORIO_NORTE_ID + " no está asignado al médico " + MEDICO_ID

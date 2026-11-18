@@ -83,10 +83,10 @@ class MedicoConsultorioControllerTest {
     private static final String MENSAJE_CONSULTORIO_ID_INVALIDO =
             "El parámetro 'consultorioId' tiene un formato inválido";
     private static final String MENSAJE_PRINCIPAL =
-            ConsultorioNoRetirableException.porSerElPrincipal(MEDICO_ID, CONSULTORIO_ID).getMessage();
+            ConsultorioNoRetirableException.porSerElPrincipal().getMessage();
     private static final String MENSAJE_BLOQUES =
-            ConsultorioNoRetirableException.porTenerBloquesDeHorario(MEDICO_ID, CONSULTORIO_ID,
-                    List.of("día 1 (lunes) de 09:00 a 13:00", "día 4 (jueves) de 15:00 a 19:00"))
+            ConsultorioNoRetirableException.porTenerBloquesDeHorario(
+                    List.of("lunes de 09:00 a 13:00", "jueves de 15:00 a 19:00"))
                     .getMessage();
 
     private static final String TOKEN = ClaveRsaDePrueba.tokenPara("ADMIN", TENANT_ID);
@@ -275,7 +275,7 @@ class MedicoConsultorioControllerTest {
     @Test
     @DisplayName("DELETE del consultorio principal devuelve 409 y explica que es el principal")
     void quitar_shouldReturn409_whenTheConsultorioIsThePrincipal() throws Exception {
-        doThrow(ConsultorioNoRetirableException.porSerElPrincipal(MEDICO_ID, CONSULTORIO_ID))
+        doThrow(ConsultorioNoRetirableException.porSerElPrincipal())
                 .when(medicoConsultorioService).quitar(any(AuthenticatedUser.class), eq(MEDICO_ID),
                         eq(CONSULTORIO_ID));
 
@@ -293,8 +293,8 @@ class MedicoConsultorioControllerTest {
     @Test
     @DisplayName("DELETE de un consultorio con bloques devuelve 409 y dice cuáles lo impiden")
     void quitar_shouldReturn409_whenTheConsultorioHasHorarios() throws Exception {
-        doThrow(ConsultorioNoRetirableException.porTenerBloquesDeHorario(MEDICO_ID, CONSULTORIO_ID,
-                List.of("día 1 (lunes) de 09:00 a 13:00", "día 4 (jueves) de 15:00 a 19:00")))
+        doThrow(ConsultorioNoRetirableException.porTenerBloquesDeHorario(
+                List.of("lunes de 09:00 a 13:00", "jueves de 15:00 a 19:00")))
                 .when(medicoConsultorioService).quitar(any(AuthenticatedUser.class), eq(MEDICO_ID),
                         eq(CONSULTORIO_ID));
 
@@ -305,9 +305,9 @@ class MedicoConsultorioControllerTest {
                 .andExpect(jsonPath("$.mensaje",
                         org.hamcrest.Matchers.containsString("bloques de horario")))
                 .andExpect(jsonPath("$.mensaje",
-                        org.hamcrest.Matchers.containsString("día 1 (lunes) de 09:00 a 13:00")))
+                        org.hamcrest.Matchers.containsString("lunes de 09:00 a 13:00")))
                 .andExpect(jsonPath("$.mensaje",
-                        org.hamcrest.Matchers.containsString("día 4 (jueves) de 15:00 a 19:00")))
+                        org.hamcrest.Matchers.containsString("jueves de 15:00 a 19:00")))
                 .andExpect(jsonPath("$.ruta").value(RUTA_CONSULTORIO));
     }
 

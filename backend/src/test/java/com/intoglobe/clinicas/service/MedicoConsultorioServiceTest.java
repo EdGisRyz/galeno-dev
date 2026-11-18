@@ -430,8 +430,11 @@ class MedicoConsultorioServiceTest {
         assertThatThrownBy(() -> medicoConsultorioService.quitar(adminDe(tenantId), medicoId, principalId))
                 .isInstanceOf(ConsultorioNoRetirableException.class)
                 .hasMessageContaining("consultorio principal")
-                .hasMessageContaining(principalId.toString())
-                .hasMessageContaining(medicoId.toString());
+                // El mensaje no nombra identificadores: quien lo lee está mirando la fila del
+                // consultorio que acaba de intentar quitar, así que un UUID solo agrega ruido.
+                .satisfies(excepcion -> assertThat(excepcion.getMessage())
+                        .doesNotContain(principalId.toString())
+                        .doesNotContain(medicoId.toString()));
         verify(medicoConsultorioRepository, never()).delete(any(MedicoConsultorio.class));
         verify(horarioMedicoRepository, never())
                 .listarBloquesEnConsultorio(any(UUID.class), any(UUID.class));
@@ -462,8 +465,8 @@ class MedicoConsultorioServiceTest {
         assertThatThrownBy(() -> medicoConsultorioService.quitar(adminDe(tenantId), medicoId, consultorioId))
                 .isInstanceOf(ConsultorioNoRetirableException.class)
                 .hasMessageContaining("bloques de horario")
-                .hasMessageContaining("día 1 (lunes) de 09:00 a 13:00")
-                .hasMessageContaining("día 4 (jueves) de 15:00 a 19:00");
+                .hasMessageContaining("lunes de 09:00 a 13:00")
+                .hasMessageContaining("jueves de 15:00 a 19:00");
         // La detección es previa: el error de integridad de la V6 no puede salir al cliente.
         verify(medicoConsultorioRepository, never()).delete(any(MedicoConsultorio.class));
     }
