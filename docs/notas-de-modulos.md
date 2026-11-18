@@ -75,6 +75,11 @@ contrato único para evitar que cada endpoint inventara su propio formato.
   Bean Validation (`MethodArgumentNotValidException`).
 - Los mensajes son resúmenes seguros en español: **no exponen stacktraces ni
   detalles internos del parser**.
+- El resumen de validación publica el **mensaje que la restricción declara**, cuando declara uno, y
+  si no el resumen por código con el nombre del campo al frente (`El campo curp es inválido`). Hoy
+  ninguna restricción del proyecto declara `message`, así que ningún texto existente cambia; lo que
+  cambia es que una regla de clase —que se reporta sobre el nombre de un método y no sobre un campo
+  del contrato— puede explicarse en su propio idioma en lugar de publicar un identificador de Java.
 
 **Por qué.** Un solo cuerpo de error es el contrato de referencia que los módulos
 1-10 deben copiar, en lugar de reinventar formatos.
@@ -1001,6 +1006,11 @@ para una implementación futura, pero no hay cuentas de paciente (decisión de p
   horarios y consultorios asignados, y administra el ciclo completo del paciente; **no** escribe
   agenda, no registra ni da de baja consultorios o médicos, y no accede a cuentas ni a la
   organización. La escritura sobre la agenda queda en administración y en el propio médico.
+- **La pantalla de Médicos ofrece «Horarios» solo donde la agenda es legible** (lote de revisión
+  visual, 2026-11-18): administración y recepción en todas las filas, y cada médico solo en la
+  suya. Antes el botón aparecía en todas las filas y abrir la de un colega terminaba en un 403 que
+  la pantalla contaba como «revisa la conexión con el servicio», mandando a buscar el problema al
+  lugar equivocado. Un rechazo que sí llegue muestra ahora el mensaje del backend.
 
 ### Checklist de lectura
 
@@ -1090,7 +1100,11 @@ La CURP se guarda **canónica** (recortada y en mayúsculas) por una sola funci�
 definiciones distintas de «la misma CURP» es exactamente cómo se cuela un duplicado. El
 formato se valida en el borde con una comprobación **estructural** de 18 posiciones; la
 validación autoritativa —existencia y dígito verificador— corresponde al registro nacional y
-queda **fuera de alcance**.
+queda **fuera de alcance**. El mensaje del **409 nombra la salida**: como la baja es lógica para
+conservar el registro, la causa más frecuente del conflicto es un paciente ya dado de baja, así
+que el texto pide **reactivarlo** en lugar de registrar uno nuevo. Las dos ramas que producen ese
+409 —la comprobación previa del servicio y la carrera que ataja la restricción única— dicen lo
+mismo.
    Esta ficha cierra una **pérdida silenciosa de datos**: la pantalla ya enviaba un objeto
    `ficha` anidado que el backend no declaraba, y Spring descarta por defecto las propiedades
    desconocidas, así que lo que la recepcionista escribía no se guardaba y no había error.
@@ -1108,6 +1122,12 @@ queda **fuera de alcance**.
    sin cambios. La pantalla valida antes de enviar y un paciente ya guardado con datos no conformes
    se sigue leyendo —en el directorio y en su ficha—; lo que no se puede es guardar la edición sin
    corregirlos.
+   La única regla que cruza dos campos: **un parentesco exige el nombre del responsable.** Cada
+   campo por separado es válido —«amigo» es un parentesco real y el responsable es opcional— y aun
+   así la fila no describe nada: dice qué es esa persona del paciente sin decir quién es. Vive en
+   `PacienteRequest#isResponsableInformadoCuandoHayParentesco` (`@AssertTrue`, un 400 de campo) y en
+   `validacionPaciente.ts`, y va en una sola dirección: los dos campos vacíos son el caso normal y
+   un responsable sin parentesco sigue permitido.
 
 ### Autorización en tres capas
 
