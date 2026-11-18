@@ -73,20 +73,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       ({@link #crearOrganizacionResponde403ParaLosTresRoles()}); y las rutas con el
  *       {@code organizacionId} de otro tenant, todas {@code 403} sin excepción de rol
  *       ({@link #elPathDeOtroTenantResponde403TambienParaAdmin()}).</li>
- *   <li><strong>MEDICO</strong>: las doce operaciones de su tenant permitidas —las seis
- *       lecturas de los módulos 02, 03 y paciente ({@link #medicoLeeSuPropioTenant()} y
- *       {@link #medicoLeePacientesDeSuPropioTenant()}), los cinco endpoints de horarios sobre
+ *   <li><strong>MEDICO</strong>: las trece operaciones de su tenant permitidas —las siete
+ *       lecturas de los módulos 02, 03, paciente y su propia organización
+ *       ({@link #medicoLeeSuPropioTenant()}, {@link #medicoLeeElNombreDeSuPropiaOrganizacion()}
+ *       y {@link #medicoLeePacientesDeSuPropioTenant()}), los cinco endpoints de horarios sobre
  *       su propia agenda ({@link #medicoOperaSuPropiaAgendaDeHorarios()}) y la lista de
  *       consultorios asignados a su propio médico
- *       ({@link #medicoLeeLosConsultoriosDeSuPropioMedico()})— y las veintitrés operaciones
+ *       ({@link #medicoLeeLosConsultoriosDeSuPropioMedico()})— y las veintidós operaciones
  *       restantes {@code 403} ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
  *   <li><strong>PACIENTE</strong>: las treinta y cinco operaciones {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
- *   <li><strong>RECEPCIONISTA</strong>: las trece celdas que le concede la matriz —las siete
- *       lecturas de consultorios, médicos, horarios y consultorios asignados, las dos lecturas de
- *       pacientes y las cuatro escrituras de pacientes (S3)— ejercidas de extremo a extremo con su
- *       código de éxito ({@link #recepcionConsultaConsultoriosDeSuOrganizacion()} y las demás
- *       pruebas {@code recepcion*}), y las veintidós operaciones restantes {@code 403}
+ *   <li><strong>RECEPCIONISTA</strong>: las catorce celdas que le concede la matriz —la lectura de
+ *       la propia organización, las siete lecturas de consultorios, médicos, horarios y
+ *       consultorios asignados, las dos lecturas de pacientes y las cuatro escrituras de pacientes
+ *       (S3)— ejercidas de extremo a extremo con su código de éxito
+ *       ({@link #recepcionConsultaConsultoriosDeSuOrganizacion()},
+ *       {@link #recepcionistaLeeElNombreDeSuPropiaOrganizacion()} y las demás pruebas
+ *       {@code recepcion*}), y las veintiuna operaciones restantes {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError} y
  *       {@link #familiaDenegadaDeRecepcionResponde403}).</li>
  *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las operaciones por id de
@@ -723,6 +726,41 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(status().isForbidden());
     }
 
+    /**
+     * Celda nueva de S3: {@code MEDICO} lee el nombre de su propia organización. Es la misma
+     * lectura que hace la cabecera del menú al iniciar la sesión, y el nombre tiene que ser el
+     * de la organización del claim, no el de otra clínica.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("MEDICO lee el nombre de su propia organización")
+    void medicoLeeElNombreDeSuPropiaOrganizacion() throws Exception {
+        ejecutar(get("/api/v1/organizaciones/" + organizacionA.getId()), tokenMedicoA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(organizacionA.getId().toString()))
+                .andExpect(jsonPath("$.nombre").value("Clínica Alfa"));
+    }
+
+    /**
+     * S4 para {@code MEDICO}: pedir la organización de otro tenant responde {@code 403} con el
+     * contrato de error y no toca la organización ajena. La comprobación es contra el claim, así
+     * que no depende de que la organización del path exista.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("MEDICO pide la organización de otro tenant y recibe 403")
+    void medicoNoLeeLaOrganizacionDeOtroTenant() throws Exception {
+        String rutaB = "/api/v1/organizaciones/" + organizacionB.getId();
+
+        afirmar403(ejecutar(get(rutaB), tokenMedicoA), rutaB);
+
+        assertThat(organizacionRepository.findById(organizacionB.getId()).orElseThrow().getNombre())
+                .as("una lectura rechazada no debe revelar ni modificar la organización ajena")
+                .isEqualTo("Clínica Beta");
+    }
+
     @Test
     @DisplayName("MEDICO lee los pacientes de su propio tenant")
     void medicoLeePacientesDeSuPropioTenant() throws Exception {
@@ -742,7 +780,7 @@ class AislamientoYMatrizRbacTest {
     }
 
     // ------------------------------------------------------------------
-    // RECEPCIONISTA: las trece celdas permitidas de S3
+    // RECEPCIONISTA: las catorce celdas permitidas de S3
     // ------------------------------------------------------------------
 
     /**
@@ -758,6 +796,50 @@ class AislamientoYMatrizRbacTest {
                 .content(CUERPO_HORARIO_NUEVO), tokenAdminA)
                 .andExpect(status().isCreated())
                 .andReturn());
+    }
+
+    /**
+     * Celda nueva de S3: {@code RECEPCIONISTA} lee el nombre de su propia organización, que es lo
+     * que la cabecera necesita para no mostrar el identificador del tenant.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("RECEPCIONISTA lee el nombre de su propia organización")
+    void recepcionistaLeeElNombreDeSuPropiaOrganizacion() throws Exception {
+        ejecutar(get("/api/v1/organizaciones/" + organizacionA.getId()), tokenRecepcionA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(organizacionA.getId().toString()))
+                .andExpect(jsonPath("$.nombre").value("Clínica Alfa"));
+    }
+
+    /**
+     * S4 para {@code RECEPCIONISTA}: la organización ajena responde {@code 403} con el contrato de
+     * error. Igual que en el caso de {@code MEDICO}, la negativa no confirma si esa organización
+     * existe porque la comparación se hace contra el claim, sin consultar la base.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("RECEPCIONISTA pide la organización de otro tenant y recibe 403")
+    void recepcionistaNoLeeLaOrganizacionDeOtroTenant() throws Exception {
+        String rutaB = "/api/v1/organizaciones/" + organizacionB.getId();
+
+        afirmar403(ejecutar(get(rutaB), tokenRecepcionA), rutaB);
+    }
+
+    /**
+     * {@code PACIENTE} queda fuera de las dos rutas de organización, incluso con el tenant
+     * correcto en el path: la denegación es de rol, no de aislamiento.
+     *
+     * @throws Exception si una aserción de MockMvc falla
+     */
+    @Test
+    @DisplayName("PACIENTE no lee la colección ni la organización por id")
+    void pacienteNoLeeNingunaRutaDeOrganizacion() throws Exception {
+        afirmar403(ejecutar(get("/api/v1/organizaciones"), tokenPacienteA), "/api/v1/organizaciones");
+        String rutaA = "/api/v1/organizaciones/" + organizacionA.getId();
+        afirmar403(ejecutar(get(rutaA), tokenPacienteA), rutaA);
     }
 
     @Test
@@ -948,9 +1030,10 @@ class AislamientoYMatrizRbacTest {
 
         switch (familia) {
             case "organización" -> {
+                // La lectura por id ya es una celda concedida (S3); lo que sigue cerrado es la
+                // colección y toda escritura sobre la organización.
                 afirmar403(ejecutar(get("/api/v1/organizaciones"), tokenRecepcionA),
                         "/api/v1/organizaciones");
-                afirmar403(ejecutar(get(rutaOrganizacion), tokenRecepcionA), rutaOrganizacion);
                 afirmar403(ejecutar(put(rutaOrganizacion)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CUERPO_ORGANIZACION_ACTUALIZADA), tokenRecepcionA), rutaOrganizacion);
@@ -1054,13 +1137,14 @@ class AislamientoYMatrizRbacTest {
 
     /**
      * Celdas {@code 403} de la matriz: las treinta y cinco operaciones para {@code PACIENTE}, las
-     * veintitrés que {@code MEDICO} no tiene permitidas y las veintidós que {@code RECEPCIONISTA}
+     * veintidós que {@code MEDICO} no tiene permitidas y las veintiuna que {@code RECEPCIONISTA}
      * no tiene, todas con el tenant correcto en el path para que lo que se ejerza sea el rol y no
-     * el aislamiento. Las doce celdas que la matriz concede a {@code MEDICO} no aparecen aquí:
-     * cuatro se ejercen en {@link #medicoLeeSuPropioTenant()}, dos en
+     * el aislamiento. Las trece celdas que la matriz concede a {@code MEDICO} no aparecen aquí:
+     * cuatro se ejercen en {@link #medicoLeeSuPropioTenant()}, una en
+     * {@link #medicoLeeElNombreDeSuPropiaOrganizacion()}, dos en
      * {@link #medicoLeePacientesDeSuPropioTenant()}, cinco en
      * {@link #medicoOperaSuPropiaAgendaDeHorarios()} y una en
-     * {@link #medicoLeeLosConsultoriosDeSuPropioMedico()}. Las trece celdas de
+     * {@link #medicoLeeLosConsultoriosDeSuPropioMedico()}. Las catorce celdas de
      * {@code RECEPCIONISTA} tampoco: se ejercen en las pruebas {@code recepcion*}.
      *
      * @return rol, descripción de la operación, método, ruta y cuerpo de cada celda denegada
@@ -1097,15 +1181,17 @@ class AislamientoYMatrizRbacTest {
     }
 
     /**
-     * Las trece celdas que S3 concede a {@code RECEPCIONISTA}: las siete lecturas de consultorios,
-     * médicos, horarios y consultorios asignados, las dos lecturas de pacientes y las cuatro
-     * escrituras de pacientes. La escritura de la agenda y de los catálogos no está entre ellas.
+     * Las catorce celdas que S3 concede a {@code RECEPCIONISTA}: la lectura de la propia
+     * organización, las siete lecturas de consultorios, médicos, horarios y consultorios
+     * asignados, las dos lecturas de pacientes y las cuatro escrituras de pacientes. La escritura
+     * de la agenda y de los catálogos no está entre ellas.
      *
      * @param descripcion descripción de la operación
      * @return {@code true} si la celda está permitida para {@code RECEPCIONISTA}
      */
     private static boolean esCeldaPermitidaParaRecepcion(String descripcion) {
-        return List.of("GET consultorios anidados", "GET consultorio por id",
+        return List.of("GET organización por id",
+                "GET consultorios anidados", "GET consultorio por id",
                 "GET médicos anidados", "GET médico por id",
                 "GET horarios anidados", "GET horario por id", "GET consultorios del médico",
                 "GET pacientes anidados", "GET paciente por id",
@@ -1192,18 +1278,19 @@ class AislamientoYMatrizRbacTest {
     }
 
     /**
-     * Las doce celdas que la matriz concede a {@code MEDICO}: las seis lecturas de su propio
-     * tenant —consultorios, médicos y pacientes—, los cinco endpoints de horarios y la lista de
-     * consultorios asignados a su propio médico. Que las de horarios y la de la asignación acaben
-     * en {@code 2xx} exige además que el actor sea el médico dueño de la agenda o de los
-     * consultorios, y esa mitad la comprueba el service contra el claim {@code medicoId}; aquí solo
-     * se fija que el rol no es lo que deniega.
+     * Las trece celdas que la matriz concede a {@code MEDICO}: las siete lecturas de su propio
+     * tenant —organización, consultorios, médicos y pacientes—, los cinco endpoints de horarios y
+     * la lista de consultorios asignados a su propio médico. Que las de horarios y la de la
+     * asignación acaben en {@code 2xx} exige además que el actor sea el médico dueño de la agenda
+     * o de los consultorios, y esa mitad la comprueba el service contra el claim
+     * {@code medicoId}; aquí solo se fija que el rol no es lo que deniega.
      *
      * @param descripcion descripción de la operación
      * @return {@code true} si la celda está permitida para {@code MEDICO}
      */
     private static boolean esCeldaPermitidaParaMedico(String descripcion) {
-        return List.of("GET consultorios anidados", "GET consultorio por id",
+        return List.of("GET organización por id",
+                "GET consultorios anidados", "GET consultorio por id",
                 "GET médicos anidados", "GET médico por id",
                 "GET pacientes anidados", "GET paciente por id", "POST horario",
                 "GET horarios anidados", "GET horario por id", "PUT horario", "DELETE horario",
@@ -1696,7 +1783,7 @@ class AislamientoYMatrizRbacTest {
      * @throws Exception si una aserción de MockMvc falla
      */
     @Test
-    @DisplayName("SONDA S3/S4: recepción obtiene exactamente las trece celdas de la tabla")
+    @DisplayName("SONDA S3/S4: recepción obtiene exactamente las catorce celdas de la tabla")
     void matrizDeRecepcionSegunLaTablaS3() throws Exception {
         String org = organizacionA.getId().toString();
         String con = consultorioA.getId().toString();
@@ -1707,7 +1794,7 @@ class AislamientoYMatrizRbacTest {
         String tabla = """
                 POST   /api/v1/organizaciones                     DENEGADA
                 GET    /api/v1/organizaciones                     DENEGADA
-                GET    /api/v1/organizaciones/{org}               DENEGADA
+                GET    /api/v1/organizaciones/{org}               PERMITIDA
                 PUT    /api/v1/organizaciones/{org}               DENEGADA
                 DELETE /api/v1/organizaciones/{org}               DENEGADA
                 POST   /api/v1/organizaciones/{org}/consultorios  DENEGADA
@@ -1760,8 +1847,8 @@ class AislamientoYMatrizRbacTest {
                 afirmar403(resultado, ruta);
             }
         }
-        assertThat(permitidas).as("S3 concede trece celdas a recepción").isEqualTo(13);
-        assertThat(denegadas).as("las otras veintidós quedan denegadas").isEqualTo(22);
+        assertThat(permitidas).as("S3 concede catorce celdas a recepción").isEqualTo(14);
+        assertThat(denegadas).as("las otras veintiuna quedan denegadas").isEqualTo(21);
     }
 
     /**

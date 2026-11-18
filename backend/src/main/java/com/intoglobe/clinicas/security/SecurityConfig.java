@@ -75,7 +75,8 @@ import tools.jackson.databind.json.JsonMapper;
  *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th><th>RECEPCIONISTA</th></tr>
  *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td><td>403</td></tr>
- *   <tr><td>{@code GET|PUT|DELETE /organizaciones/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code GET /organizaciones/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
+ *   <tr><td>{@code PUT|DELETE /organizaciones/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code POST /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
  *   <tr><td>{@code GET /consultorios/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
@@ -105,10 +106,14 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>«Propio tenant» tiene dos mitades y las aplican dos piezas distintas: aquí se exige el
  * rol, y {@link TenantAccessGuard} exige que el {@code organizacionId} del path coincida con
- * el {@code tenantId} del token, <strong>sin excepción para {@code ADMIN}</strong> (D5
- * corregido el 2026-10-29). Los recursos pedidos por id se filtran por organización en la
- * capa de datos y responden {@code 404} cuando son de otro tenant, para no revelar que
- * existen.</p>
+ * el {@code tenantId} del token, <strong>sin excepción para {@code ADMIN}</strong> (D5). Desde
+ * S3 la lectura de la organización por id es compartida por {@code ADMIN}, {@code MEDICO} y
+ * {@code RECEPCIONISTA}; desde S4 los tres roles operan <em>solo</em> sobre la organización de su
+ * token, también en {@code PUT} y {@code DELETE}. La comprobación del path la hace el
+ * controlador y la vuelve a hacer {@code OrganizacionService} antes de consultar el repositorio,
+ * así que no depende de que un llamador pase por esta cadena. La colección sigue siendo solo de
+ * {@code ADMIN}. Los recursos pedidos por id se filtran por organización en la capa de datos y
+ * responden {@code 404} cuando son de otro tenant, para no revelar que existen.</p>
  *
  * <h2>Horarios: la matriz concede el rol, el service acota el tenant y la agenda</h2>
  *
@@ -203,12 +208,12 @@ import tools.jackson.databind.json.JsonMapper;
  * propios datos.</p>
  *
  * <p>El rol de personal {@code RECEPCIONISTA} está en el contrato de claims y tiene sus celdas
- * explícitas en esta matriz (ver la tabla): consulta consultorios, médicos, sus consultorios
- * asignados, la agenda de horarios y los pacientes de su organización, y registra, actualiza, da
- * de baja y reactiva pacientes. Lo que no tiene es escritura sobre la agenda ni sobre
- * consultorios, médicos y sus asignaciones, ni cuentas del personal, ni la organización: todas
- * esas celdas le responden {@code 403} con el contrato de error, porque el rol está en el
- * contrato y el rechazo es de matriz, no de token.</p>
+ * explícitas en esta matriz (ver la tabla): consulta la propia organización, consultorios,
+ * médicos, sus consultorios asignados, la agenda de horarios y los pacientes de su organización, y
+ * registra, actualiza, da de baja y reactiva pacientes. Lo que no tiene es escritura sobre la
+ * agenda ni sobre consultorios, médicos y sus asignaciones, ni cuentas del personal, ni la
+ * escritura de la organización: todas esas celdas le responden {@code 403} con el contrato de
+ * error, porque el rol está en el contrato y el rechazo es de matriz, no de token.</p>
  *
  * <h2>No hay rutas {@code /api/v1/auth/**} que permitir</h2>
  *
@@ -344,10 +349,15 @@ public class SecurityConfig {
                         // quedaría inalcanzable por el aislamiento por tenant). Se declara con
                         // denyAll() y no se deja a la ausencia de regla: la celda queda
                         // auditada aquí, con nombre propio, y no depende de que el fallback
-                        // siga negando todo. El resto, solo ADMIN.
+                        // siga negando todo. La colección sigue siendo solo de ADMIN; la lectura
+                        // por id es compartida por ADMIN, MEDICO y RECEPCIONISTA desde S3 (cada
+                        // rol lee el nombre de su propia organización), y TenantAccessGuard
+                        // sigue negando el path de otro tenant sin consultar la base. Las
+                        // escrituras y la baja quedan solo para ADMIN.
                         .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES).denyAll()
                         .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES).hasRole(ROL_ADMIN)
-                        .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.GET, RUTA_ORGANIZACIONES + "/*")
+                        .hasAnyRole(ROL_ADMIN, ROL_MEDICO, ROL_RECEPCIONISTA)
                         .requestMatchers(HttpMethod.PUT, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_ORGANIZACIONES + "/*").hasRole(ROL_ADMIN)
                         // Horarios: ADMIN y MEDICO escriben, y RECEPCIONISTA solo lee. La lectura

@@ -41,12 +41,16 @@ import jakarta.validation.Valid;
  * proxy reverso.</p>
  *
  * <p><strong>Tenant y rol (R-SEG-04 a R-SEG-06, ADR-013):</strong> el rol lo exige la
- * cadena de filtros ({@code ADMIN} para todo el módulo) y el tenant sale del claim. El
- * {@code {id}} del path solo se acepta si coincide con el {@code tenantId} del token, y
- * para eso se consulta {@link TenantAccessGuard}: si no coincide, la respuesta es {@code 403}
- * <em>también</em> para {@code ADMIN}, porque no existe un rol de plataforma (D5 corregido el
- * 2026-10-29). El {@code id} que se propaga al service es el del token, nunca el del path.
- * El listado devuelve únicamente la organización del token.</p>
+ * cadena de filtros —la colección y las escrituras son de {@code ADMIN}; la lectura por id es
+ * compartida por {@code ADMIN}, {@code MEDICO} y {@code RECEPCIONISTA} (S3)— y el tenant sale
+ * del claim. El {@code {id}} del path solo se acepta si coincide con el {@code tenantId} del
+ * token: lo comprueba {@link TenantAccessGuard} en esta capa y lo vuelve a comprobar
+ * {@link OrganizacionService} antes de tocar el repositorio, sin excepción de rol (D5). Si no
+ * coincide, la respuesta es {@code 403} <em>también</em> para {@code ADMIN}, porque no existe un
+ * rol de plataforma. Al service viajan dos identificadores distintos y separados: el del path,
+ * que es una afirmación del cliente, y el {@code tenantId} del claim, que es la referencia con
+ * la que el service compara antes de tocar el repositorio. El claim nunca se sustituye por el
+ * valor del path. El listado devuelve únicamente la organización del token.</p>
  */
 @RestController
 @RequestMapping("/api/v1/organizaciones")
@@ -105,7 +109,7 @@ public class OrganizacionController {
      */
     @GetMapping("/{id}")
     @Operation(summary = "Buscar organización por id",
-            description = "Devuelve una organización existente a partir de su identificador UUID.")
+            description = "Devuelve la organización del propio tenant a partir de su identificador UUID. ADMIN, MEDICO y RECEPCIONISTA pueden leer la suya; un id de otro tenant responde 403.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Organización encontrada",
                     content = @Content(schema = @Schema(implementation = OrganizacionResponse.class))),
@@ -117,8 +121,10 @@ public class OrganizacionController {
     public ResponseEntity<OrganizacionResponse> buscarPorId(
             @Parameter(description = "Identificador UUID de la organización.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID id) {
-        // El id que se consulta es el del claim; el del path solo sirve de comprobación cruzada.
-        return ResponseEntity.ok(organizacionService.buscarPorId(tenantAccessGuard.exigirTenantDeLaRuta(id)));
+        // El controller valida el path contra el claim y el service vuelve a comprobarlo antes
+        // de tocar el repositorio: la garantía no depende de que un llamador use el controller.
+        UUID tenantId = tenantAccessGuard.exigirTenantDeLaRuta(id);
+        return ResponseEntity.ok(organizacionService.buscarPorId(id, tenantId));
     }
 
     /**
@@ -163,7 +169,7 @@ public class OrganizacionController {
             @PathVariable UUID id,
             @Valid @RequestBody OrganizacionRequest request) {
         return ResponseEntity.ok(
-                organizacionService.actualizar(tenantAccessGuard.exigirTenantDeLaRuta(id), request));
+                organizacionService.actualizar(id, tenantAccessGuard.exigirTenantDeLaRuta(id), request));
     }
 
     /**
@@ -187,7 +193,7 @@ public class OrganizacionController {
     public ResponseEntity<Void> desactivar(
             @Parameter(description = "Identificador UUID de la organización a desactivar.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
             @PathVariable UUID id) {
-        organizacionService.desactivar(tenantAccessGuard.exigirTenantDeLaRuta(id));
+        organizacionService.desactivar(id, tenantAccessGuard.exigirTenantDeLaRuta(id));
         return ResponseEntity.noContent().build();
     }
 }
