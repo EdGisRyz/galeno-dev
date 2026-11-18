@@ -10,6 +10,15 @@ export interface ModalProps {
   children: React.ReactNode;
   className?: string;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  /**
+   * Dibuja el diálogo por encima de otro modal que ya esté abierto.
+   *
+   * <p>Todos los modales viven en la misma capa, así que con dos abiertos gana el que aparece
+   * después en el documento. Un diálogo de confirmación que se abre **desde dentro** de otro
+   * modal queda debajo y resulta invisible: el usuario ve el fondo oscurecido pero no el aviso.
+   * Esta bandera le da la capa superior sin cambiar el orden de montaje.</p>
+   */
+  nivelSuperior?: boolean;
 }
 
 export function Modal({
@@ -20,6 +29,7 @@ export function Modal({
   children,
   className,
   maxWidth = 'md',
+  nivelSuperior = false,
 }: ModalProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -46,7 +56,9 @@ export function Modal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+    <div
+      className={`fixed inset-0 ${nivelSuperior ? 'z-[60]' : 'z-50'} flex items-center justify-center p-4 sm:p-6 overflow-y-auto`}
+    >
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in"

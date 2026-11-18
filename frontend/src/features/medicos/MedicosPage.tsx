@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api } from '@/lib/axios';
-import { resumenDeErrorHttp } from '@/lib/apiError';
+import { resumenDeErrorHttp, mensajeDelBackend } from '@/lib/apiError';
 import {
   Button,
   Input,
@@ -18,6 +18,11 @@ import {
   Alert,
 } from '@/components/ui';
 import type { Medico, HorarioMedico } from '@/features/medicos/medicos.types';
+import {
+  erroresDeMedico,
+  type CampoDeMedico,
+  type ErroresDeMedico,
+} from '@/features/medicos/validacionMedico';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
 import {
@@ -83,19 +88,6 @@ const EMPTY_HORARIO_FORM = {
   consultorioId: '',
 };
 
-/**
- * Mensaje que el backend adjunta a un error de negocio (`ErrorResponse.mensaje`), si viene.
- *
- * El 409 al quitar un consultorio explica el motivo —es el principal del médico o todavía tiene
- * bloques de horario—: reemplazarlo por un texto genérico dejaría al administrador sin saber qué
- * tiene que cambiar antes de reintentar.
- */
-function mensajeDelBackend(error: unknown, respaldo: string): string {
-  const posible = error as { response?: { data?: { mensaje?: string } } } | null | undefined;
-  const mensaje = posible?.response?.data?.mensaje;
-  return typeof mensaje === 'string' && mensaje.trim() !== '' ? mensaje : respaldo;
-}
-
 export function MedicosPage() {
   /**
    * Organización dueña del directorio: sale del claim `tenantId` de la sesión, que es la
@@ -123,6 +115,7 @@ export function MedicosPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [erroresForm, setErroresForm] = useState<ErroresDeMedico>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
@@ -216,6 +209,7 @@ export function MedicosPage() {
   const openCreateModal = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, consultorioId: consultorios[0]?.id || '' });
+    setErroresForm({});
     setSaveError(null);
     setIsModalOpen(true);
   };
@@ -230,13 +224,33 @@ export function MedicosPage() {
       tarifaBase: medico.tarifaBase != null ? String(medico.tarifaBase) : '',
       consultorioId: medico.consultorioId,
     });
+    setErroresForm({});
     setSaveError(null);
     setIsModalOpen(true);
   };
 
+  /**
+   * Escribe un campo del formulario y retira su error: el mensaje describía el valor anterior y
+   * dejarlo visible mientras se corrige el dato es una advertencia falsa.
+   */
+  const actualizarCampo = (campo: CampoDeMedico, valor: string) => {
+    setForm((f) => ({ ...f, [campo]: valor }));
+    setErroresForm((prev) => {
+      if (!prev[campo]) return prev;
+      const siguiente = { ...prev };
+      delete siguiente[campo];
+      return siguiente;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.nombre.trim() || !form.consultorioId) return;
+
+    // S7: las mismas reglas del backend, aplicadas antes de enviar. Un dato mal formado no sale
+    // de la pantalla y el mensaje queda junto al campo, sin esperar la respuesta del servicio.
+    const errores = erroresDeMedico(form);
+    setErroresForm(errores);
+    if (Object.keys(errores).length > 0 || !form.consultorioId) return;
 
     const payload = {
       consultorioId: form.consultorioId,
@@ -266,7 +280,9 @@ export function MedicosPage() {
       programarOcultarAviso();
     } catch (err) {
       console.error('Error al guardar médico:', resumenDeErrorHttp(err));
-      setSaveError(MENSAJE_ERROR_GUARDADO);
+      // Si el backend rechaza por una regla que la pantalla no conoce, su mensaje es el que
+      // permite corregir el dato; el genérico solo habla de la conexión.
+      setSaveError(mensajeDelBackend(err, MENSAJE_ERROR_GUARDADO));
     } finally {
       setIsSubmitting(false);
     }
@@ -444,7 +460,11 @@ export function MedicosPage() {
       setEditingHorarioId(null);
     } catch (err) {
       console.error('Error al guardar horario:', resumenDeErrorHttp(err));
-      setHorarioFormError(MENSAJE_ERROR_HORARIO_GUARDADO);
+      // El rechazo de un bloque tiene causas propias —rango invertido, solapamiento con otro
+      // bloque del mismo día— y el backend las explica en su mensaje. Se muestra tal cual: es lo
+      // único que le dice a recepción qué corregir, y reemplazarlo por un texto genérico la deja
+      // adivinando entre varias causas posibles.
+      setHorarioFormError(mensajeDelBackend(err, MENSAJE_ERROR_HORARIO_GUARDADO));
     } finally {
       setIsSavingHorario(false);
     }
@@ -458,7 +478,7 @@ export function MedicosPage() {
       setHorarios((prev) => prev.filter((h) => h.id !== horarioAEliminar));
     } catch (err) {
       console.error('Error al eliminar horario:', resumenDeErrorHttp(err));
-      setHorariosError(MENSAJE_ERROR_HORARIO_BAJA);
+      setHorariosError(mensajeDelBackend(err, MENSAJE_ERROR_HORARIO_BAJA));
     } finally {
       setHorarioAEliminar(null);
     }
@@ -760,7 +780,8 @@ export function MedicosPage() {
           <Input
             label="Nombre"
             value={form.nombre}
-            onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
+            onChange={(e) => actualizarCampo('nombre', e.target.value)}
+            error={erroresForm.nombre}
             required
             maxLength={120}
           />
@@ -782,20 +803,23 @@ export function MedicosPage() {
             <Input
               label="Especialidad"
               value={form.especialidad}
-              onChange={(e) => setForm((f) => ({ ...f, especialidad: e.target.value }))}
+              onChange={(e) => actualizarCampo('especialidad', e.target.value)}
+              error={erroresForm.especialidad}
               maxLength={80}
             />
             <Input
               label="Cédula profesional"
               value={form.cedula}
-              onChange={(e) => setForm((f) => ({ ...f, cedula: e.target.value }))}
+              onChange={(e) => actualizarCampo('cedula', e.target.value)}
+              error={erroresForm.cedula}
               leftIcon={<IdCard className="w-4 h-4" />}
-              maxLength={30}
+              maxLength={10}
             />
             <Input
               label="Teléfono"
               value={form.telefono}
-              onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
+              onChange={(e) => actualizarCampo('telefono', e.target.value)}
+              error={erroresForm.telefono}
               leftIcon={<Phone className="w-4 h-4" />}
               maxLength={20}
             />
@@ -866,6 +890,9 @@ export function MedicosPage() {
         title="Eliminar bloque de disponibilidad"
         description="El bloque se elimina de forma definitiva: no se puede recuperar."
         maxWidth="sm"
+        // Se abre desde dentro del panel de horarios: sin la capa superior quedaría debajo del
+        // panel y el aviso de confirmación no se vería.
+        nivelSuperior
       >
         <p className="text-sm text-[#41484D]">
           {horarioAEliminarDatos ? (
