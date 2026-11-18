@@ -372,6 +372,299 @@ class MedicoControllerTest {
     }
 
     @Test
+    @DisplayName("POST con nombre numérico devuelve 400 (@Pattern) y no llega al service")
+    void crear_shouldReturn400_whenNombreHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"52454255"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con especialidad numérica devuelve 400 (@Pattern) y no llega al service")
+    void crear_shouldReturn400_whenEspecialidadHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","especialidad":"2334"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo especialidad es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con cédula con letras devuelve 400 (@Pattern) y no llega al service")
+    void crear_shouldReturn400_whenCedulaHasLetters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","cedula":"ccwcwcc"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo cedula es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con cédula con separadores devuelve 400 (@Pattern: solo dígitos)")
+    void crear_shouldReturn400_whenCedulaHasSeparators() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","cedula":"1234-567"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo cedula es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con cédula de 4 dígitos devuelve 400 (@Pattern: mínimo 5)")
+    void crear_shouldReturn400_whenCedulaIsShorterThanFiveDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","cedula":"1234"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo cedula es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con cédula de 11 dígitos devuelve 400 (@Pattern: máximo 10)")
+    void crear_shouldReturn400_whenCedulaIsLongerThanTenDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","cedula":"12345678901"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo cedula es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono con letras devuelve 400 (@Pattern) y no llega al service")
+    void crear_shouldReturn400_whenTelefonoHasLetters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","telefono":"vvvvvuvu"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono de 6 caracteres devuelve 400 (@Pattern: mínimo 7)")
+    void crear_shouldReturn400_whenTelefonoIsShorterThanSevenCharacters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","telefono":"123456"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono de 21 caracteres devuelve 400 (@Pattern: máximo 20)")
+    void crear_shouldReturn400_whenTelefonoIsLongerThanTwentyCharacters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","telefono":"123456789012345678901"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con especialidad de 81 caracteres devuelve 400 (@Size)")
+    void crear_shouldReturn400_whenEspecialidadExceedsEightyCharacters() throws Exception {
+        String especialidadLarga = "a".repeat(81);
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","especialidad":"%s"}
+                                """.formatted(CONSULTORIO_ID, especialidadLarga)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje")
+                        .value("El campo especialidad tiene una longitud fuera del rango permitido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/medicos"));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("PUT con teléfono con letras devuelve 400 (@Valid también en el PUT)")
+    void actualizar_shouldReturn400_whenTelefonoHasLetters() throws Exception {
+        perform(put("/api/v1/medicos/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","telefono":"vvvvvuvu"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + ID));
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
+    @DisplayName("POST con los datos reales del directorio devuelve 201 (@Pattern los acepta)")
+    void crear_shouldReturn201_whenTheRealDirectoryDataIsSent() throws Exception {
+        when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Dra. Elena Ruiz", "Medicina general",
+                        "1234567", "9511111111", null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Dra. Elena Ruiz","especialidad":"Medicina general","cedula":"1234567","telefono":"9511111111"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nombre").value("Dra. Elena Ruiz"))
+                .andExpect(jsonPath("$.cedula").value("1234567"))
+                .andExpect(jsonPath("$.telefono").value("9511111111"));
+        verify(medicoService).crear(eq(ORG_ID), any(MedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con acentos, punto, guion y apóstrofo en el nombre devuelve 201")
+    void crear_shouldReturn201_whenNombreUsesTheAcceptedPunctuation() throws Exception {
+        String nombre = "Médico de prueba Núñez O'Connor-Peña";
+        when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, nombre, "Cardiología pediátrica",
+                        null, null, null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"%s","especialidad":"Cardiología pediátrica"}
+                                """.formatted(CONSULTORIO_ID, nombre)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nombre").value(nombre));
+        verify(medicoService).crear(eq(ORG_ID), any(MedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con los límites de cédula y teléfono devuelve 201")
+    void crear_shouldReturn201_whenCedulaAndTelefonoAreAtTheirBounds() throws Exception {
+        when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Médico de prueba", null,
+                        "1234567890", "+52 55 5555 9876", null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","cedula":"1234567890","telefono":"+52 55 5555 9876"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cedula").value("1234567890"))
+                .andExpect(jsonPath("$.telefono").value("+52 55 5555 9876"));
+        verify(medicoService).crear(eq(ORG_ID), any(MedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con los opcionales en cadena vacía devuelve 201 (@Pattern los deja pasar)")
+    void crear_shouldReturn201_whenOptionalFieldsAreEmptyStrings() throws Exception {
+        when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Médico de prueba", "", "", "",
+                        null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","especialidad":"","cedula":"","telefono":""}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isCreated());
+        verify(medicoService).crear(eq(ORG_ID), any(MedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST sin los opcionales devuelve 201 (@Pattern ignora null)")
+    void crear_shouldReturn201_whenOptionalFieldsAreNull() throws Exception {
+        when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Médico de prueba", null, null,
+                        null, null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isCreated());
+        verify(medicoService).crear(eq(ORG_ID), any(MedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con teléfono entre paréntesis devuelve 201 (así se escribe un fijo)")
+    void crear_shouldReturn201_whenTelefonoUsesParentheses() throws Exception {
+        when(medicoService.crear(any(UUID.class), any(MedicoRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, CONSULTORIO_ID, "Médico de prueba", null, null,
+                        "(951) 111 1111", null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"consultorioId":"%s","nombre":"Médico de prueba","telefono":"(951) 111 1111"}
+                                """.formatted(CONSULTORIO_ID)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.telefono").value("(951) 111 1111"));
+        verify(medicoService).crear(eq(ORG_ID), any(MedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con teléfono sin ningún dígito devuelve 400 (@Pattern) y no llega al service")
+    void crear_shouldReturn400_whenTelefonoHasNoDigits() throws Exception {
+        for (String telefono : List.of("()", "(      )", "-------")) {
+            perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"consultorioId":"%s","nombre":"Médico de prueba","telefono":"%s"}
+                                    """.formatted(CONSULTORIO_ID, telefono)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.codigo").value(400))
+                    .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"));
+        }
+        verifyNoInteractions(medicoService);
+    }
+
+    @Test
     @DisplayName("POST con JSON mal formado devuelve 400 sin detalles internos del parser")
     void crear_shouldReturn400_whenJsonIsMalformed() throws Exception {
         perform(post("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)

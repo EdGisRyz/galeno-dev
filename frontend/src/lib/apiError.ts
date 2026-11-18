@@ -29,3 +29,20 @@ export function resumenDeErrorHttp(error: unknown): ResumenErrorHttp {
     estado: posible?.response?.status ?? null,
   };
 }
+
+/**
+ * Mensaje que el backend adjunta a un error de negocio (`ErrorResponse.mensaje`), si viene.
+ *
+ * Un rechazo del backend explica el motivo —la CURP ya existe en la organización, el consultorio no
+ * se puede retirar, el campo tiene un formato inválido— y reemplazarlo por un texto genérico deja a
+ * quien está en el mostrador sin saber qué corregir antes de reintentar. Vive aquí, y no en cada
+ * pantalla, porque lo usan los tres módulos que muestran el motivo del servicio.
+ *
+ * @param error    error capturado del cliente HTTP
+ * @param respaldo texto propio de la pantalla para cuando el rechazo no trae mensaje
+ */
+export function mensajeDelBackend(error: unknown, respaldo: string): string {
+  const posible = error as { response?: { data?: { mensaje?: string } } } | null | undefined;
+  const mensaje = posible?.response?.data?.mensaje;
+  return typeof mensaje === 'string' && mensaje.trim() !== '' ? mensaje : respaldo;
+}

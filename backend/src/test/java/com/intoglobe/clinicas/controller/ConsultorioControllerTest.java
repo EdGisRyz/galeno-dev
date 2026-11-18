@@ -275,8 +275,185 @@ class ConsultorioControllerTest {
                                 """.formatted("9".repeat(21))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
-                .andExpect(jsonPath("$.mensaje").value("El campo telefono tiene una longitud fuera del rango permitido"))
+                // El rechazo pasó de @Size a @Pattern: el formato del teléfono es una sola regla
+                // compartida con médico y paciente, y el máximo de 20 vive dentro de ella.
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
                 .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/consultorios"));
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("POST con nombre numérico devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenNombreHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"454545"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/consultorios"));
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono con letras devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenTelefonoHasLetters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio de prueba","telefono":"btsbtbrb4554545"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/consultorios"));
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("PUT con nombre numérico devuelve 400 (@Valid también en el PUT)")
+    void actualizar_shouldReturn400_whenNombreHasDigits() throws Exception {
+        perform(put("/api/v1/consultorios/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"454545"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/consultorios/" + ID));
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("POST con dirección con números y letras devuelve 201 (la dirección es libre)")
+    void crear_shouldReturn201_whenDireccionMixesDigitsAndLetters() throws Exception {
+        when(consultorioService.crear(any(UUID.class), any(ConsultorioRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, "Consultorio de prueba", "Calle 5 de Mayo 12-B",
+                        "9511111111", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio de prueba","direccion":"Calle 5 de Mayo 12-B","telefono":"9511111111"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.direccion").value("Calle 5 de Mayo 12-B"));
+        verify(consultorioService).crear(eq(ORG_ID), any(ConsultorioRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con dirección de solo dígitos devuelve 201: la regla es deuda declarada")
+    void crear_shouldReturn201_whenDireccionIsOnlyDigits() throws Exception {
+        // `454545` no es una dirección, pero distinguirlo exige un servicio de direcciones y no una
+        // expresión regular. El alcance lo deja fuera a propósito: el dato entra y la deuda queda
+        // declarada en lugar de fingir que un patrón la resuelve. El nombre y el teléfono de la
+        // misma captura sí se rechazan.
+        when(consultorioService.crear(any(UUID.class), any(ConsultorioRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, "Consultorio de prueba", "454545", null, true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio de prueba","direccion":"454545"}
+                                """))
+                .andExpect(status().isCreated());
+        verify(consultorioService).crear(eq(ORG_ID), any(ConsultorioRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con los opcionales en cadena vacía devuelve 201 (@Pattern los deja pasar)")
+    void crear_shouldReturn201_whenOptionalFieldsAreEmptyStrings() throws Exception {
+        when(consultorioService.crear(any(UUID.class), any(ConsultorioRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, "Consultorio de prueba", "", "", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio de prueba","direccion":"","telefono":""}
+                                """))
+                .andExpect(status().isCreated());
+        verify(consultorioService).crear(eq(ORG_ID), any(ConsultorioRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con nombre con números y letras devuelve 201 (Consultorio 2 es un nombre real)")
+    void crear_shouldReturn201_whenNombreHasDigitsAndLetters() throws Exception {
+        when(consultorioService.crear(any(UUID.class), any(ConsultorioRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, "Consultorio 2", null, null, true));
+
+        for (String nombre : List.of("Consultorio 2", "Sala 3", "Consultorio Central", "Alfa Salud")) {
+            perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"nombre":"%s"}
+                                    """.formatted(nombre)))
+                    .andExpect(status().isCreated());
+        }
+        verify(consultorioService, times(4)).crear(eq(ORG_ID), any(ConsultorioRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con nombre de solo dígitos devuelve 400 (@Pattern: exige al menos una letra)")
+    void crear_shouldReturn400_whenNombreIsOnlyDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"123"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + ORG_ID + "/consultorios"));
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("POST con nombre sin ninguna letra devuelve 400 (@Pattern)")
+    void crear_shouldReturn400_whenNombreHasNoLetters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"---"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"));
+        verifyNoInteractions(consultorioService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono entre paréntesis devuelve 201 (así se escribe un fijo)")
+    void crear_shouldReturn201_whenTelefonoUsesParentheses() throws Exception {
+        when(consultorioService.crear(any(UUID.class), any(ConsultorioRequest.class)))
+                .thenReturn(respuesta(ID, ORG_ID, "Consultorio de prueba", null, "(951) 111 1111", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Consultorio de prueba","telefono":"(951) 111 1111"}
+                                """))
+                .andExpect(status().isCreated());
+        verify(consultorioService).crear(eq(ORG_ID), any(ConsultorioRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con teléfono de solo paréntesis o de 2 caracteres devuelve 400 (@Pattern)")
+    void crear_shouldReturn400_whenTelefonoHasNoDigits() throws Exception {
+        // El mínimo de 7 caracteres no basta por sí solo: sin un dígito no hay teléfono.
+        for (String telefono : List.of("()", "(      )", "-------")) {
+            perform(post("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"nombre":"Consultorio de prueba","telefono":"%s"}
+                                    """.formatted(telefono)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.codigo").value(400))
+                    .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"));
+        }
         verifyNoInteractions(consultorioService);
     }
 

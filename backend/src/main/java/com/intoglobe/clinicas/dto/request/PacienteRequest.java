@@ -3,6 +3,7 @@ package com.intoglobe.clinicas.dto.request;
 import java.time.LocalDate;
 
 import com.intoglobe.clinicas.model.Paciente;
+import com.intoglobe.clinicas.validation.PatronesDeFormato;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -59,33 +60,50 @@ import jakarta.validation.constraints.Size;
  * presente y vacío», no «campo ausente». Solo la CURP se canoniza, porque de ella depende la
  * unicidad.</p>
  *
+ * <p><strong>Formato de los datos de la ficha.</strong> Nombre, ocupación, nombre del responsable y
+ * parentesco son texto sin dígitos; teléfono y teléfono del responsable comparten la regla de
+ * teléfono. Las expresiones no se escriben aquí: son las de {@link PatronesDeFormato}, las mismas
+ * que usan médico y consultorio, porque dos copias desincronizadas aceptarían en un formulario lo
+ * que rechazan en otro. El <strong>domicilio es libre y solo tiene un máximo de longitud</strong>:
+ * una dirección lleva número de casa —{@code Av. Juárez 210}— y aplicarle el alfabeto del nombre
+ * rechazaría la mitad de las direcciones reales.</p>
+ *
  * <p>Las validaciones Jakarta viven aquí, nunca en la entidad.</p>
  *
- * @param nombre          nombre del paciente (obligatorio, 1..160 caracteres)
- * @param telefono        teléfono de contacto (opcional, máx. 20 caracteres)
+ * @param nombre          nombre del paciente (obligatorio, 1..160 caracteres, sin dígitos)
+ * @param telefono        teléfono de contacto (opcional, 7..20 caracteres con dígitos, {@code +}
+ *                        inicial opcional, espacios y guiones)
  * @param fechaNacimiento fecha de nacimiento (opcional, {@code DATE} sin hora ni zona)
  * @param sexo            sexo registrado (opcional, uno de {@code M}, {@code F}, {@code O})
  * @param email           correo electrónico (opcional, máx. 180 caracteres, sin
  *                        validación de formato)
  * @param notas           notas libres (opcional, columna {@code TEXT})
  * @param curp            CURP del paciente (opcional, 18 posiciones; se guarda canónica)
- * @param ocupacion       ocupación del paciente (opcional, máx. 120 caracteres)
- * @param domicilio       domicilio del paciente (opcional, máx. 240 caracteres)
- * @param nombreResponsable nombre del responsable (opcional, máx. 160 caracteres)
- * @param telefonoResponsable teléfono del responsable (opcional, máx. 20 caracteres)
- * @param parentesco      parentesco del responsable con el paciente (opcional, máx. 40 caracteres)
+ * @param ocupacion       ocupación del paciente (opcional, máx. 120 caracteres, sin dígitos)
+ * @param domicilio       domicilio del paciente (opcional y libre, máx. 240 caracteres)
+ * @param nombreResponsable nombre del responsable (opcional, máx. 160 caracteres, sin dígitos)
+ * @param telefonoResponsable teléfono del responsable (opcional, 7..20 caracteres, misma regla
+ *                        que {@code telefono})
+ * @param parentesco      parentesco del responsable con el paciente (opcional, máx. 40
+ *                        caracteres, sin dígitos)
  */
 public record PacienteRequest(
 
-        @Schema(description = "Nombre completo del paciente (obligatorio, 1 a 160 caracteres).",
+        @Schema(description = "Nombre completo del paciente (obligatorio, 1 a 160 caracteres; "
+                + "letras, espacios, punto, guion y apóstrofo, sin dígitos).",
                 example = "María López Ramírez")
         @NotBlank
         @Size(min = 1, max = 160)
+        // Sin dígitos. El blanco lo rechaza @NotBlank, que es quien tiene el mensaje propio.
+        @Pattern(regexp = PatronesDeFormato.TEXTO_SIN_DIGITOS)
         String nombre,
 
-        @Schema(description = "Teléfono de contacto del paciente; null si no se registró, máximo 20 caracteres.",
+        @Schema(description = "Teléfono de contacto del paciente; null o vacío si no se registró. "
+                + "De 7 a 20 caracteres: dígitos, un + inicial opcional, espacios y guiones.",
                 example = "+52 55 5555 4321")
-        @Size(max = 20)
+        // El máximo de 20 vive dentro del patrón compartido: declarar además @Size produciría dos
+        // mensajes para el mismo dato.
+        @Pattern(regexp = PatronesDeFormato.TELEFONO)
         String telefono,
 
         @Schema(description = "Fecha de nacimiento del paciente; null si no se registró.",
@@ -119,29 +137,41 @@ public record PacienteRequest(
         @Pattern(regexp = "^$|^(?i)[A-Z]{4}\\d{6}[HM][A-Z]{5}[A-Z0-9]\\d$")
         String curp,
 
-        @Schema(description = "Ocupación del paciente; null si no se registró, máximo 120 caracteres.",
+        @Schema(description = "Ocupación del paciente; null o vacía si no se registró, máximo 120 "
+                + "caracteres, sin dígitos.",
                 example = "Comerciante")
         @Size(max = 120)
+        @Pattern(regexp = PatronesDeFormato.TEXTO_SIN_DIGITOS_OPCIONAL)
         String ocupacion,
 
-        @Schema(description = "Domicilio del paciente; null si no se registró, máximo 240 caracteres.",
+        @Schema(description = "Domicilio del paciente; null o vacío si no se registró. Campo libre, "
+                + "máximo 240 caracteres: una dirección lleva números y letras mezclados.",
                 example = "Av. Reforma 123, Col. Centro")
+        // Libre a propósito: aquí NO se aplica el patrón de texto sin dígitos. `Av. Juárez 210` es
+        // una dirección válida y restringirla al alfabeto del nombre rompería la mayoría de las
+        // reales. Solo se limita la longitud que declara la columna.
         @Size(max = 240)
         String domicilio,
 
-        @Schema(description = "Nombre del responsable del paciente; null si no se registró, máximo 160 caracteres.",
+        @Schema(description = "Nombre del responsable del paciente; null o vacío si no se registró, "
+                + "máximo 160 caracteres, sin dígitos.",
                 example = "Rosa Ramírez Silva")
         @Size(max = 160)
+        @Pattern(regexp = PatronesDeFormato.TEXTO_SIN_DIGITOS_OPCIONAL)
         String nombreResponsable,
 
-        @Schema(description = "Teléfono del responsable; null si no se registró, máximo 20 caracteres.",
+        @Schema(description = "Teléfono del responsable; null o vacío si no se registró. De 7 a 20 "
+                + "caracteres: dígitos, un + inicial opcional, espacios y guiones.",
                 example = "+52 55 5555 8765")
-        @Size(max = 20)
+        @Pattern(regexp = PatronesDeFormato.TELEFONO)
         String telefonoResponsable,
 
-        @Schema(description = "Parentesco del responsable con el paciente; null si no se registró, máximo 40 caracteres.",
+        @Schema(description = "Parentesco del responsable con el paciente; null o vacío si no se "
+                + "registró, máximo 40 caracteres, sin dígitos. Texto libre: la pantalla sugiere los "
+                + "comunes, pero «amigo» o «vecino» también son válidos.",
                 example = "Madre")
         @Size(max = 40)
+        @Pattern(regexp = PatronesDeFormato.TEXTO_SIN_DIGITOS_OPCIONAL)
         String parentesco) {
 
     /**

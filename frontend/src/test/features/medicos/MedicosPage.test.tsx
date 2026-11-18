@@ -31,6 +31,7 @@ vi.mock('@/lib/axios', () => ({
 
 const getMock = vi.mocked(api.get);
 const postMock = vi.mocked(api.post);
+const putMock = vi.mocked(api.put);
 const deleteMock = vi.mocked(api.delete);
 
 function respuestaCon<T>(data: T): AxiosResponse<T> {
@@ -74,13 +75,26 @@ const HORARIO: HorarioMedico = {
   duracionConsulta: 30,
 };
 
+/**
+ * Médico tal como lo guardó la base antes de existir una regla de formato: es el caso de la
+ * captura (nombre `52454255`, cédula `ccwcwcc`, teléfono `vvvvvuvu`). S8 exige que se siga
+ * pudiendo leer, y S7 que no se pueda volver a guardar sin corregirlo.
+ */
+const MEDICO_CON_DATOS_NO_CONFORMES: Medico = {
+  ...MEDICO,
+  nombre: '52454255',
+  especialidad: '2334',
+  cedula: 'ccwcwcc',
+  telefono: 'vvvvvuvu',
+};
+
 const RUTA_HORARIOS = `/medicos/${MEDICO.id}/horarios`;
 const RUTA_CONSULTORIOS_ASIGNADOS = `/medicos/${MEDICO.id}/consultorios`;
 
 /** Deja listas las cuatro lecturas de la pantalla: médicos, consultorios, asignados y una agenda. */
-function cargarCon(horarios: HorarioMedico[] = []) {
+function cargarCon(horarios: HorarioMedico[] = [], medicos: Medico[] = [MEDICO]) {
   getMock.mockImplementation((url: string) => {
-    if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
+    if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon(medicos));
     if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
     if (url === RUTA_CONSULTORIOS_ASIGNADOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
     if (url === RUTA_HORARIOS) return Promise.resolve(respuestaCon(horarios));
@@ -173,6 +187,107 @@ describe('MedicosPage · estados de carga', () => {
   });
 });
 
+describe('MedicosPage · reglas de formato del médico', () => {
+  it('no envía el alta cuando el nombre trae dígitos', async () => {
+    cargarCon();
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
+    fireEvent.change(screen.getByLabelText(/^nombre/i), { target: { value: '52454255' } });
+    fireEvent.click(screen.getByRole('button', { name: /registrar médico/i }));
+
+    // El error aparece junto al campo, sin esperar la respuesta del servicio (S7).
+    expect(await screen.findByText(/solo admite letras/i)).toBeInTheDocument();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it('no envía la edición de un médico con cédula con letras hasta corregirla', async () => {
+    cargarCon([], [MEDICO_CON_DATOS_NO_CONFORMES]);
+
+    render(<MedicosPage />);
+    expect(await screen.findByText('52454255')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle('Editar médico'));
+    fireEvent.click(screen.getByRole('button', { name: /guardar cambios/i }));
+
+    expect(await screen.findByText(/entre 5 y 10 dígitos/i)).toBeInTheDocument();
+    expect(putMock).not.toHaveBeenCalled();
+  });
+
+  it('no envía el alta cuando el teléfono trae letras', async () => {
+    cargarCon();
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
+    fireEvent.change(screen.getByLabelText(/^nombre/i), { target: { value: 'Médico de prueba' } });
+    fireEvent.change(screen.getByLabelText(/teléfono/i), { target: { value: 'vvvvvuvu' } });
+    fireEvent.click(screen.getByRole('button', { name: /registrar médico/i }));
+
+    expect(await screen.findByText(/entre 7 y 20 caracteres/i)).toBeInTheDocument();
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it('envía lo escrito cuando los datos cumplen las reglas', async () => {
+    cargarCon();
+    postMock.mockResolvedValue(respuestaCon({ ...MEDICO, id: 'med-0002', nombre: 'Dra. Elena Ruiz' }));
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
+    fireEvent.change(screen.getByLabelText(/^nombre/i), { target: { value: 'Dra. Elena Ruiz' } });
+    fireEvent.change(screen.getByLabelText(/especialidad/i), {
+      target: { value: 'Medicina general' },
+    });
+    fireEvent.change(screen.getByLabelText(/cédula/i), { target: { value: '1234567' } });
+    fireEvent.change(screen.getByLabelText(/teléfono/i), { target: { value: '9511111111' } });
+    fireEvent.click(screen.getByRole('button', { name: /registrar médico/i }));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith(RUTA_MEDICOS, {
+        consultorioId: CONSULTORIO.id,
+        nombre: 'Dra. Elena Ruiz',
+        especialidad: 'Medicina general',
+        cedula: '1234567',
+        telefono: '9511111111',
+        tarifaBase: null,
+      }),
+    );
+  });
+
+  it('sigue mostrando en el directorio un médico con datos no conformes', async () => {
+    // S8: la regla nueva impide guardar, no leer. Una ficha ya guardada antes de la regla se
+    // sigue viendo, con su cédula tal cual, para que el administrador pueda corregirla.
+    cargarCon([], [MEDICO_CON_DATOS_NO_CONFORMES]);
+
+    render(<MedicosPage />);
+
+    expect(await screen.findByText('52454255')).toBeInTheDocument();
+    expect(screen.getByText('ccwcwcc')).toBeInTheDocument();
+    expect(screen.getByText('vvvvvuvu')).toBeInTheDocument();
+  });
+
+  it('muestra el mensaje del backend cuando el servicio rechaza el formato', async () => {
+    // Si el backend rechaza por una regla que la pantalla no conoce, su mensaje es el que se
+    // muestra: la validación local no lo reemplaza por un texto genérico.
+    cargarCon();
+    postMock.mockRejectedValueOnce({ response: { data: { mensaje: 'El campo cedula es inválido' } } });
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
+    fireEvent.change(screen.getByLabelText(/^nombre/i), { target: { value: 'Médico de prueba' } });
+    fireEvent.click(screen.getByRole('button', { name: /registrar médico/i }));
+
+    expect(await screen.findByText('El campo cedula es inválido')).toBeInTheDocument();
+  });
+});
+
 describe('MedicosPage · horarios según el rol', () => {
   it('deja que un MEDICO gestione la agenda propia', async () => {
     abrirSesion('MEDICO', MEDICO.id);
@@ -203,6 +318,24 @@ describe('MedicosPage · horarios según el rol', () => {
 });
 
 describe('MedicosPage · borrado de un bloque', () => {
+  it('abre la confirmación en una capa superior al panel de horarios', async () => {
+    // El diálogo se abre desde dentro del panel. Con la misma capa, el panel —que aparece
+    // después en el documento— lo tapaba: se veía el fondo oscurecido pero no el aviso.
+    cargarCon([HORARIO]);
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
+    fireEvent.click(await screen.findByTitle('Eliminar bloque'));
+
+    const dialogo = (await screen.findByText('Eliminar bloque de disponibilidad')).closest('.fixed');
+    const panel = screen.getByText(/^Horarios de /i).closest('.fixed');
+    expect(dialogo?.className).toContain('z-[60]');
+    expect(panel?.className).toContain('z-50');
+    expect(panel?.className).not.toContain('z-[60]');
+  });
+
   it('pide confirmación y no llama al servicio hasta aceptarla', async () => {
     cargarCon([HORARIO]);
 
@@ -220,5 +353,49 @@ describe('MedicosPage · borrado de un bloque', () => {
     fireEvent.click(within(confirmacion as HTMLElement).getByRole('button', { name: /eliminar bloque/i }));
 
     await waitFor(() => expect(deleteMock).toHaveBeenCalledWith(`/horarios/${HORARIO.id}`));
+  });
+
+  it('muestra el mensaje del backend cuando el bloque se rechaza', async () => {
+    // Mismo camino que el borrado, del lado del alta: si el backend explica el rechazo, ese
+    // texto es lo que permite corregir el bloque. El genérico hablaba solo de rango y duración,
+    // y no cubría el solapamiento, que es la otra causa posible.
+    cargarCon([HORARIO]);
+    postMock.mockRejectedValueOnce({
+      response: { data: { mensaje: 'El bloque se solapa con otro del mismo día' } },
+    });
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /agregar bloque/i }));
+
+    expect(await screen.findByText('El bloque se solapa con otro del mismo día')).toBeInTheDocument();
+  });
+
+  it('muestra el mensaje del backend cuando el borrado se rechaza', async () => {
+    // El rechazo no se reemplaza por un texto genérico: el backend sabe por qué no se puede
+    // borrar y ese motivo es lo único que le permite decidir a quien está en el mostrador.
+    cargarCon([HORARIO]);
+    deleteMock.mockRejectedValueOnce({
+      response: { data: { mensaje: 'El bloque no puede eliminarse porque tiene citas agendadas' } },
+    });
+
+    render(<MedicosPage />);
+    await screen.findByText('Médico de prueba');
+
+    fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
+    fireEvent.click(await screen.findByTitle('Eliminar bloque'));
+
+    const titulo = await screen.findByText('Eliminar bloque de disponibilidad');
+    const confirmacion = titulo.closest('[role="dialog"]');
+    expect(confirmacion).not.toBeNull();
+    fireEvent.click(
+      within(confirmacion as HTMLElement).getByRole('button', { name: /eliminar bloque/i }),
+    );
+
+    expect(
+      await screen.findByText('El bloque no puede eliminarse porque tiene citas agendadas'),
+    ).toBeInTheDocument();
   });
 });

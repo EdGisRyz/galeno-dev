@@ -40,6 +40,14 @@ function renderLoginForm() {
   );
 }
 
+function renderLoginFormConMotivo() {
+  return render(
+    <MemoryRouter initialEntries={['/login?reason=sin_acceso']}>
+      <LoginForm />
+    </MemoryRouter>,
+  );
+}
+
 function enviarCredenciales() {
   fireEvent.change(screen.getByLabelText(/correo electrónico/i), {
     target: { value: 'medico@clinica.mx' },
@@ -85,12 +93,27 @@ describe('LoginForm · mensaje de error del emisor', () => {
     expect(screen.queryByText(FALLBACK_GENERICO)).not.toBeInTheDocument();
   });
 
-  it('cae al texto genérico cuando el error no trae mensaje del emisor', async () => {
-    servicio.login.mockRejectedValue(new Error('sin red'));
+  it('cae al texto genérico cuando el error no trae mensaje del emisor', async () => {    servicio.login.mockRejectedValue(new Error('sin red'));
 
     renderLoginForm();
     enviarCredenciales();
 
     expect(await screen.findByText(FALLBACK_GENERICO)).toBeInTheDocument();
+  });
+});
+
+describe('LoginForm · motivo del rechazo', () => {
+  it('explica el rechazo por rol cuando la guarda devuelve con sin_acceso', () => {
+    // La guarda manda acá a quien tiene una sesión válida pero ningún destino: sin este aviso
+    // vuelve al login como si se hubiera equivocado de contraseña.
+    renderLoginFormConMotivo();
+
+    expect(screen.getByText(/no tiene acceso a ninguna sección/i)).toBeInTheDocument();
+  });
+
+  it('no muestra ese aviso cuando se entra al login sin motivo', () => {
+    renderLoginForm();
+
+    expect(screen.queryByText(/no tiene acceso a ninguna sección/i)).toBeNull();
   });
 });

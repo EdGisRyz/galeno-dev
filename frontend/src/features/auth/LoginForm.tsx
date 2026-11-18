@@ -66,6 +66,16 @@ export function LoginForm() {
         </Alert>
       )}
 
+      {/* Rechazo por rol: la guarda devuelve acá a quien no tiene ninguna sección habilitada.
+          Sin este aviso la persona vuelve al login como si se hubiera equivocado de contraseña,
+          y el único camino de salida —que administración revise su rol— queda invisible. */}
+      {reason === 'sin_acceso' && (
+        <Alert variant="warning" title="Tu cuenta no tiene secciones habilitadas">
+          Iniciaste sesión correctamente, pero tu rol no tiene acceso a ninguna sección de la
+          estación clínica. Pide a la administración de tu clínica que revise tu rol.
+        </Alert>
+      )}
+
       {errorMessage && (
         <Alert variant="error" title="Error de Autenticación">
           {errorMessage}

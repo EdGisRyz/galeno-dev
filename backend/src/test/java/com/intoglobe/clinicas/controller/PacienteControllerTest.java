@@ -563,6 +563,208 @@ class PacienteControllerTest {
     }
 
     @Test
+    @DisplayName("POST con nombre con dígitos devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenNombreHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Arturo Beltránñntty354545 5."}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono con letras devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenTelefonoHasLetters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","telefono":"9514445566ttnynt"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono de 6 caracteres devuelve 400 (@Pattern: mínimo 7)")
+    void crear_shouldReturn400_whenTelefonoIsShorterThanSevenCharacters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","telefono":"123456"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con ocupación con dígitos devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenOcupacionHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","ocupacion":"Jubilado454545"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo ocupacion es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con nombre del responsable numérico devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenNombreResponsableHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","nombreResponsable":"45454545"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombreResponsable es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con parentesco numérico devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenParentescoHasDigits() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","parentesco":"54545454"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo parentesco es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con teléfono del responsable con letras devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenTelefonoResponsableHasLetters() throws Exception {
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","telefonoResponsable":"35tgrgegegege"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefonoResponsable es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/organizaciones/" + TENANT_ID + "/pacientes"));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("PUT con parentesco numérico devuelve 400 (@Valid también en el PUT)")
+    void actualizar_shouldReturn400_whenParentescoHasDigits() throws Exception {
+        perform(put("/api/v1/pacientes/{id}", PACIENTE_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","parentesco":"54545454"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo parentesco es inválido"))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/pacientes/" + PACIENTE_ID));
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
+    @DisplayName("POST con los datos reales de la ficha devuelve 201 (@Pattern los acepta)")
+    void crear_shouldReturn201_whenTheRealRecordDataIsSent() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "María López Ramírez", true));
+
+        // Incluye el domicilio con número de casa, la ocupación con acento y el parentesco que no
+        // está en las sugerencias de la pantalla: los tres tienen que seguir entrando.
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"María López Ramírez","telefono":"9514445566","ocupacion":"Jubilada","domicilio":"Av. Juárez 210, Col. Centro","nombreResponsable":"Rosa Ramírez Silva","telefonoResponsable":"+52 55 5555 8765","parentesco":"Amigo"}
+                                """))
+                .andExpect(status().isCreated());
+        verify(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con los opcionales en cadena vacía devuelve 201 (@Pattern los deja pasar)")
+    void crear_shouldReturn201_whenOptionalFieldsAreEmptyStrings() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "Paciente de prueba", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","telefono":"","ocupacion":"","domicilio":"","nombreResponsable":"","telefonoResponsable":"","parentesco":""}
+                                """))
+                .andExpect(status().isCreated());
+        verify(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con parentesco de sugerencia y con parentesco libre devuelve 201")
+    void crear_shouldReturn201_whenParentescoIsAnyFreeText() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "Paciente de prueba", true));
+
+        for (String parentesco : List.of("Madre", "Cónyuge", "Vecino", "Institución")) {
+            perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"nombre":"Paciente de prueba","parentesco":"%s"}
+                                    """.formatted(parentesco)))
+                    .andExpect(status().isCreated());
+        }
+    }
+
+    @Test
+    @DisplayName("POST con teléfono entre paréntesis en el paciente y en el responsable devuelve 201")
+    void crear_shouldReturn201_whenTelefonoUsesParentheses() throws Exception {
+        when(pacienteService.crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class)))
+                .thenReturn(respuesta(PACIENTE_ID, "Paciente de prueba", true));
+
+        perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nombre":"Paciente de prueba","telefono":"(951) 111 1111","telefonoResponsable":"+52 (55) 5555 8765"}
+                                """))
+                .andExpect(status().isCreated());
+        verify(pacienteService).crear(eq(TENANT_ID), eq(TENANT_ID), any(PacienteRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST con teléfono sin ningún dígito devuelve 400 (@Pattern) sin llamar al service")
+    void crear_shouldReturn400_whenTelefonoHasNoDigits() throws Exception {
+        // Siete o más caracteres de paréntesis, espacios y guiones no son un teléfono.
+        for (String telefono : List.of("()", "(      )", "-------")) {
+            perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"nombre":"Paciente de prueba","telefono":"%s"}
+                                    """.formatted(telefono)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.codigo").value(400))
+                    .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"));
+        }
+        verifyNoInteractions(pacienteService);
+    }
+
+    @Test
     @DisplayName("POST con JSON mal formado devuelve 400 sin detalles internos del parser")
     void crear_shouldReturn400_whenJsonIsMalformed() throws Exception {
         perform(post("/api/v1/organizaciones/{organizacionId}/pacientes", TENANT_ID)

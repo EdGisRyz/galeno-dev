@@ -15,6 +15,7 @@ import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.mapper.ConsultorioMapper;
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.HorarioMedico;
+import com.intoglobe.clinicas.model.DiasDeLaSemana;
 import com.intoglobe.clinicas.model.Medico;
 import com.intoglobe.clinicas.model.MedicoConsultorio;
 import com.intoglobe.clinicas.repository.ConsultorioRepository;
@@ -102,9 +103,6 @@ public class MedicoConsultorioService {
      * {@code horario_medico.dia_semana}: {@code 0=Domingo .. 6=Sábado}. Se usan solo para que el
      * mensaje del 409 diga cuáles son los bloques que impiden retirar el consultorio.
      */
-    private static final String[] NOMBRES_DE_LOS_DIAS = {
-            "domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"
-    };
 
     private final MedicoRepository medicoRepository;
     private final ConsultorioRepository consultorioRepository;
@@ -273,7 +271,7 @@ public class MedicoConsultorioService {
      */
     private static void exigirQueNoSeaElPrincipal(Medico medico, UUID consultorioId) {
         if (medico.getConsultorio().getId().equals(consultorioId)) {
-            throw ConsultorioNoRetirableException.porSerElPrincipal(medico.getId(), consultorioId);
+            throw ConsultorioNoRetirableException.porSerElPrincipal();
         }
     }
 
@@ -292,7 +290,7 @@ public class MedicoConsultorioService {
     private void exigirQueNoTengaBloques(UUID medicoId, UUID consultorioId) {
         var bloques = horarioMedicoRepository.listarBloquesEnConsultorio(medicoId, consultorioId);
         if (!bloques.isEmpty()) {
-            throw ConsultorioNoRetirableException.porTenerBloquesDeHorario(medicoId, consultorioId,
+            throw ConsultorioNoRetirableException.porTenerBloquesDeHorario(
                     bloques.stream().map(MedicoConsultorioService::describirBloque).toList());
         }
     }
@@ -300,16 +298,18 @@ public class MedicoConsultorioService {
     /**
      * Describe un bloque para el mensaje del 409, con el día y el rango horario.
      *
+     * <p>El día se nombra con la palabra y no con su número de la convención interna: quien lee el
+     * mensaje está decidiendo qué mover en el mostrador, y «día 4» no le dice nada. El número se
+     * mantiene solo como respaldo si llegara un valor fuera de la convención, porque entonces el
+     * dato sí es el problema.</p>
+     *
      * @param bloque bloque de horario a describir
-     * @return descripción legible, por ejemplo {@code "día 1 (lunes) de 09:00 a 13:00"}
+     * @return descripción legible, por ejemplo {@code "jueves de 09:00 a 13:00"}
      */
     private static String describirBloque(HorarioMedico bloque) {
         var dia = bloque.getDiaSemana();
-        var nombreDelDia = dia >= 0 && dia < NOMBRES_DE_LOS_DIAS.length
-                ? NOMBRES_DE_LOS_DIAS[dia]
-                : "día fuera de la convención";
-        return "día " + dia + " (" + nombreDelDia + ") de " + hora(bloque.getHoraInicio())
-                + " a " + hora(bloque.getHoraFin());
+        var nombreDelDia = DiasDeLaSemana.nombre(dia);
+        return nombreDelDia + " de " + hora(bloque.getHoraInicio()) + " a " + hora(bloque.getHoraFin());
     }
 
     /**

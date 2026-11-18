@@ -27,8 +27,8 @@ import java.util.UUID;
  *
  * <p>La excepción representa la regla, no el protocolo: el servicio la lanza sin saber nada de
  * HTTP y el {@code GlobalExceptionHandler} la traduce a {@code 409}. Las dos formas de llegar
- * aquí se distinguen con {@link #porSerElPrincipal(UUID, UUID)} y
- * {@link #porTenerBloquesDeHorario(UUID, UUID, List)}, porque la acción que desbloquea la
+ * aquí se distinguen con {@link #porSerElPrincipal()} y
+ * {@link #porTenerBloquesDeHorario(List)}, porque la acción que desbloquea la
  * operación es distinta.</p>
  */
 public class ConsultorioNoRetirableException extends RuntimeException {
@@ -44,11 +44,19 @@ public class ConsultorioNoRetirableException extends RuntimeException {
      * @param consultorioId consultorio que es el principal del médico
      * @return la excepción lista para lanzar
      */
-    public static ConsultorioNoRetirableException porSerElPrincipal(UUID medicoId, UUID consultorioId) {
+    /**
+     * Explica que el consultorio pedido es el principal del médico.
+     *
+     * <p>El mensaje no nombra identificadores: quien lo lee está mirando la fila del consultorio
+     * que acaba de intentar quitar, así que un UUID no agrega nada y vuelve ilegible el texto.</p>
+     *
+     * @return la excepción de negocio, que el handler traduce a 409
+     */
+    public static ConsultorioNoRetirableException porSerElPrincipal() {
         return new ConsultorioNoRetirableException(
-                "No se puede quitar el consultorio " + consultorioId + " del médico " + medicoId
-                        + ": es su consultorio principal, la referencia por defecto de su agenda y de "
-                        + "sus pacientes. El consultorio principal no se retira");
+                "No se puede quitar este consultorio: es el consultorio principal del médico, la "
+                        + "referencia por defecto de su agenda y de sus pacientes. El consultorio "
+                        + "principal no se retira");
     }
 
     /**
@@ -58,18 +66,26 @@ public class ConsultorioNoRetirableException extends RuntimeException {
      * @param medicoId      médico al que se le intentó retirar el consultorio
      * @param consultorioId consultorio que tiene bloques de horario
      * @param bloques       descripción legible de cada bloque que lo impide, por ejemplo
-     *                      {@code "día 1 (lunes) de 09:00 a 13:00"}; se enumeran en el mensaje
+     *                      {@code "lunes de 09:00 a 13:00"}; se enumeran en el mensaje
      *                      para que el administrador sepa cuáles mover antes de reintentar
      * @return la excepción lista para lanzar
      */
-    public static ConsultorioNoRetirableException porTenerBloquesDeHorario(UUID medicoId,
-            UUID consultorioId, List<String> bloques) {
+    /**
+     * Explica que el consultorio todavía tiene bloques de horario del médico.
+     *
+     * <p>Nombra los bloques —día y rango— porque son lo que hay que mover para desbloquear la
+     * operación, y omite los identificadores por la misma razón que
+     * {@link #porSerElPrincipal()}: quien lee el mensaje ya está en la fila del consultorio.</p>
+     *
+     * @param bloques descripciones legibles de los bloques que impiden la baja
+     * @return la excepción de negocio, que el handler traduce a 409
+     */
+    public static ConsultorioNoRetirableException porTenerBloquesDeHorario(List<String> bloques) {
         return new ConsultorioNoRetirableException(
-                "No se puede quitar el consultorio " + consultorioId + " del médico " + medicoId
-                        + ": todavía tiene " + bloques.size()
+                "No se puede quitar este consultorio: todavía tiene " + bloques.size()
                         + (bloques.size() == 1 ? " bloque de horario" : " bloques de horario")
                         + " del médico (" + String.join("; ", bloques)
-                        + "). Cambiá esos bloques a otro consultorio asignado o eliminálos antes de "
+                        + "). Cambia esos bloques a otro consultorio asignado o elimínalos antes de "
                         + "retirar este");
     }
 }

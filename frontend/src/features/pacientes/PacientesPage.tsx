@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { differenceInYears } from 'date-fns';
 import { api } from '@/lib/axios';
-import { resumenDeErrorHttp } from '@/lib/apiError';
+import { mensajeDelBackend, resumenDeErrorHttp } from '@/lib/apiError';
 import {
   Button,
   Input,
@@ -19,6 +19,12 @@ import {
   Alert,
 } from '@/components/ui';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
+import {
+  SUGERENCIAS_DE_PARENTESCO,
+  erroresDePaciente,
+  type CampoDePaciente,
+  type ErroresDePaciente,
+} from '@/features/pacientes/validacionPaciente';
 import { useAuthStore } from '@/store/auth.store';
 import {
   Users,
@@ -72,19 +78,6 @@ const EMPTY_FORM = {
   parentesco: '',
 };
 
-/**
- * Mensaje que el backend adjunta a un error de negocio (`ErrorResponse.mensaje`), si viene.
- *
- * El 409 por CURP duplicada explica el motivo —la CURP ya existe en la organización— y
- * reemplazarlo por un texto genérico dejaría a la recepcionista sin saber qué corregir antes de
- * reintentar. Mismo criterio que en `MedicosPage`.
- */
-function mensajeDelBackend(error: unknown, respaldo: string): string {
-  const posible = error as { response?: { data?: { mensaje?: string } } } | null | undefined;
-  const mensaje = posible?.response?.data?.mensaje;
-  return typeof mensaje === 'string' && mensaje.trim() !== '' ? mensaje : respaldo;
-}
-
 function calcularEdad(fechaNacimiento?: string | null): string {
   if (!fechaNacimiento) return 'Sin registrar';
   const years = differenceInYears(new Date(), new Date(fechaNacimiento));
@@ -117,6 +110,7 @@ export function PacientesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [erroresForm, setErroresForm] = useState<ErroresDePaciente>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
   const [reactivarError, setReactivarError] = useState<string | null>(null);
@@ -162,6 +156,7 @@ export function PacientesPage() {
   const openCreateModal = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setErroresForm({});
     setSaveError(null);
     setIsModalOpen(true);
   };
@@ -173,6 +168,7 @@ export function PacientesPage() {
   const openEditModal = (patient: Paciente) => {
     setEditingId(patient.id);
     setSaveError(null);
+    setErroresForm({});
     setForm({
       nombre: patient.nombre,
       telefono: patient.telefono || '',
@@ -190,9 +186,28 @@ export function PacientesPage() {
     setIsModalOpen(true);
   };
 
+  /**
+   * Escribe un campo con regla de formato y retira su error: el mensaje describía el valor anterior
+   * y dejarlo visible mientras se corrige el dato es una advertencia falsa.
+   */
+  const actualizarCampo = (campo: CampoDePaciente, valor: string) => {
+    setForm((f) => ({ ...f, [campo]: valor }));
+    setErroresForm((prev) => {
+      if (!prev[campo]) return prev;
+      const siguiente = { ...prev };
+      delete siguiente[campo];
+      return siguiente;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.nombre.trim()) return;
+
+    // S9: las mismas reglas del backend, aplicadas antes de enviar. Un dato mal formado no sale de
+    // la pantalla y el mensaje queda junto al campo, sin esperar la respuesta del servicio.
+    const errores = erroresDePaciente(form);
+    setErroresForm(errores);
+    if (Object.keys(errores).length > 0) return;
 
     // S6/S8: los seis campos de la ficha van planos, al mismo nivel que el resto y en camelCase.
     // El objeto anidado `ficha` de antes no lo declaraba el backend y Spring lo descartaba en
@@ -640,7 +655,8 @@ export function PacientesPage() {
               <Input
                 label="Nombre Completo"
                 value={form.nombre}
-                onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
+                onChange={(e) => actualizarCampo('nombre', e.target.value)}
+                error={erroresForm.nombre}
                 required
               />
               <Select
@@ -657,7 +673,8 @@ export function PacientesPage() {
               <Input
                 label="Teléfono"
                 value={form.telefono}
-                onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
+                onChange={(e) => actualizarCampo('telefono', e.target.value)}
+                error={erroresForm.telefono}
                 leftIcon={<Phone className="w-4 h-4" />}
               />
               <Input
@@ -704,31 +721,46 @@ export function PacientesPage() {
               <Input
                 label="Ocupación"
                 value={form.ocupacion}
-                onChange={(e) => setForm((f) => ({ ...f, ocupacion: e.target.value }))}
+                onChange={(e) => actualizarCampo('ocupacion', e.target.value)}
+                error={erroresForm.ocupacion}
               />
               <Input
                 label="Domicilio Completo"
                 value={form.domicilio}
-                onChange={(e) => setForm((f) => ({ ...f, domicilio: e.target.value }))}
+                onChange={(e) => actualizarCampo('domicilio', e.target.value)}
+                error={erroresForm.domicilio}
                 leftIcon={<Home className="w-4 h-4" />}
                 className="sm:col-span-2"
               />
               <Input
                 label="Nombre del Responsable"
                 value={form.nombreResponsable}
-                onChange={(e) => setForm((f) => ({ ...f, nombreResponsable: e.target.value }))}
+                onChange={(e) => actualizarCampo('nombreResponsable', e.target.value)}
+                error={erroresForm.nombreResponsable}
                 helperText="Para menores de edad o urgencias"
               />
+              {/* El parentesco es texto con sugerencias, no una lista cerrada (S6): «amigo»,
+                  «vecino» o «institución» son casos reales y siguen siendo válidos. Las formas
+                  «hermano/a» van en singular porque la barra no pertenece al conjunto de caracteres
+                  que la regla acepta. */}
               <Input
                 label="Parentesco"
                 value={form.parentesco}
-                onChange={(e) => setForm((f) => ({ ...f, parentesco: e.target.value }))}
+                onChange={(e) => actualizarCampo('parentesco', e.target.value)}
+                error={erroresForm.parentesco}
+                list="sugerencias-parentesco"
                 helperText="Relación con el paciente: madre, tutor, hermano..."
               />
+              <datalist id="sugerencias-parentesco">
+                {SUGERENCIAS_DE_PARENTESCO.map((parentesco) => (
+                  <option key={parentesco} value={parentesco} />
+                ))}
+              </datalist>
               <Input
                 label="Teléfono del Responsable"
                 value={form.telefonoResponsable}
-                onChange={(e) => setForm((f) => ({ ...f, telefonoResponsable: e.target.value }))}
+                onChange={(e) => actualizarCampo('telefonoResponsable', e.target.value)}
+                error={erroresForm.telefonoResponsable}
               />
             </div>
           </div>
