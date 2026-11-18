@@ -504,6 +504,34 @@ la creación hay un motivo obligatorio: sin la comprobación, la FK rechazaría 
 (`existsById` al listar; `findById` al crear, que además aporta la entidad que el
 mapper necesita, así que ahí no es una consulta extra).
 
+### Decisión 5 — Nombre y teléfono con formato; la dirección queda libre
+
+**Decisión.** `ConsultorioRequest` valida el **nombre** (obligatorio; admite letras, espacios,
+punto, guion, apóstrofo y **dígitos**, siempre que tenga al menos una letra) y el **teléfono**
+(7 a 20 caracteres, con al menos un dígito, `+` inicial opcional y espacios, guiones o paréntesis
+como separadores) con los patrones compartidos de `validation/PatronesDeFormato`, los mismos de
+médico y paciente: una sola definición por regla y su espejo en
+`frontend/src/lib/patronesDeFormato.ts`. La **dirección no lleva regla de caracteres**; solo el
+límite que declare su columna.
+
+Los dígitos en el nombre del consultorio son deliberados: `Consultorio 2` y `Sala 3` son nombres
+reales de una clínica, y la regla de los nombres de persona —sin dígitos— los rechazaba. Lo que se
+exige es al menos una letra, así que `454545` sigue afuera. Los nombres de médico y de paciente
+conservan la regla estricta: un número no es parte del nombre de nadie.
+
+**Por qué.** El formulario aceptó y guardó el consultorio `454545` con teléfono `btsbtbrb4554545`.
+El nombre y el teléfono sí son datos de formato reconocible y se pueden rechazar en el borde. La
+dirección no: `Calle 5 de Mayo 12-B` es una dirección y `454545` no lo es, pero distinguirlas exige
+un servicio de direcciones y no una expresión regular, así que aplicarle el alfabeto del nombre
+rechazaría direcciones reales sin detectar la falsa.
+
+**Deuda declarada.** `454545` como dirección **sigue entrando** (tiene su test, `crear_shouldReturn201_whenDireccionIsOnlyDigits`).
+No es un olvido: validar direcciones de verdad está fuera de alcance, y se registra aquí en vez de
+fingir que un patrón lo resuelve. Lo que sí queda cerrado es que ese consultorio no se pueda
+**guardar** con nombre `454545` ni con el teléfono con letras, que es lo que la captura mostraba.
+La pantalla valida las dos reglas antes de enviar y muestra el mensaje del backend cuando rechaza
+por algo que solo él conoce.
+
 ### Desviaciones deliberadas respecto del plan
 
 - **GAL-001 sección 7 (slicing).** La tarjeta define 3 unidades; el módulo se commitea en **4**.
@@ -730,6 +758,32 @@ equivocada**, y habría que afirmar el texto del mensaje.
 
 **Alcance de la autorización.** Extender el traductor **no** es crear un camino paralelo;
 reestructurarlo o duplicarlo sí. La tarjeta (R20) quedó enmendada para dejarlo explícito.
+
+### Decisión 5 — Las reglas de formato viven en el borde, no en la entidad
+
+**Decisión.** `MedicoRequest` valida el formato de los cuatro campos de datos con `@Pattern`:
+nombre y especialidad solo admiten letras (con acentos y eñe), espacios, punto, guion y apóstrofo;
+cédula solo dígitos de 5 a 10; teléfono de 7 a 20 caracteres con dígitos, un `+` inicial opcional
+y espacios o guiones. Los opcionales aceptan `null` y cadena vacía.
+
+**Por qué.** Antes solo había longitudes y por eso la base guardó un médico llamado `52454255`,
+con cédula `ccwcwcc` y teléfono `vvvvvuvu`: una cédula falsa en un directorio médico no es un
+detalle estético. La regla va en el DTO —el borde de la API— y no en la entidad ni en la base
+porque es una regla de aplicación que debe responder **400 con el contrato de error único y el
+campo identificado**, y porque solo así el rechazo ocurre antes de tocar el repositorio. Los
+patrones aceptan los datos reales ya guardados (`Dra. Elena Ruiz`, `Medicina general`, cédula
+`1234567`, teléfono `9511111111`): impiden guardar datos mal formados, no leer ni corregir los que
+ya existen. La pantalla replica las mismas reglas antes de enviar, y el mensaje del backend sigue
+mostrándose cuando rechaza por algo que solo él conoce.
+
+**Una sola definición.** Los patrones no se escriben en el DTO: viven en
+`validation/PatronesDeFormato` (`TEXTO_SIN_DIGITOS`, `TEXTO_SIN_DIGITOS_OPCIONAL`, `TELEFONO`,
+`CEDULA_PROFESIONAL`) y los comparten médico, paciente y consultorio. Tres copias serían tres
+oportunidades de que un formulario acepte lo que otro rechaza. El espejo del cliente está en
+`frontend/src/lib/patronesDeFormato.ts`, que es el único sitio del frontend con las expresiones; los
+módulos por pantalla solo deciden qué campo usa qué regla. **Java y JS cambian juntos**: una regla
+que solo se ajuste en un lado no rompe ninguna compilación y deja al formulario aceptando lo que la
+API rechaza.
 
 ### Duda abierta
 
@@ -1041,6 +1095,19 @@ queda **fuera de alcance**.
    `ficha` anidado que el backend no declaraba, y Spring descarta por defecto las propiedades
    desconocidas, así que lo que la recepcionista escribía no se guardaba y no había error.
    Con la ficha en campos planos (S6) el dato viaja, se guarda y se devuelve.
+8. **Formato de la ficha: nombre, ocupación, responsable y parentesco sin dígitos; teléfonos con
+   formato —dígitos, `+`, espacios, guiones o paréntesis—; el domicilio queda libre.** El formulario aceptaba y guardaba `Arturo Beltránñntty354545 5.`
+   como nombre, `Jubilado454545` como ocupación, `45454545` como responsable y `54545454` como
+   parentesco. Las reglas se aplican con los patrones compartidos de `validation/PatronesDeFormato`
+   —los mismos de médico y consultorio, espejo en `frontend/src/lib/patronesDeFormato.ts`—, no con
+   copias por módulo: dos patrones que se desincronicen aceptarían en un formulario lo que rechazan
+   en otro. El **domicilio es la excepción deliberada**: una dirección lleva número de casa
+   (`Av. Juárez 210`), así que solo se le aplica el máximo de la columna. El **parentesco es texto
+   libre con sugerencias** (`datalist`, no `select`): «amigo», «vecino» o «institución» son casos
+   reales y no se pueden cerrar en una lista. La CURP conserva su regla estructural y su unicidad,
+   sin cambios. La pantalla valida antes de enviar y un paciente ya guardado con datos no conformes
+   se sigue leyendo —en el directorio y en su ficha—; lo que no se puede es guardar la edición sin
+   corregirlos.
 
 ### Autorización en tres capas
 
