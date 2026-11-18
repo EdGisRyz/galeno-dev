@@ -866,8 +866,11 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // conflictos del backend —consultorio principal y bloques de horario— porque es el motivo que
     // la pantalla muestra al administrador: un mock que siempre respondiera 204 escondería justo
     // la regla que la interfaz tiene que explicar.
-    const coleccionDeConsultoriosDelMedico = url.match(/^\/medicos\/([^/]+)\/consultorios\/?$/);
-    const consultorioAsignadoDelMedico = url.match(/^\/medicos\/([^/]+)\/consultorios\/([^/]+)\/?$/);
+    // Sobre `ruta` y no sobre `url`: `ruta` es la URL sin query string, que es la convención del
+    // resto del adaptador. Con `url`, una petición con parámetros no casa con el ancla `$` y la
+    // ruta cae en el 404 genérico.
+    const coleccionDeConsultoriosDelMedico = ruta.match(/^\/medicos\/([^/]+)\/consultorios\/?$/);
+    const consultorioAsignadoDelMedico = ruta.match(/^\/medicos\/([^/]+)\/consultorios\/([^/]+)\/?$/);
 
     if (coleccionDeConsultoriosDelMedico && method === 'get') {
       await delay();
