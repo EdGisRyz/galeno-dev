@@ -30,7 +30,8 @@ import jakarta.persistence.Table;
  *       de escritura.</li>
  *   <li>La baja es lógica mediante {@link #desactivar()}, operación idempotente:
  *       el borrado físico rompería las FK de {@code medico} y {@code cita}, que no
- *       declaran cascada.</li>
+ *       declaran cascada. {@link #activar()} deshace esa baja sin duplicar la fila, así que
+ *       conserva a los médicos y el historial de citas que la referencian.</li>
  *   <li>La validación de entrada (nombre, teléfono) vive en el DTO de petición,
  *       nunca en esta entidad.</li>
  * </ul>
@@ -112,6 +113,15 @@ public class Consultorio {
      */
     public void desactivar() {
         this.activo = false;
+    }
+
+    /**
+     * Reactivación lógica e idempotente: activar un consultorio que ya está activo no
+     * produce error. Devuelve el registro a la vida conservando a sus médicos y su
+     * historial de citas, que es el motivo de que la baja sea lógica.
+     */
+    public void activar() {
+        this.activo = true;
     }
 
     public UUID getId() {

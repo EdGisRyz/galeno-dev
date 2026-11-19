@@ -31,6 +31,10 @@ import jakarta.persistence.Table;
  *   <li>La baja es lógica mediante {@link #desactivar()}, operación idempotente. El
  *       borrado físico está descartado: la FK de {@code cita} lo bloquea y la de
  *       {@code horario_medico} borraría los horarios en silencio, sin avisar.</li>
+ *   <li>{@link #activar()} es idempotente y devuelve el registro a la vida sin duplicarlo:
+ *       sus bloques de disponibilidad y sus asignaciones de consultorio siguen colgados del
+ *       mismo identificador. Reactivar un médico no toca la cuenta de usuario asociada: el
+ *       acceso se cierra por {@code activo} del médico y una cuenta dada de baja sigue de baja.</li>
  *   <li>La tarifa es {@link BigDecimal} porque la columna es {@code NUMERIC(10,2)}:
  *       usar {@code double} introduciría error de redondeo en un importe.</li>
  *   <li>La validación de entrada (nombre, longitudes, rango de la tarifa) vive en el
@@ -136,6 +140,15 @@ public class Medico {
      */
     public void desactivar() {
         this.activo = false;
+    }
+
+    /**
+     * Reactivación lógica e idempotente: activar un médico que ya está activo no produce
+     * error. Devuelve el registro a la vida conservando sus horarios y sus asignaciones de
+     * consultorio, que son lo que se perdería con un alta nueva.
+     */
+    public void activar() {
+        this.activo = true;
     }
 
     public UUID getId() {

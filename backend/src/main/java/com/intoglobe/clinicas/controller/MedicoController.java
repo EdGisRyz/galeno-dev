@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.intoglobe.clinicas.dto.request.MedicoRequest;
@@ -52,7 +53,7 @@ import jakarta.validation.Valid;
  * cualquier proxy reverso.</p>
  *
  * <p><strong>Tenant y rol (R-SEG-04 a R-SEG-06, ADR-013):</strong> la cadena de filtros
- * exige {@code ADMIN} para crear, actualizar y desactivar, y admite {@code MEDICO} solo en
+ * exige {@code ADMIN} para crear, actualizar, desactivar y reactivar, y admite {@code MEDICO} solo en
  * las lecturas. El {@code organizacionId} del path se acepta únicamente si coincide con el
  * {@code tenantId} del token —{@link TenantAccessGuard} responde {@code 403} en caso
  * contrario, sin exención de {@code ADMIN}— y es el tenant del claim el que se propaga al
@@ -62,7 +63,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1")
-@Tag(name = "v1 · medicos", description = "Alta, consulta, actualización y baja lógica de médicos.")
+@Tag(name = "v1 · medicos", description = "Alta, consulta, actualización, baja lógica y reactivación de médicos.")
 public class MedicoController {
 
     private final MedicoService medicoService;
@@ -110,17 +111,19 @@ public class MedicoController {
      *
      * <p>La existencia del padre es parte del contrato de la ruta anidada: un id
      * inexistente responde 404 en vez de un {@code 200 []} que ocultaría el error del
-     * cliente. Esa comprobación vive en el service, no aquí. Los médicos dados de baja
-     * lógica quedan fuera del listado.</p>
+     * cliente. Esa comprobación vive en el service, no aquí. Por omisión el listado trae solo
+     * los médicos activos; {@code incluirInactivos} agrega los dados de baja para que la
+     * pantalla pueda ofrecer la reactivación en la misma fila (S8).</p>
      *
      * @param organizacionId organización dueña de los médicos, validada contra el token
-     * @return 200 con el arreglo de médicos activos
+     * @param incluirInactivos si se incluyen también los médicos dados de baja
+     * @return 200 con el arreglo de médicos
      */
     @GetMapping("/organizaciones/{organizacionId}/medicos")
-    @Operation(summary = "Listar médicos activos de una organización",
-            description = "Devuelve los médicos activos de la organización indicada, ordenados alfabéticamente por nombre.")
+    @Operation(summary = "Listar médicos de una organización",
+            description = "Devuelve los médicos activos de la organización indicada, ordenados alfabéticamente por nombre. Con incluirInactivos=true devuelve también los dados de baja.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Listado de médicos activos",
+            @ApiResponse(responseCode = "200", description = "Listado de médicos",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = MedicoResponse.class)))),
             @ApiResponse(responseCode = "400", description = "Identificador de la organización con formato inválido",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -129,9 +132,12 @@ public class MedicoController {
     })
     public ResponseEntity<List<MedicoResponse>> listarPorOrganizacion(
             @Parameter(description = "Identificador UUID de la organización cuyos médicos se listan.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
-            @PathVariable UUID organizacionId) {
+            @PathVariable UUID organizacionId,
+            @Parameter(description = "Incluye también los médicos dados de baja, para poder reactivarlos.")
+            @RequestParam(name = "incluirInactivos", defaultValue = "false") boolean incluirInactivos) {
         return ResponseEntity.ok(
-                medicoService.listarPorOrganizacion(tenantAccessGuard.exigirTenantDeLaRuta(organizacionId)));
+                medicoService.listarPorOrganizacion(
+                        tenantAccessGuard.exigirTenantDeLaRuta(organizacionId), incluirInactivos));
     }
 
     /**
@@ -217,6 +223,36 @@ public class MedicoController {
             @Parameter(description = "Identificador UUID del médico a desactivar.", example = "b1a2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
             @PathVariable UUID id) {
         medicoService.desactivar(id, tenantAccessGuard.tenantActual());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Reactiva un médico dado de baja lógica. Es idempotente: activar un médico que ya está
+     * activo sigue devolviendo 204 y no duplica la fila.
+     *
+     * <p>Es la vuelta que la baja lógica prometía: el mismo registro, con sus bloques de
+     * horario y sus asignaciones de consultorio, en lugar de un alta nueva que los perdería.
+     * No reactiva la cuenta de usuario del médico (S5); el acceso se cierra por {@code activo}
+     * del médico y una cuenta dada de baja sigue de baja.</p>
+     *
+     * @param id identificador del médico
+     * @return 204 sin cuerpo
+     */
+    @PostMapping("/medicos/{id}/activar")
+    @Operation(summary = "Reactivar médico",
+            description = "Revierte la baja lógica de un médico existente. La operación es idempotente y no devuelve cuerpo.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Médico reactivado, sin cuerpo",
+                    content = @Content),
+            @ApiResponse(responseCode = "400", description = "Identificador con formato inválido",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Médico inexistente",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<Void> activar(
+            @Parameter(description = "Identificador UUID del médico a reactivar.", example = "b1a2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
+            @PathVariable UUID id) {
+        medicoService.activar(id, tenantAccessGuard.tenantActual());
         return ResponseEntity.noContent().build();
     }
 }

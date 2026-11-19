@@ -36,6 +36,8 @@ const ORGANIZACION_ID = 'org-001';
 
 /** La colección cuelga de la organización: `GET/POST /organizaciones/{id}/consultorios`. */
 const RUTA_COLECCION = `/organizaciones/${ORGANIZACION_ID}/consultorios`;
+/** Listado con las bajas: es el que pide la pantalla para poder reactivarlas (S8). */
+const RUTA_LISTADO_CONSULTORIOS = `${RUTA_COLECCION}?incluirInactivos=true`;
 
 const CONSULTORIO: Consultorio = {
   id: 'con-0001',
@@ -81,7 +83,7 @@ describe('ConsultoriosPage · listado', () => {
     render(<ConsultoriosPage />);
 
     expect(await screen.findByText('Consultorio de prueba')).toBeInTheDocument();
-    expect(getMock).toHaveBeenCalledWith(RUTA_COLECCION);
+    expect(getMock).toHaveBeenCalledWith(RUTA_LISTADO_CONSULTORIOS);
   });
 });
 

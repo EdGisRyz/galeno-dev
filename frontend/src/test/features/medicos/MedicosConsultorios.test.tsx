@@ -38,7 +38,9 @@ function respuestaCon<T>(data: T): AxiosResponse<T> {
 
 const ORGANIZACION_ID = 'org-001';
 const RUTA_MEDICOS = `/organizaciones/${ORGANIZACION_ID}/medicos`;
-const RUTA_CONSULTORIOS = `/organizaciones/${ORGANIZACION_ID}/consultorios`;
+const RUTA_CONSULTORIOS = `/organizaciones/${ORGANIZACION_ID}/consultorios?incluirInactivos=true`;
+/** Listado con las bajas: es el que pide la pantalla para poder reactivarlas (S8). */
+const RUTA_LISTADO_MEDICOS = `${RUTA_MEDICOS}?incluirInactivos=true`;
 
 /** Consultorio principal del médico: es el que la asignación nunca deja retirar. */
 const PRINCIPAL: Consultorio = {
@@ -109,7 +111,7 @@ function cargarCon(opciones: {
   consultoriosDeLaOrganizacion?: Consultorio[];
 }) {
   getMock.mockImplementation((url: string) => {
-    if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
+    if (url === RUTA_LISTADO_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
     if (url === RUTA_CONSULTORIOS) {
       return Promise.resolve(
         respuestaCon(opciones.consultoriosDeLaOrganizacion ?? [PRINCIPAL, NORTE]),
@@ -161,7 +163,7 @@ describe('MedicosPage · consultorios asignados', () => {
     let asignadosEnElServidor: Consultorio[] = [PRINCIPAL];
     getMock.mockImplementation((url: string) => {
       if (url === RUTA_ASIGNADOS) return Promise.resolve(respuestaCon(asignadosEnElServidor));
-      if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
+      if (url === RUTA_LISTADO_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
       if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([PRINCIPAL, NORTE]));
       if (url === RUTA_HORARIOS) return Promise.resolve(respuestaCon([]));
       return Promise.reject(new Error(`URL inesperada: ${url}`));

@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.intoglobe.clinicas.dto.request.ConsultorioRequest;
 import com.intoglobe.clinicas.dto.response.ConsultorioResponse;
+import com.intoglobe.clinicas.exception.ConsultorioPrincipalConMedicoActivoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.security.ClaveRsaDePrueba;
 import com.intoglobe.clinicas.security.SecurityConfig;
@@ -126,7 +127,7 @@ class ConsultorioControllerTest {
     @Test
     @DisplayName("GET anidado devuelve 200 con el arreglo de consultorios activos")
     void listarPorOrganizacion_shouldReturn200WithArray() throws Exception {
-        when(consultorioService.listarPorOrganizacion(ORG_ID)).thenReturn(List.of(
+        when(consultorioService.listarPorOrganizacion(ORG_ID, false)).thenReturn(List.of(
                 respuesta(UUID.randomUUID(), ORG_ID, "Alfa Salud", null, null, true),
                 respuesta(UUID.randomUUID(), ORG_ID, "Beta Médica", null, null, true)));
 
@@ -141,9 +142,23 @@ class ConsultorioControllerTest {
     }
 
     @Test
+    @DisplayName("GET anidado con incluirInactivos=true propaga el parámetro al servicio (S8)")
+    void listarPorOrganizacion_shouldPassIncluirInactivos_whenRequested() throws Exception {
+        when(consultorioService.listarPorOrganizacion(ORG_ID, true)).thenReturn(List.of(
+                respuesta(UUID.randomUUID(), ORG_ID, "Beta En Refacción", null, null, false)));
+
+        perform(get("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID)
+                        .param("incluirInactivos", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].activo").value(false));
+        verify(consultorioService).listarPorOrganizacion(ORG_ID, true);
+    }
+
+    @Test
     @DisplayName("GET anidado con organización inexistente devuelve 404 con ErrorResponse")
     void listarPorOrganizacion_shouldReturn404WithErrorResponse_whenOrganizationIsMissing() throws Exception {
-        when(consultorioService.listarPorOrganizacion(ORG_ID))
+        when(consultorioService.listarPorOrganizacion(ORG_ID, false))
                 .thenThrow(new ResourceNotFoundException("Organizacion", ORG_ID));
 
         perform(get("/api/v1/organizaciones/{organizacionId}/consultorios", ORG_ID))
@@ -205,6 +220,38 @@ class ConsultorioControllerTest {
     }
 
     @Test
+    @DisplayName("POST /{id}/activar devuelve 204 sin cuerpo y es idempotente al repetirse")
+    void activar_shouldReturn204WithoutBody_andRemain204_whenRepeated() throws Exception {
+        perform(post("/api/v1/consultorios/{id}/activar", ID))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        perform(post("/api/v1/consultorios/{id}/activar", ID))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        verify(consultorioService, times(2)).activar(ID, ORG_ID);
+    }
+
+    @Test
+    @DisplayName("DELETE /{id} del principal de un médico activo devuelve 409 con ErrorResponse (S6)")
+    void desactivar_shouldReturn409_whenItIsThePrincipalOfAnActiveMedico() throws Exception {
+        var mensaje = ConsultorioPrincipalConMedicoActivoException
+                .porSerElPrincipalDeUnMedicoActivo().getMessage();
+        doThrow(ConsultorioPrincipalConMedicoActivoException.porSerElPrincipalDeUnMedicoActivo())
+                .when(consultorioService).desactivar(ID, ORG_ID);
+
+        perform(delete("/api/v1/consultorios/{id}", ID))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(mensaje))
+                .andExpect(jsonPath("$.mensaje",
+                        org.hamcrest.Matchers.containsString("Da de baja primero al médico")))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/consultorios/" + ID));
+    }
+
+    @Test
     @DisplayName("GET /{id} inexistente devuelve 404 con ErrorResponse")
     void buscarPorId_shouldReturn404WithErrorResponse_whenMissing() throws Exception {
         when(consultorioService.buscarPorId(ID, ORG_ID))
@@ -247,6 +294,20 @@ class ConsultorioControllerTest {
                 .andExpect(jsonPath("$.error").value("Not Found"))
                 .andExpect(jsonPath("$.mensaje").value(MENSAJE_CONSULTORIO_NO_ENCONTRADO))
                 .andExpect(jsonPath("$.ruta").value("/api/v1/consultorios/" + ID));
+    }
+
+    @Test
+    @DisplayName("POST /{id}/activar inexistente devuelve 404 con ErrorResponse")
+    void activar_shouldReturn404_whenMissing() throws Exception {
+        doThrow(new ResourceNotFoundException("Consultorio", ID))
+                .when(consultorioService).activar(ID, ORG_ID);
+
+        perform(post("/api/v1/consultorios/{id}/activar", ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.codigo").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.mensaje").value(MENSAJE_CONSULTORIO_NO_ENCONTRADO))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/consultorios/" + ID + "/activar"));
     }
 
     @Test

@@ -32,7 +32,9 @@ const postMock = vi.mocked(api.post);
 
 const ORGANIZACION_ID = 'org-001';
 const RUTA_MEDICOS = `/organizaciones/${ORGANIZACION_ID}/medicos`;
-const RUTA_CONSULTORIOS = `/organizaciones/${ORGANIZACION_ID}/consultorios`;
+const RUTA_CONSULTORIOS = `/organizaciones/${ORGANIZACION_ID}/consultorios?incluirInactivos=true`;
+/** Listado con las bajas: es el que pide la pantalla para poder reactivarlas (S8). */
+const RUTA_LISTADO_MEDICOS = `${RUTA_MEDICOS}?incluirInactivos=true`;
 
 /** Motivo que el backend adjunta al 409 de la cédula repetida. */
 const MENSAJE_DUPLICADO =
@@ -83,7 +85,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
 
   getMock.mockImplementation((url: string) => {
-    if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon<Medico[]>([MEDICO]));
+    if (url === RUTA_LISTADO_MEDICOS) return Promise.resolve(respuestaCon<Medico[]>([MEDICO]));
     if (url === RUTA_CONSULTORIOS) {
       return Promise.resolve(respuestaCon<Consultorio[]>([CONSULTORIO]));
     }

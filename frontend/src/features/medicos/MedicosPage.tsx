@@ -33,6 +33,7 @@ import {
   IdCard,
   Pencil,
   Trash2,
+  UserCheck,
   Loader2,
   RefreshCw,
   Clock,
@@ -46,6 +47,8 @@ const MENSAJE_ERROR_GUARDADO =
   'No fue posible guardar el médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_BAJA =
   'No fue posible desactivar el médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
+const MENSAJE_ERROR_REACTIVAR =
+  'No fue posible reactivar al médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_HORARIOS =
   'No fue posible obtener los horarios de este médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_HORARIO_BAJA =
@@ -122,6 +125,7 @@ export function MedicosPage() {
   // los dos casos dejaría el de la baja dentro de un modal que ya no está en pantalla.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [bajaError, setBajaError] = useState<string | null>(null);
+  const [reactivarError, setReactivarError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
@@ -168,19 +172,34 @@ export function MedicosPage() {
    * a la suya), y la condición que decide si el botón «Horarios» aparece en la fila.
    *
    * Ofrecerlo en una fila ajena a un médico abría un panel que el servicio rechaza con 403 y la
-   * pantalla contaba ese rechazo como un problema de conexión (S4).
+   * pantalla contaba ese rechazo como un problema de conexión (S4). Tampoco se ofrece para un
+   * médico dado de baja: su agenda no es editable (S10), así que el botón llevaría a un 409
+   * predecible.
    */
   const puedeConsultarAgendaDe = (medicoId: string) =>
     rolDeSesion === 'ADMIN' ||
     rolDeSesion === 'RECEPCIONISTA' ||
     (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medicoId);
 
+  /**
+   * El botón «Horarios» necesita las dos mitades: poder leer la agenda y que el médico esté activo.
+   *
+   * @param medico médico de la fila
+   * @returns si la fila ofrece abrir su panel de horarios
+   */
+  const puedeAbrirAgendaDe = (medico: Medico) =>
+    medico.activo && puedeConsultarAgendaDe(medico.id);
+
   // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
-  // render, el efecto se dispararía en bucle.
+  // render, el efecto se dispararía en bucle. Los médicos se piden con `incluirInactivos=true`
+  // (S8): sin los dados de baja, el recién desactivado desaparece de la tabla y el botón
+  // «Reactivar» queda inalcanzable. Los consultorios también se piden con las bajas (S12): la
+  // columna de la fila muestra *su* consultorio aunque esté inactivo; vaciarla borraba el dato
+  // que la fila tiene que comunicar.
   const loadData = useCallback((ruta: string, rutaConsultorios: string | null) => {
     return Promise.all([
-      api.get<Medico[]>(ruta),
-      rutaConsultorios ? api.get<Consultorio[]>(rutaConsultorios) : null,
+      api.get<Medico[]>(`${ruta}?incluirInactivos=true`),
+      rutaConsultorios ? api.get<Consultorio[]>(`${rutaConsultorios}?incluirInactivos=true`) : null,
     ])
       .then(([medicosRes, consultoriosRes]) => {
         setMedicos(medicosRes.data);
@@ -226,7 +245,7 @@ export function MedicosPage() {
 
   const openCreateModal = () => {
     setEditingId(null);
-    setForm({ ...EMPTY_FORM, consultorioId: consultorios[0]?.id || '' });
+    setForm({ ...EMPTY_FORM, consultorioId: consultoriosDisponibles[0]?.id || '' });
     setErroresForm({});
     setSaveError(null);
     setIsModalOpen(true);
@@ -306,8 +325,33 @@ export function MedicosPage() {
     }
   };
 
-  // No hay botón "Activar": el backend no expone reactivación (MedicoController solo tiene
-  // crear/listar/buscar/actualizar/desactivar). Misma brecha señalada en Consultorios (HU3-5).
+  /**
+   * Reactivación de una baja lógica (S4): `POST /medicos/{id}/activar` responde 204 sin cuerpo, así
+   * que la fila se marca activa en el estado local. Un rechazo del backend —por ejemplo, el
+   * consultorio principal dado de baja (S7)— se muestra con su mensaje, porque es lo único que
+   * dice qué hacer antes de reintentar.
+   */
+  const handleReactivar = async (medico: Medico) => {
+    setReactivarError(null);
+    try {
+      await api.post(`/medicos/${medico.id}/activar`);
+      setMedicos((prev) =>
+        prev.map((m) => (m.id === medico.id ? { ...m, activo: true } : m)),
+      );
+      setAlertNotice('Médico reactivado correctamente.');
+      programarOcultarAviso();
+    } catch (err) {
+      console.error('Error al reactivar médico:', resumenDeErrorHttp(err));
+      setReactivarError(mensajeDelBackend(err, MENSAJE_ERROR_REACTIVAR));
+    }
+  };
+
+  /**
+   * Baja lógica del médico: `DELETE /medicos/{id}` responde 204 sin cuerpo y el servicio solo apaga
+   * el registro, así que la fila se marca inactiva y aparece la acción para reactivarlo. El mensaje
+   * del backend, si lo hay, se muestra tal cual: un rechazo de negocio explica mejor el motivo que
+   * el texto de conexión.
+   */
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
     setBajaError(null);
@@ -322,7 +366,7 @@ export function MedicosPage() {
     } catch (err) {
       console.error('Error al desactivar médico:', resumenDeErrorHttp(err));
       setAlertNotice(null);
-      setBajaError(MENSAJE_ERROR_BAJA);
+      setBajaError(mensajeDelBackend(err, MENSAJE_ERROR_BAJA));
     } finally {
       setIsDeactivating(false);
       setDeactivatingId(null);
@@ -451,14 +495,22 @@ export function MedicosPage() {
     e.preventDefault();
     if (!horariosDeId) return;
 
+    const bloqueOriginal = horarios.find((h) => h.id === editingHorarioId);
+    const conservaElConsultorioDelBloque =
+      bloqueOriginal !== undefined && bloqueOriginal.consultorioId === horarioForm.consultorioId;
+
     const payload = {
       diaSemana: Number(horarioForm.diaSemana),
       horaInicio: `${horarioForm.horaInicio}:00`,
       horaFin: `${horarioForm.horaFin}:00`,
       duracionConsulta: Number(horarioForm.duracionConsulta),
       // Opcional en el backend: sin él el alta usa el principal y la edición conserva el actual.
-      // La pantalla siempre manda el elegido, para que el bloque diga dónde se atiende.
-      ...(horarioForm.consultorioId ? { consultorioId: horarioForm.consultorioId } : {}),
+      // Al editar se omite cuando no cambió: reenviar el mismo consultorio cuenta como mover el
+      // bloque y, si está dado de baja, el backend responde 409 (S11). Corregir la hora no es
+      // moverlo (S13).
+      ...(horarioForm.consultorioId && !conservaElConsultorioDelBloque
+        ? { consultorioId: horarioForm.consultorioId }
+        : {}),
     };
 
     try {
@@ -505,10 +557,28 @@ export function MedicosPage() {
     }
   };
 
-  // Solo los consultorios de la organización que todavía no están asignados pueden ofrecerse: la
-  // lista de asignados es un conjunto, no un historial.
+  // El directorio trae también los consultorios dados de baja para nombrarlos en la tabla (S12),
+  // pero asignar o abrir un médico en una sala cerrada no es una opción que la pantalla deba
+  // ofrecer: los selectores usan solo los activos. Es un filtro barato sobre la misma lectura.
+  const consultoriosDisponibles = consultorios.filter((c) => c.activo);
+
+  // Selector del bloque (S13): solo los consultorios asignados que están activos, porque el backend
+  // rechaza con 409 un bloque en un consultorio de baja. La excepción es la edición: el consultorio
+  // actual del bloque se muestra aunque esté inactivo — corregir la hora no es moverlo, y sin esa
+  // opción el campo quedaría con un valor fuera de la lista.
+  const consultoriosActivosAsignados = consultoriosAsignados.filter((c) => c.activo);
+  const consultorioActualDelBloque = consultoriosAsignados.find(
+    (c) => c.id === horarioForm.consultorioId,
+  );
+  const consultoriosDelBloque =
+    editingHorarioId && consultorioActualDelBloque && !consultorioActualDelBloque.activo
+      ? [...consultoriosActivosAsignados, consultorioActualDelBloque]
+      : consultoriosActivosAsignados;
+
+  // Solo los consultorios activos de la organización que todavía no están asignados pueden
+  // ofrecerse: la lista de asignados es un conjunto, no un historial.
   const consultoriosPorAsignar = useMemo(
-    () => consultorios.filter((c) => !consultoriosAsignados.some((a) => a.id === c.id)),
+    () => consultorios.filter((c) => c.activo && !consultoriosAsignados.some((a) => a.id === c.id)),
     [consultorios, consultoriosAsignados],
   );
 
@@ -558,7 +628,7 @@ export function MedicosPage() {
             variant="primary"
             size="sm"
             onClick={openCreateModal}
-            disabled={consultorios.length === 0}
+            disabled={consultoriosDisponibles.length === 0}
             leftIcon={<Plus className="w-4 h-4 text-[#88BDDC]" />}
           >
             Nuevo Médico
@@ -576,6 +646,11 @@ export function MedicosPage() {
       {bajaError && (
         <Alert variant="error" title="No se pudo desactivar el médico">
           {bajaError}
+        </Alert>
+      )}
+      {reactivarError && (
+        <Alert variant="error" title="No se pudo reactivar al médico">
+          {reactivarError}
         </Alert>
       )}
 
@@ -723,7 +798,7 @@ export function MedicosPage() {
 
                   <TableCell className="text-right">
                     <div className="inline-flex items-center gap-1.5">
-                      {puedeConsultarAgendaDe(m.id) && (
+                      {puedeAbrirAgendaDe(m) && (
                         <button
                           type="button"
                           onClick={() => openHorarios(m.id)}
@@ -745,6 +820,17 @@ export function MedicosPage() {
                             <Pencil className="w-3.5 h-3.5 text-[#88BDDC]" />
                             <span className="hidden sm:inline">Editar</span>
                           </button>
+                          {!m.activo && (
+                            <button
+                              type="button"
+                              onClick={() => handleReactivar(m)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#059669] text-white hover:bg-[#047857] text-xs font-medium transition-all shadow-2xs"
+                              title="Reactivar médico"
+                            >
+                              <UserCheck className="w-3.5 h-3.5 text-[#D1FAE5]" />
+                              <span className="hidden sm:inline">Reactivar</span>
+                            </button>
+                          )}
                           {m.activo && (
                             <button
                               type="button"
@@ -777,7 +863,7 @@ export function MedicosPage() {
                       </p>
                       {puedeEditarMedicos && (
                         <p className="text-[#94A3B8]">
-                          {consultorios.length === 0
+                          {consultoriosDisponibles.length === 0
                             ? 'Da de alta un consultorio primero: un médico siempre necesita uno asignado.'
                             : 'Da de alta al primer médico con el botón «Nuevo Médico».'}
                         </p>
@@ -814,7 +900,7 @@ export function MedicosPage() {
             label="Consultorio"
             value={form.consultorioId}
             onChange={(e) => setForm((f) => ({ ...f, consultorioId: e.target.value }))}
-            options={consultorios.map((c) => ({ value: c.id, label: c.nombre }))}
+            options={consultoriosDisponibles.map((c) => ({ value: c.id, label: c.nombre }))}
             placeholder="Selecciona..."
             required
             disabled={editingId !== null}
@@ -891,8 +977,8 @@ export function MedicosPage() {
         maxWidth="sm"
       >
         <p className="text-sm text-[#41484D]">
-          ¿Desactivar <strong>{medicoADesactivar?.nombre}</strong>? El sistema todavía no ofrece
-          una forma de reactivarlo: confírmalo solo si estás seguro.
+          ¿Desactivar <strong>{medicoADesactivar?.nombre}</strong>? Dejará de estar disponible
+          para nuevas citas y podrás reactivarlo desde esta misma pantalla cuando vuelva.
         </p>
         <div className="flex justify-end gap-2 pt-5">
           <Button type="button" variant="outline" onClick={() => setDeactivatingId(null)}>
@@ -1144,11 +1230,10 @@ export function MedicosPage() {
                 label="Consultorio del bloque"
                 value={horarioForm.consultorioId}
                 onChange={(e) => setHorarioForm((f) => ({ ...f, consultorioId: e.target.value }))}
-                // Solo los asignados: el backend rechaza con 409 un bloque en un consultorio que el
-                // médico no tiene. Si la lista no llegó, el campo queda vacío y el alta usa el
-                // principal, igual que el contrato.
-                options={consultoriosAsignados.map((c) => ({ value: c.id, label: c.nombre }))}
-                disabled={consultoriosAsignados.length === 0}
+                // Solo los asignados activos (S13) más el actual del bloque en edición: el backend
+                // rechaza con 409 un consultorio de baja para crear o mover un bloque.
+                options={consultoriosDelBloque.map((c) => ({ value: c.id, label: c.nombre }))}
+                disabled={consultoriosDelBloque.length === 0}
               />
               <Select
                 label="Día"

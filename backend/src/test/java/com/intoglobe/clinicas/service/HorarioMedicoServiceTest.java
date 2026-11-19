@@ -17,6 +17,8 @@ import org.springframework.security.access.AccessDeniedException;
 
 import com.intoglobe.clinicas.dto.request.HorarioMedicoRequest;
 import com.intoglobe.clinicas.dto.response.HorarioMedicoResponse;
+import com.intoglobe.clinicas.exception.AgendaDeMedicoInactivoException;
+import com.intoglobe.clinicas.exception.ConsultorioInactivoParaBloqueException;
 import com.intoglobe.clinicas.exception.ConsultorioNoAsignadoAlMedicoException;
 import com.intoglobe.clinicas.exception.DuracionConsultaInvalidaException;
 import com.intoglobe.clinicas.exception.RangoHorarioInvalidoException;
@@ -942,6 +944,125 @@ class HorarioMedicoServiceTest {
         verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
         assertThat(horario.getConsultorio()).isSameAs(principal);
         assertThat(horario.getDiaSemana()).isEqualTo(LUNES);
+    }
+
+    @Test
+    @DisplayName("crear en la agenda de un médico dado de baja responde 409 y no guarda (S10)")
+    void crear_shouldThrowAgendaDeMedicoInactivo_whenMedicoIsInactive() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId));
+        medico.desactivar();
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+
+        assertThatThrownBy(() -> horarioMedicoService.crear(adminDe(tenantId), medicoId, request))
+                .isInstanceOf(AgendaDeMedicoInactivoException.class)
+                .hasMessageContaining("Reactiva primero al médico");
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+        verify(horarioMedicoRepository, never()).contarSolapamientos(any(UUID.class), any(UUID.class),
+                anyShort(), any(LocalTime.class), any(LocalTime.class), any(UUID.class));
+    }
+
+    @Test
+    @DisplayName("crear en un consultorio dado de baja responde 409 y no guarda (S11)")
+    void crear_shouldThrowConsultorioInactivo_whenTheTargetConsultorioIsInactive() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId));
+        medico.getConsultorio().desactivar();
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        when(horarioMedicoRepository.contarSolapamientos(any(UUID.class), any(UUID.class), anyShort(),
+                any(LocalTime.class), any(LocalTime.class), any(UUID.class))).thenReturn(0L);
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+
+        assertThatThrownBy(() -> horarioMedicoService.crear(adminDe(tenantId), medicoId, request))
+                .isInstanceOf(ConsultorioInactivoParaBloqueException.class)
+                .hasMessageContaining("Reactiva primero el consultorio");
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("crear se permite cuando el consultorio pedido está activo y asignado (S11)")
+    void crear_shouldPersist_whenTheTargetConsultorioIsActive() {
+        var tenantId = UUID.randomUUID();
+        var medicoId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), medicoId);
+        var norte = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        when(medicoRepository.findById(medicoId)).thenReturn(Optional.of(medico));
+        when(consultorioRepository.buscarPorIdYOrganizacion(norte.getId(), tenantId))
+                .thenReturn(Optional.of(norte));
+        var asignacionAlNorte = new MedicoConsultorio(medico, norte, medico.getOrganizacion());
+        when(medicoConsultorioRepository.buscarAsignacion(medicoId, norte.getId(), tenantId))
+                .thenReturn(Optional.of(asignacionAlNorte));
+        when(horarioMedicoRepository.contarSolapamientos(any(UUID.class), any(UUID.class), anyShort(),
+                any(LocalTime.class), any(LocalTime.class), any(UUID.class))).thenReturn(0L);
+        when(horarioMedicoRepository.save(any(HorarioMedico.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA, norte.getId());
+
+        var respuesta = horarioMedicoService.crear(adminDe(tenantId), medicoId, request);
+
+        assertThat(respuesta.consultorioId()).isEqualTo(norte.getId());
+        assertThat(respuesta.consultorioNombre()).isEqualTo("Consultorio Norte");
+        verify(horarioMedicoRepository).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("actualizar un bloque de un médico dado de baja responde 409 y no guarda (S10)")
+    void actualizar_shouldThrowAgendaDeMedicoInactivo_whenMedicoIsInactive() {
+        var tenantId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), UUID.randomUUID());
+        var horario = horarioConId(medico, LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+        medico.desactivar();
+        when(horarioMedicoRepository.findById(horario.getId())).thenReturn(Optional.of(horario));
+        var request = request(LUNES, NUEVE, ONCE, DURACION_TREINTA);
+
+        assertThatThrownBy(() -> horarioMedicoService.actualizar(adminDe(tenantId), horario.getId(), request))
+                .isInstanceOf(AgendaDeMedicoInactivoException.class)
+                .hasMessageContaining("Reactiva primero al médico");
+        assertThat(horario.getHoraFin())
+                .as("un rechazo no debe mover el bloque")
+                .isEqualTo(DIEZ);
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("mover un bloque a un consultorio dado de baja responde 409 y no guarda (S11)")
+    void actualizar_shouldThrowConsultorioInactivo_whenMovingToAnInactiveConsultorio() {
+        var tenantId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), UUID.randomUUID());
+        var norte = consultorioConId(medico.getOrganizacion(), "Consultorio Norte");
+        norte.desactivar();
+        var horario = horarioConId(medico, LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+        when(horarioMedicoRepository.findById(horario.getId())).thenReturn(Optional.of(horario));
+        when(consultorioRepository.buscarPorIdYOrganizacion(norte.getId(), tenantId))
+                .thenReturn(Optional.of(norte));
+        when(horarioMedicoRepository.contarSolapamientos(any(UUID.class), any(UUID.class), anyShort(),
+                any(LocalTime.class), any(LocalTime.class), any(UUID.class))).thenReturn(0L);
+        var request = request(LUNES, NUEVE, DIEZ, DURACION_TREINTA, norte.getId());
+
+        assertThatThrownBy(() -> horarioMedicoService.actualizar(adminDe(tenantId), horario.getId(), request))
+                .isInstanceOf(ConsultorioInactivoParaBloqueException.class)
+                .hasMessageContaining("Reactiva primero el consultorio");
+        assertThat(horario.getConsultorio().getId())
+                .as("un rechazo no debe mover el bloque de consultorio")
+                .isEqualTo(medico.getConsultorio().getId());
+        verify(horarioMedicoRepository, never()).save(any(HorarioMedico.class));
+    }
+
+    @Test
+    @DisplayName("eliminar el bloque de un médico dado de baja se permite: hay que poder limpiar (S10)")
+    void eliminar_shouldAllowDeletingAblock_whenTheMedicoIsInactive() {
+        var tenantId = UUID.randomUUID();
+        var medico = medicoEn(organizacionConId(tenantId), UUID.randomUUID());
+        var horario = horarioConId(medico, LUNES, NUEVE, DIEZ, DURACION_TREINTA);
+        medico.desactivar();
+        when(horarioMedicoRepository.findById(horario.getId())).thenReturn(Optional.of(horario));
+
+        horarioMedicoService.eliminar(adminDe(tenantId), horario.getId());
+
+        verify(horarioMedicoRepository).delete(horario);
     }
 
     /**

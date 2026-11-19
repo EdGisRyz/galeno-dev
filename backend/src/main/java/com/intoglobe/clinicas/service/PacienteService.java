@@ -224,10 +224,6 @@ public class PacienteService {
      * dos identificadores: las citas y los adjuntos anteriores quedarían colgados del
      * viejo.</p>
      *
-     * <p><strong>Deuda declarada:</strong> {@code medico} y {@code consultorio} solo
-     * tienen {@code desactivar} y todavía no ofrecen la operación simétrica de
-     * reactivación; este módulo no la agrega para ellos.</p>
-     *
      * @param id       identificador del paciente a reactivar
      * @param tenantId organización del token de la petición
      * @throws ResourceNotFoundException si no existe un paciente con ese id en ese tenant

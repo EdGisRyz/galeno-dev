@@ -40,7 +40,9 @@ function respuestaCon<T>(data: T): AxiosResponse<T> {
 
 const ORGANIZACION_ID = 'org-001';
 const RUTA_MEDICOS = `/organizaciones/${ORGANIZACION_ID}/medicos`;
-const RUTA_CONSULTORIOS = `/organizaciones/${ORGANIZACION_ID}/consultorios`;
+const RUTA_CONSULTORIOS = `/organizaciones/${ORGANIZACION_ID}/consultorios?incluirInactivos=true`;
+/** Listado con las bajas: es el que pide la pantalla para poder reactivarlas (S8). */
+const RUTA_LISTADO_MEDICOS = `${RUTA_MEDICOS}?incluirInactivos=true`;
 
 const CONSULTORIO: Consultorio = {
   id: 'con-0001',
@@ -94,7 +96,7 @@ const RUTA_CONSULTORIOS_ASIGNADOS = `/medicos/${MEDICO.id}/consultorios`;
 /** Deja listas las cuatro lecturas de la pantalla: médicos, consultorios, asignados y una agenda. */
 function cargarCon(horarios: HorarioMedico[] = [], medicos: Medico[] = [MEDICO]) {
   getMock.mockImplementation((url: string) => {
-    if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon(medicos));
+    if (url === RUTA_LISTADO_MEDICOS) return Promise.resolve(respuestaCon(medicos));
     if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
     if (url === RUTA_CONSULTORIOS_ASIGNADOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
     if (url === RUTA_HORARIOS) return Promise.resolve(respuestaCon(horarios));
@@ -145,7 +147,7 @@ describe('MedicosPage · listado', () => {
 
     expect(await screen.findByText('Médico de prueba')).toBeInTheDocument();
     expect(screen.getByText('Consultorio de prueba')).toBeInTheDocument();
-    expect(getMock).toHaveBeenCalledWith(RUTA_MEDICOS);
+    expect(getMock).toHaveBeenCalledWith(RUTA_LISTADO_MEDICOS);
   });
 });
 
@@ -179,7 +181,7 @@ describe('MedicosPage · estados de carga', () => {
     getMock
       .mockRejectedValueOnce(new Error('sin conexión'))
       .mockImplementation((url: string) => {
-        if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
+        if (url === RUTA_LISTADO_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
         if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
         return Promise.resolve(respuestaCon([]));
       });
@@ -375,7 +377,7 @@ describe('MedicosPage · horarios según el rol', () => {
   it('muestra el mensaje del backend cuando el rechazo de la agenda no es de red (S4)', async () => {
     abrirSesion('MEDICO', MEDICO.id);
     getMock.mockImplementation((url: string) => {
-      if (url === RUTA_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
+      if (url === RUTA_LISTADO_MEDICOS) return Promise.resolve(respuestaCon([MEDICO]));
       if (url === RUTA_CONSULTORIOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
       if (url === RUTA_CONSULTORIOS_ASIGNADOS) return Promise.resolve(respuestaCon([CONSULTORIO]));
       if (url === RUTA_HORARIOS) {

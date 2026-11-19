@@ -145,6 +145,35 @@ class MedicoRepositoryTest {
     }
 
     @Test
+    void listarPorOrganizacion_shouldIncludeInactiveAndSortByName() {
+        var organizacion = persistirOrganizacion("Clínica Con Bajas");
+        var otraOrganizacion = persistirOrganizacion("Clínica Ajena Con Bajas");
+        var consultorio = persistirConsultorio(organizacion, "Consultorio Con Bajas");
+        var consultorioAjeno = persistirConsultorio(otraOrganizacion, "Consultorio Ajeno Con Bajas");
+        var zeta = new Medico(organizacion, consultorio, "Zeta Médico", null, null, null, null);
+        var inactivo = new Medico(organizacion, consultorio, "Alfa Médico", null, null, null, null);
+        inactivo.desactivar();
+        var ajeno = new Medico(otraOrganizacion, consultorioAjeno, "Médico Ajeno", null, null, null, null);
+        entityManager.persist(zeta);
+        entityManager.persist(inactivo);
+        entityManager.persist(ajeno);
+        entityManager.flush();
+        entityManager.clear();
+
+        var todos = medicoRepository.listarPorOrganizacion(organizacion.getId());
+
+        assertThat(todos)
+                .extracting(Medico::getNombre)
+                .containsExactly("Alfa Médico", "Zeta Médico");
+        assertThat(todos)
+                .extracting(Medico::getId)
+                .doesNotContain(ajeno.getId());
+        assertThat(todos)
+                .as("el listado con bajas tiene que traer al médico inactivo")
+                .anyMatch(medico -> !medico.isActivo());
+    }
+
+    @Test
     void desactivar_shouldBeIdempotentAndRemoveFromActiveListing() {
         var organizacion = persistirOrganizacion("Clínica Baja");
         var consultorio = persistirConsultorio(organizacion, "Consultorio Baja");

@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.intoglobe.clinicas.dto.request.HorarioMedicoRequest;
 import com.intoglobe.clinicas.dto.response.HorarioMedicoResponse;
+import com.intoglobe.clinicas.exception.AgendaDeMedicoInactivoException;
+import com.intoglobe.clinicas.exception.ConsultorioInactivoParaBloqueException;
 import com.intoglobe.clinicas.exception.ConsultorioNoAsignadoAlMedicoException;
 import com.intoglobe.clinicas.exception.DuracionConsultaInvalidaException;
 import com.intoglobe.clinicas.exception.RangoHorarioInvalidoException;
@@ -47,11 +49,13 @@ import com.intoglobe.clinicas.security.AuthenticatedUser;
  *       antes que cualquier regla del cuerpo, para no revelar que existe—,</li>
  *   <li>propiedad de la agenda —un {@code MEDICO} que opera sobre la agenda de otro médico
  *       recibe 403—,</li>
+ *   <li>estado del médico —dado de baja, crear o actualizar responde 409 (S10); borrar se
+ *       permite, porque hay que poder limpiar datos—,</li>
  *   <li>rango horario: {@code horaInicio} estrictamente anterior a {@code horaFin},</li>
  *   <li>duración de consulta dentro de {@code {20, 30, 45, 60}},</li>
  *   <li>solapamiento con otro bloque del mismo médico y día,</li>
- *   <li>consultorio del bloque: inexistente en el tenant (404) o no asignado al médico
- *       (409),</li>
+ *   <li>consultorio del bloque: inexistente en el tenant (404), dado de baja (409, S11) o no
+ *       asignado al médico (409),</li>
  *   <li>persistir.</li>
  * </ol>
  *
@@ -171,6 +175,7 @@ public class HorarioMedicoService {
      *                                          organización del token
      * @throws AccessDeniedException            si el actor es {@code MEDICO} y la agenda no
      *                                          es la suya
+     * @throws AgendaDeMedicoInactivoException  si el médico está dado de baja (S10)
      * @throws RangoHorarioInvalidoException    si {@code horaInicio} no es estrictamente
      *                                          anterior a {@code horaFin}
      * @throws DuracionConsultaInvalidaException si la duración no es una de
@@ -179,6 +184,8 @@ public class HorarioMedicoService {
      *                                          médico y día
      * @throws ResourceNotFoundException        si el {@code consultorioId} del cuerpo no existe
      *                                          en la organización del token
+     * @throws ConsultorioInactivoParaBloqueException si el consultorio —pedido o principal— está
+     *                                          dado de baja (S11)
      * @throws ConsultorioNoAsignadoAlMedicoException si el consultorio —el pedido o el principal
      *                                          del médico— no está asignado a ese médico
      */
@@ -187,6 +194,7 @@ public class HorarioMedicoService {
             HorarioMedicoRequest request) {
         var medico = medicoDelTenant(actor, medicoId);
         exigirPropiedadDeLaAgenda(actor, medicoId);
+        exigirMedicoActivo(medico);
         validarRango(request.horaInicio(), request.horaFin());
         validarDuracion(request.duracionConsulta());
         comprobarSolapamiento(actor, medicoId, request.diaSemana(), request.horaInicio(),
@@ -267,11 +275,15 @@ public class HorarioMedicoService {
      *                                          existe en ella
      * @throws AccessDeniedException            si el actor es {@code MEDICO} y el bloque no
      *                                          es de su agenda
+     * @throws AgendaDeMedicoInactivoException  si el médico dueño del bloque está dado de baja
+     *                                          (S10)
      * @throws RangoHorarioInvalidoException    si el rango enviado es inválido
      * @throws DuracionConsultaInvalidaException si la duración no es una de
      *                                          {@code {20, 30, 45, 60}}
      * @throws SolapamientoDeHorarioException   si el bloque se solapa con otro del mismo
      *                                          médico y día
+     * @throws ConsultorioInactivoParaBloqueException si el consultorio destino del movimiento
+     *                                          está dado de baja (S11)
      * @throws ConsultorioNoAsignadoAlMedicoException si el consultorio pedido no está asignado
      *                                          al médico del bloque
      */
@@ -281,6 +293,7 @@ public class HorarioMedicoService {
         var horario = buscarEnElTenant(actor, id);
         var medicoId = horario.getMedico().getId();
         exigirPropiedadDeLaAgenda(actor, medicoId);
+        exigirMedicoActivo(horario.getMedico());
         validarRango(request.horaInicio(), request.horaFin());
         validarDuracion(request.duracionConsulta());
         comprobarSolapamiento(actor, medicoId, request.diaSemana(), request.horaInicio(),
@@ -326,12 +339,18 @@ public class HorarioMedicoService {
      * integridad en un {@code 409} que dice qué hacer. La consulta de la asignación ya está
      * acotada por organización, así que el par de otra clínica tampoco puede colarse por esta vía.</p>
      *
+     * <p>Además, el consultorio tiene que estar <strong>activo</strong> (S11): agendar en una sala
+     * dada de baja vuelve a dejar la agenda apuntando a un consultorio cerrado. La comprobación va
+     * antes que la de asignación porque es la que el administrador tiene que resolver primero —
+     * asignar un consultorio inactivo no arreglaría nada—.</p>
+     *
      * @param actor         usuario autenticado de la petición, del que sale la organización
      * @param medico        médico dueño del bloque, ya resuelto en el tenant
      * @param consultorioId consultorio pedido, o {@code null} para el principal del médico
      * @return el consultorio donde se dictará el bloque
      * @throws ResourceNotFoundException              si el consultorio pedido no existe en la
      *                                                organización del token
+     * @throws ConsultorioInactivoParaBloqueException si el consultorio está dado de baja
      * @throws ConsultorioNoAsignadoAlMedicoException si el consultorio no está asignado al médico
      */
     private Consultorio consultorioAsignado(AuthenticatedUser actor, Medico medico, UUID consultorioId) {
@@ -339,12 +358,40 @@ public class HorarioMedicoService {
                 ? medico.getConsultorio()
                 : consultorioRepository.buscarPorIdYOrganizacion(consultorioId, actor.tenantId())
                         .orElseThrow(() -> new ResourceNotFoundException("Consultorio", consultorioId));
+        exigirConsultorioActivo(consultorio);
         if (medicoConsultorioRepository
                 .buscarAsignacion(medico.getId(), consultorio.getId(), actor.tenantId()).isEmpty()) {
             throw ConsultorioNoAsignadoAlMedicoException.porNoEstarAsignado(medico.getId(),
                     consultorio.getId());
         }
         return consultorio;
+    }
+
+    /**
+     * Exige que el médico esté activo para poder crear o modificar su agenda (S10).
+     *
+     * <p>El borrado no pasa por aquí a propósito: un médico que ya no atiende tiene que poder
+     * limpiar sus bloques, y bloquearlo dejaría registros imposibles de corregir.</p>
+     *
+     * @param medico médico dueño de la agenda, ya resuelto en el tenant
+     * @throws AgendaDeMedicoInactivoException si el médico está dado de baja
+     */
+    private static void exigirMedicoActivo(Medico medico) {
+        if (!medico.isActivo()) {
+            throw AgendaDeMedicoInactivoException.porSerDeUnMedicoDadoDeBaja();
+        }
+    }
+
+    /**
+     * Exige que el consultorio donde se dictará el bloque esté activo (S11).
+     *
+     * @param consultorio consultorio destino del bloque
+     * @throws ConsultorioInactivoParaBloqueException si el consultorio está dado de baja
+     */
+    private static void exigirConsultorioActivo(Consultorio consultorio) {
+        if (!consultorio.isActivo()) {
+            throw ConsultorioInactivoParaBloqueException.porEstarDadoDeBaja();
+        }
     }
 
     /**

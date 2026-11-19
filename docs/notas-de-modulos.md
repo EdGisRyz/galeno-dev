@@ -422,15 +422,22 @@ Módulo 02 con alcance **COMPLETO** (GAL-001 sección 6): dominio, repositorio, 
 integración, DTOs, mapper, service, tests unitarios, controller, tests MVC y estas
 notas. Es el molde de los módulos 3-10.
 
-Expone cinco endpoints bajo `/api/v1`:
+Expone seis endpoints bajo `/api/v1`:
 
 | Método | Ruta | Respuesta |
 |---|---|---|
 | `POST` | `/api/v1/organizaciones/{organizacionId}/consultorios` | 201 + `Location` |
-| `GET` | `/api/v1/organizaciones/{organizacionId}/consultorios` | 200 (solo activos, por nombre) |
+| `GET` | `/api/v1/organizaciones/{organizacionId}/consultorios` | 200 (solo activos, por nombre; `?incluirInactivos=true` agrega los dados de baja) |
 | `GET` | `/api/v1/consultorios/{id}` | 200 |
 | `PUT` | `/api/v1/consultorios/{id}` | 200 |
 | `DELETE` | `/api/v1/consultorios/{id}` | 204 (baja lógica, idempotente) |
+| `POST` | `/api/v1/consultorios/{id}/activar` | 204 (reactivación, idempotente) |
+
+La reactivación es solo de `ADMIN`, como el resto de las escrituras de consultorio, y un
+identificador de otra organización responde `404` igual que uno inexistente: la consulta va
+acotada por el tenant. [Probada: `ConsultorioServiceTest` (reactiva y repite sin error),
+`ConsultorioControllerTest` (204 sin cuerpo, 404), `AislamientoYMatrizRbacTest` (celda de
+`ADMIN` y las tres denegadas).]
 
 ### Decisión 1 — La baja es lógica porque las FK la obligan
 
@@ -445,6 +452,44 @@ ningún borrado físico**. `DELETE` responde 204.
 médicos o citas **fallaría con violación de FK**, porque la ausencia de `ON DELETE`
 significa `NO ACTION`. La baja lógica es la única opción viable y además preserva la
 lectura histórica de las citas y los médicos que lo referencian.
+
+La otra mitad de esa decisión es `activar()`: si la baja existe para poder recuperar el
+registro, la vuelta tiene que existir. Es idempotente, conserva a los médicos y el historial de
+citas que referencian al consultorio, y no toca ninguna cuenta de usuario. El caso que la motivó
+es el consultorio dado de baja por una refacción. [Probada: `ConsultorioServiceTest` y
+`ConsultorioControllerTest`.]
+
+**La reactivación necesita puerta de entrada (S8).** El listado por omisión sigue devolviendo solo
+activos, que es su contrato; `GET /organizaciones/{id}/consultorios?incluirInactivos=true` agrega
+los dados de baja con el mismo orden por nombre, y `ConsultoriosPage` lo pide así. Sin ese
+parámetro el consultorio recién desactivado desaparecía de la tabla y no quedaba dónde pulsar
+«Reactivar»: la operación estaba construida pero era inalcanzable. La fila inactiva se distingue
+con su badge de estado y ofrece «Reactivar» en lugar de «Desactivar» (S9). [Probada:
+`ConsultorioRepositoryTest` (la consulta con bajas incluye al inactivo y no cruza organización),
+`ConsultorioServiceTest`, `ConsultorioControllerTest` (el parámetro ausente equivale a `false`),
+`ConsultoriosPage.reactivar.test.tsx` (la pantalla pide el listado con el parámetro y la fila
+inactiva trae su botón) y `AislamientoYMatrizRbacTest` (de punta a punta contra la base).]
+
+### Decisión 1 bis — La baja no deja a un médico activo sin consultorio principal (S6)
+
+**Contexto.** `medico.consultorio_id` es la referencia por defecto de la agenda y de las citas de
+un médico. `desactivar()` no comprobaba nada, así que se podía dar de baja el consultorio
+principal de una médica activa: su fila seguía diciendo «activo» mientras la agenda apuntaba a
+una sala cerrada. El estado era alcanzable **sin tocar la reactivación**.
+
+**Decisión.** `desactivar` cuenta los médicos activos que tienen el consultorio como principal
+(`MedicoRepository#contarActivosPorConsultorioPrincipal`, acotado por organización) y, si hay al
+guno, responde **409** con `ConsultorioPrincipalConMedicoActivoException`. El mensaje nombra el
+motivo y el camino: dar de baja primero al médico. Si el único médico que lo tiene como principal
+está inactivo, la baja se permite.
+
+**Por qué 409 y no 400.** La petición está bien formada y el consultorio existe; lo que choca es el
+estado del médico. Y por qué no se permite igual: la baja lógica dice «el consultorio deja de
+estar disponible», no «el médico activo se queda sin lugar donde atender». La invariante completa
+—un médico activo tiene un consultorio principal activo— se cierra con la otra puerta en
+`medico` (S7). [Probada: `ConsultorioServiceTest` (bloqueado y permitido),
+`ConsultorioControllerTest` (409 con `ErrorResponse`) y `AislamientoYMatrizRbacTest` (las dos
+puertas de extremo a extremo contra la base).]
 
 *Precisión de evidencia:* esa consecuencia se **deriva** de la FK de V1 y **no se
 ejercitó** con un test, porque `medico` y `cita` todavía no tienen entidades en el
@@ -653,16 +698,41 @@ modelo durante el módulo 01. **Tests verdes no equivalen a review aprobada.**
 Módulo 03 con alcance **COMPLETO** (GAL-001 sección 6). **Cierra los 3 modelos de la rama**
 (`Organizacion`, `Consultorio`, `Medico`).
 
-Expone cinco endpoints bajo `/api/v1`, con la convención de rutas del proyecto (**la
+Expone seis endpoints bajo `/api/v1`, con la convención de rutas del proyecto (**la
 colección cuelga de su dueño inmediato**, el ítem va plano):
 
 | Método | Ruta | Respuesta |
 |---|---|---|
 | `POST` | `/api/v1/organizaciones/{organizacionId}/medicos` | 201 + `Location` |
-| `GET` | `/api/v1/organizaciones/{organizacionId}/medicos` | 200 (solo activos, por nombre) |
+| `GET` | `/api/v1/organizaciones/{organizacionId}/medicos` | 200 (solo activos, por nombre; `?incluirInactivos=true` agrega los dados de baja) |
 | `GET` | `/api/v1/medicos/{id}` | 200 |
 | `PUT` | `/api/v1/medicos/{id}` | 200 |
 | `DELETE` | `/api/v1/medicos/{id}` | 204 (baja lógica, idempotente) |
+| `POST` | `/api/v1/medicos/{id}/activar` | 204 (reactivación, idempotente) |
+
+La reactivación es solo de `ADMIN` (las escrituras de médico lo son) y un identificador de otra
+organización responde `404`, no `403`. Devuelve el mismo registro, con sus bloques de horario y
+sus asignaciones de consultorio: es el dato que se perdía al crear un médico nuevo. No reactiva la
+cuenta de usuario asociada; el acceso se cierra por el `activo` del médico (decisión P5).
+[Probada: `MedicoServiceTest` (reactiva y repite sin error), `MedicoControllerTest` (204 sin
+cuerpo, 404, 409), `MedicoReactivacionHorariosTest` (los horarios siguen ahí tras la vuelta) y
+`AislamientoYMatrizRbacTest` (celda de `ADMIN` y las tres denegadas).]
+
+El listado por omisión sigue devolviendo solo activos; `GET /organizaciones/{id}/medicos`
+acepta `incluirInactivos=true` y `MedicosPage` lo pide así, para que el médico recién dado de baja
+siga en la tabla con su badge inactivo y su botón «Reactivar» (S8 y S9). Sin esa puerta la
+operación era inalcanzable desde la pantalla. [Probada: `MedicoRepositoryTest`,
+`MedicoServiceTest`, `MedicoControllerTest` (parámetro ausente = `false`),
+`MedicosPage.reactivar.test.tsx` y `AislamientoYMatrizRbacTest`.]
+
+**La columna de consultorio no se vacía por un consultorio de baja (S12).** `MedicosPage` pide
+también el directorio de consultorios con `incluirInactivos=true` y toma el nombre de ahí: el dato
+sigue existiendo —es *su* consultorio— y el estado del consultorio se comunica en su propio
+módulo, no borrando la celda. Esa misma lectura alimenta los selectores de alta y asignación,
+que se filtran a consultorios activos: nombrar un consultorio cerrado en una fila es correcto,
+ofrecerlo para abrir un médico nuevo no lo es. [Probada: `MedicosPage.inactivos.test.tsx`
+(nombre visible en la fila, listado pedido con las bajas y consultorio inactivo fuera del alta),
+y las pruebas de alta y asignación que ya existían.]
 
 ### Decisión 1 — La baja es lógica porque las FK entrantes lo impiden o destruyen datos
 
@@ -686,12 +756,19 @@ que el bloque que la referencia, así que la base rechaza el `DELETE`. Lo fija
 incierto, por lo que la conclusión se deriva del mismo esquema y **no** se ejercitó allí).
 
 **Decisión.** `desactivar()` pone `activo = false`, es idempotente, y **no hay endpoint de
-borrado físico**.
+borrado físico**. `activar()` es la vuelta simétrica e idempotente.
 
 **Por qué.** El borrado físico **o está bloqueado o destruye datos sin avisar**. No es una
 preferencia: es el esquema. Es el mismo razonamiento que en `consultorio`, pero aquí con varios
 comportamientos distintos conviviendo, y uno de ellos (CASCADE sobre horarios) es silencioso — el
 peor de todos.
+
+**Reactivación y su límite (S7).** Reactivar un médico cuyo consultorio principal está dado de
+baja responde **409** con `MedicoConConsultorioPrincipalInactivoException`, que indica el camino:
+reactivar primero el consultorio. Es la otra mitad de la invariante de S6; sin ella, la baja del
+consultorio de un médico **inactivo** dejaría abierta la puerta que la baja del consultorio
+principal cierra. [Probada: `MedicoServiceTest` (bloqueado y permitido),
+`MedicoControllerTest` (409 con `ErrorResponse`) y `AislamientoYMatrizRbacTest`.]
 
 ### Decisión 1 bis — La clave de la asignación NO lleva `ON DELETE CASCADE`
 
@@ -925,10 +1002,10 @@ va plano, la convención que fijaron los módulos 02 y 03:
 
 | Método | Ruta | Respuesta |
 |---|---|---|
-| `POST` | `/api/v1/medicos/{medicoId}/horarios` | 201 + `Location` |
+| `POST` | `/api/v1/medicos/{medicoId}/horarios` | 201 + `Location` (409 si el médico o el consultorio están de baja) |
 | `GET` | `/api/v1/medicos/{medicoId}/horarios` | 200 (por día y hora de inicio) |
 | `GET` | `/api/v1/horarios/{id}` | 200 |
-| `PUT` | `/api/v1/horarios/{id}` | 200 |
+| `PUT` | `/api/v1/horarios/{id}` | 200 (409 si el médico está de baja o si se mueve a un consultorio de baja) |
 | `DELETE` | `/api/v1/horarios/{id}` | 204 (baja física) |
 
 ### Decisiones
@@ -955,6 +1032,33 @@ de `medico` se justificaba por `cita` y por el CASCADE destructivo; acá no ocur
 expresa un conjunto cerrado sin infraestructura de constraints nueva, así que
 `DuracionConsultaInvalidaException` lo rechaza con 400. Es una **desviación declarada** del
 borrador de la tarjeta, con el mismo efecto observable. [Decidida en S2.]
+
+### La agenda solo existe donde alguien puede atender (S10 y S11)
+
+Cerrar S6 y S7 dejó una puerta abierta un escalón más abajo: con el médico dado de baja se le
+podían **crear o modificar bloques**, y un bloque nuevo podía apuntar a un consultorio **también
+dado de baja**. El servicio lo cierra con dos reglas, en este orden dentro de la cadena ya
+existente:
+
+1. **médico dado de baja** → **409** con `AgendaDeMedicoInactivoException` (camino: reactivar al
+   médico). Se comprueba después del acotamiento por organización (404) y de la propiedad de la
+   agenda (403), y antes de las reglas del cuerpo: el estado del dueño de la agenda no depende del
+   request.
+2. **consultorio destino dado de baja** → **409** con `ConsultorioInactivoParaBloqueException`
+   (camino: reactivar el consultorio). Se comprueba al resolver el consultorio del bloque —crear
+   siempre, y actualizar solo cuando el cuerpo trae `consultorioId`, es decir cuando el bloque se
+   mueve—, antes que la asignación: asignar un consultorio inactivo no arreglaría nada y el
+   mensaje de «no asignado» haría perder tiempo.
+
+**Borrar sí se permite**, en los dos casos del médico: `DELETE` no pasa por la comprobación de
+estado. Hace falta poder limpiar los bloques de un médico que ya no atiende, y bloquearlo dejaría
+registros imposibles de corregir; la creación y la edición alcanzan para que nadie agregue
+disponibilidad falsa. En la pantalla, el botón «Horarios» no se ofrece para un médico inactivo, y
+un rechazo que llegue igual se muestra con el mensaje del backend en el panel. [Probada:
+`HorarioMedicoServiceTest` (los dos bloqueados con su 409, el borrado permitido y el alta permitida
+en un consultorio activo y asignado), `HorarioMedicoControllerTest` (409 con `ErrorResponse` en
+los dos casos) y `AislamientoYMatrizRbacTest` (crear con el médico activo, 409 con el médico de
+baja y borrado permitido, contra la base).]
 
 ### Autorización en tres capas
 
@@ -1076,8 +1180,9 @@ en `PacienteServiceTest`.]
 la clínica después de meses debe seguir siendo el mismo registro: reactivar la fila conserva
 su historial, mientras que crearlo de nuevo lo partiría entre dos identificadores y dejaría
 las citas y adjuntos anteriores colgados del viejo. Por eso `PUT` no reactiva un paciente
-inactivo y existe `POST /pacientes/{id}/activar`, idempotente. Deuda declarada: `medico` y
-`consultorio` solo tienen `desactivar` y este módulo no les agrega la operación simétrica.
+inactivo y existe `POST /pacientes/{id}/activar`, idempotente. La simetría que este módulo
+abrió ya está también en `medico` y `consultorio`, cada uno con su propia ruta `activar` y sus
+propias notas; aquí no queda ninguna deuda que saldar por ellos.
 [Probada: `PacienteServiceTest` (reactiva y repite sin error) y `PacienteControllerTest`
 (204 sin cuerpo).]
 6. **Las dos lecturas de la colección y del ítem admiten `MEDICO` y `RECEPCIONISTA`; las
