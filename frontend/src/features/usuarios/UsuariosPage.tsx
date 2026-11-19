@@ -3,6 +3,13 @@ import { api } from '@/lib/axios';
 import { mensajeDelBackend, resumenDeErrorHttp } from '@/lib/apiError';
 import { errorDeCorreoDeCuenta } from '@/lib/patronesDeFormato';
 import {
+  erroresDeCuenta,
+  nombrePrincipalDeLaCuenta,
+  tieneNombreDePersona,
+  LONGITUD_MAXIMA_NOMBRE,
+  type ErroresDeCuenta,
+} from '@/features/usuarios/validacionUsuario';
+import {
   Button,
   Input,
   Select,
@@ -32,6 +39,7 @@ import {
   RotateCcw,
   Loader2,
   RefreshCw,
+  Phone,
 } from 'lucide-react';
 
 const MENSAJE_ERROR_CARGA =
@@ -57,13 +65,29 @@ const VARIANTE_POR_ROL: Record<RolUsuario, 'primary' | 'secondary' | 'warning' |
 };
 
 const EMPTY_FORM = {
+  nombre: '',
+  telefono: '',
   email: '',
   rol: 'RECEPCIONISTA' as RolUsuario,
   medicoId: '',
 };
 
-/** Mensaje de forma del correo; la ausencia de la clave significa que el campo cumple. */
-type ErroresDelFormulario = { email?: string };
+/**
+ * Mensajes del formulario: los de los datos de la persona y el de la forma del correo. La ausencia de
+ * la clave significa que el campo cumple; el correo mantiene su regla propia, que es la del
+ * identificador de inicio de sesión.
+ */
+type ErroresDelFormulario = ErroresDeCuenta & { email?: string };
+
+/**
+ * El correo es el identificador de inicio de sesión y el alta no se envía sin él.
+ *
+ * El formulario lleva `noValidate` para que los mensajes sean los de la pantalla —en español y junto
+ * al campo— y no el aviso del navegador, que cada uno escribe en su idioma y bloquea el envío antes
+ * de que este formulario pueda explicar qué falta. Por eso la obligatoriedad del correo también se
+ * declara aquí, y no se delega en el atributo `required`.
+ */
+const MENSAJE_CORREO_OBLIGATORIO = 'El correo es obligatorio.';
 
 export function UsuariosPage() {
   /**
@@ -149,6 +173,10 @@ export function UsuariosPage() {
   const openEditModal = (usuario: Usuario) => {
     setEditingId(usuario.id);
     setForm({
+      // Una cuenta anterior a la V10 no tiene nombre: el campo nace vacío y guardarla obliga a
+      // completarlo (S5). No se rellena con nada derivado del correo.
+      nombre: usuario.nombre ?? '',
+      telefono: usuario.telefono ?? '',
       email: usuario.email,
       rol: usuario.rol,
       medicoId: usuario.medicoId || '',
@@ -167,22 +195,31 @@ export function UsuariosPage() {
     e.preventDefault();
     // S6: los espacios de los extremos no forman parte del correo. Se recorta antes de validar y
     // se envía recortado, porque un espacio invisible al pegar rechazaba un correo válido con un
-    // mensaje sobre su forma —el mismo recorte que hace el backend antes de su patrón—.
+    // mensaje sobre su forma —el mismo recorte que hace el backend antes de su patrón—. El nombre y
+    // el teléfono se recortan por la misma razón: un espacio pegado no es parte del dato.
     const email = form.email.trim();
-    if (!email) return;
-    if (form.rol === 'MEDICO' && !form.medicoId) return;
+    const nombre = form.nombre.trim();
+    const telefono = form.telefono.trim();
 
-    // S4: la misma regla estructural del backend, aplicada antes de enviar. El correo de una cuenta
-    // es el identificador de inicio de sesión, así que un valor sin forma de correo dejaría una
-    // cuenta con la que nadie puede entrar; el mensaje queda junto al campo.
-    const errorEmail = errorDeCorreoDeCuenta(email);
-    setErroresForm(errorEmail ? { email: errorEmail } : {});
-    if (errorEmail) return;
+    // S1, S4 y S7: el nombre es obligatorio y el teléfono opcional, con las reglas compartidas y el
+    // mensaje junto al campo. El correo conserva su regla estructural, que es la del identificador
+    // de inicio de sesión. La misma validación corre en el backend.
+    const errorEmail = !email ? MENSAJE_CORREO_OBLIGATORIO : errorDeCorreoDeCuenta(email);
+    const errores: ErroresDelFormulario = {
+      ...erroresDeCuenta({ nombre, telefono }),
+      ...(errorEmail ? { email: errorEmail } : {}),
+    };
+    setErroresForm(errores);
+    if (Object.keys(errores).length > 0) return;
+    if (form.rol === 'MEDICO' && !form.medicoId) return;
 
     const payload = {
       email,
       rol: form.rol,
       medicoId: form.rol === 'MEDICO' ? form.medicoId : null,
+      nombre,
+      // El teléfono en blanco es «no registrado»: viaja nulo, igual que en el contrato del backend.
+      telefono: telefono === '' ? null : telefono,
     };
 
     try {
@@ -251,7 +288,14 @@ export function UsuariosPage() {
 
   const filteredUsuarios = useMemo(() => {
     const term = search.toLowerCase();
-    return usuarios.filter((u) => !term || u.email.toLowerCase().includes(term));
+    // S4: la lista muestra personas, así que la búsqueda tiene que encontrar por nombre además de
+    // por correo; dejar solo el correo haría invisible a quien busca por el nombre que está viendo.
+    return usuarios.filter(
+      (u) =>
+        !term ||
+        u.email.toLowerCase().includes(term) ||
+        (u.nombre ?? '').toLowerCase().includes(term),
+    );
   }, [usuarios, search]);
 
   const stats = useMemo(() => {
@@ -359,7 +403,7 @@ export function UsuariosPage() {
       <Card>
         <CardContent className="p-4">
           <Input
-            placeholder="Buscar por correo..."
+            placeholder="Buscar por nombre o correo..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             leftIcon={<Search className="w-4 h-4" />}
@@ -379,7 +423,7 @@ export function UsuariosPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Correo</TableHead>
+              <TableHead>Persona</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead>Médico asociado</TableHead>
               <TableHead>Estado</TableHead>
@@ -422,7 +466,18 @@ export function UsuariosPage() {
               filteredUsuarios.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell>
-                    <span className="text-xs font-semibold text-[#0B1C30]">{u.email}</span>
+                    {/*
+                      S4: el dato principal es la persona. Una cuenta anterior a la V10 no tiene
+                      nombre y muestra el correo tal cual: no se deriva un nombre de la dirección.
+                      El correo sigue visible como dato secundario cuando hay nombre, porque es con
+                      lo que la persona inicia sesión.
+                    */}
+                    <span className="text-xs font-semibold text-[#0B1C30] block">
+                      {nombrePrincipalDeLaCuenta(u)}
+                    </span>
+                    {tieneNombreDePersona(u) && (
+                      <span className="text-[11px] text-[#64748B] block">{u.email}</span>
+                    )}
                     {esLaPropiaCuenta(u) && (
                       <span className="text-[10px] text-[#64748B] block">Tu cuenta</span>
                     )}
@@ -518,10 +573,47 @@ export function UsuariosPage() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={editingId ? 'Editar Cuenta' : 'Registrar Nueva Cuenta'}
-        description="Correo, rol y médico asociado (si aplica)."
+        description="Datos de la persona, correo de acceso y rol."
         maxWidth="md"
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {/*
+          `noValidate`: los mensajes son los de la pantalla —en español y junto al campo—, no el
+          aviso del navegador, que cada uno escribe en su idioma y bloquea el envío antes de que
+          este formulario pueda explicar qué falta. Es el mismo criterio del registro de clínica.
+        */}
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {/*
+            S1 y S5: el nombre es obligatorio y el teléfono opcional, en el alta y en la edición.
+            Una cuenta anterior a la V10 nace con el nombre en blanco y no se guarda hasta
+            completarlo: la lista muestra personas, no identificadores.
+          */}
+          <Input
+            label="Nombre Completo"
+            type="text"
+            autoComplete="name"
+            value={form.nombre}
+            onChange={(e) => {
+              setForm((f) => ({ ...f, nombre: e.target.value }));
+              setErroresForm((prev) => ({ ...prev, nombre: undefined }));
+            }}
+            error={erroresForm.nombre}
+            required
+            maxLength={LONGITUD_MAXIMA_NOMBRE}
+          />
+          <Input
+            label="Teléfono"
+            type="text"
+            inputMode="tel"
+            autoComplete="tel"
+            value={form.telefono}
+            onChange={(e) => {
+              setForm((f) => ({ ...f, telefono: e.target.value }));
+              setErroresForm((prev) => ({ ...prev, telefono: undefined }));
+            }}
+            error={erroresForm.telefono}
+            leftIcon={<Phone className="w-4 h-4" />}
+            helperText="Opcional."
+          />
           {/*
             `type="text"` con `inputMode="email"` en lugar de `type="email"`: el navegador
             rechazaría por su cuenta parte de los correos sin forma de correo (`juan@`, `juan@.com`)
@@ -537,7 +629,7 @@ export function UsuariosPage() {
             value={form.email}
             onChange={(e) => {
               setForm((f) => ({ ...f, email: e.target.value }));
-              setErroresForm((prev) => (prev.email ? {} : prev));
+              setErroresForm((prev) => ({ ...prev, email: undefined }));
             }}
             error={erroresForm.email}
             required

@@ -41,6 +41,25 @@ import jakarta.validation.constraints.Size;
  * responde 400 con un mensaje propio; la pertenencia del médico a la organización la impone
  * además la clave foránea compuesta de la base.</p>
  *
+ * <p><strong>El nombre es obligatorio y el teléfono opcional (S1, S5).</strong> El alta pedía solo
+ * correo y rol, como si la cuenta fuera un identificador y no una persona que trabaja ahí: la lista
+ * del personal mostraba únicamente el correo. Los dos campos se persisten en las columnas que la V10
+ * ya creó —{@code usuario.nombre} y {@code usuario.telefono}, nulables— y viajan en el mismo DTO para
+ * que la edición los corrija.</p>
+ *
+ * <p>El nombre sigue la regla de las <strong>personas</strong> ({@link PatronesDeFormato#TEXTO_SIN_DIGITOS}):
+ * en el nombre de una administradora, una recepcionista o un médico un número no es parte del
+ * nombre. El teléfono usa {@link PatronesDeFormato#TELEFONO}, el mismo que el de médico y paciente. Las
+ * dos reglas son las compartidas —con espejo en el formulario— y este DTO no escribe expresiones
+ * propias.</p>
+ *
+ * <p><strong>Editar una cuenta anterior obliga a completarle el nombre.</strong> Las cuentas creadas
+ * antes de esta entrega tienen {@code nombre} nulo y la lista las muestra por correo, sin inventar un
+ * nombre a partir de la dirección. Como el campo es obligatorio también en la edición, guardar una de
+ * esas cuentas exige escribir el nombre de la persona: es la misma consecuencia asumida que el
+ * paciente con CURP duplicada, que obliga a corregirla al guardar. El teléfono sí puede quedar nulo.
+ *</p>
+ *
  * <p><strong>{@code email} lleva una comprobación estructural de forma, y el correo del paciente
  * no.</strong> Aquí el correo es el <em>identificador de inicio de sesión</em>: una cuenta creada
  * con {@code juan@} nace sin que nadie pueda entrar con ella. Se exige la forma mínima —una parte
@@ -72,6 +91,10 @@ import jakarta.validation.constraints.Size;
  *                 normalizado a minúsculas
  * @param rol      rol de la cuenta (obligatorio, uno de {@link RolUsuario})
  * @param medicoId médico asociado (opcional; obligatorio cuando el rol es {@code MEDICO})
+ * @param nombre   nombre de la persona (obligatorio, 1..120 caracteres, sin dígitos); editar una
+ *                 cuenta anterior a la V10 exige enviarlo, y sin él la petición responde 400
+ * @param telefono teléfono de contacto (opcional; 7..20 caracteres, dígitos, {@code +} inicial
+ *                 opcional, espacios, guiones y paréntesis)
  */
 public record UsuarioRequest(
 
@@ -95,7 +118,24 @@ public record UsuarioRequest(
         @Schema(description = "Médico asociado a la cuenta; obligatorio si el rol es MEDICO, "
                 + "opcional para los demás roles (por ejemplo, una cuenta ADMIN que además atiende).",
                 example = "5b2e9c1a-7d34-4f80-9a2b-6c1d9e0f3a41")
-        UUID medicoId) {
+        UUID medicoId,
+
+        @Schema(description = "Nombre completo de la persona (obligatorio, 1 a 120 caracteres: letras, "
+                + "espacios, punto, guion y apóstrofo; sin dígitos).",
+                example = "Administración")
+        @NotBlank
+        @Size(min = 1, max = 120)
+        // Letras, espacios, punto, guion y apóstrofo, sin dígitos. El blanco lo rechaza @NotBlank.
+        @Pattern(regexp = PatronesDeFormato.TEXTO_SIN_DIGITOS)
+        String nombre,
+
+        @Schema(description = "Teléfono de contacto de la persona; null o vacío si no se registró. "
+                + "De 7 a 20 caracteres: dígitos, un + inicial opcional, espacios, guiones y paréntesis.",
+                example = "+52 55 5555 9876")
+        // De 7 a 20 caracteres contando el +: el largo lo acota el patrón compartido. Acepta la
+        // cadena vacía porque el teléfono es opcional.
+        @Pattern(regexp = PatronesDeFormato.TELEFONO)
+        String telefono) {
 
     /**
      * Recorta los espacios de los extremos del correo <strong>antes</strong> de que Bean Validation

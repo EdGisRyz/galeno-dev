@@ -23,6 +23,12 @@ código; **no sustituyen la review humana ni la review externa**.
   transacción para la organización y su administrador, y las notas del módulo al final de este
   archivo. Verificación de esta tarea: backend **921 tests**, frontend **267 tests**, `build` y
   `lint` sin errores.
+- Módulo `usuario` (cuentas del personal): alcance **COMPLETO** para el alta administrativa. El
+  alta y la edición piden **nombre completo (obligatorio) y teléfono (opcional)**, se persisten en las
+  columnas de la V10 —sin migración nueva—, `UsuarioResponse` los devuelve y la lista muestra el
+  nombre con el correo como dato secundario. Las cuentas anteriores se muestran por correo, sin
+  inventar un nombre. Verificación de esta tarea: backend **942 tests**, frontend **278 tests**,
+  `build` y `lint` sin errores.
 - Módulo `consultorio`: alcance **COMPLETO** (dominio, repositorio, DTOs, mapper,
   service, controller, tests y notas). Es el molde de los módulos 3-10. Rutas
   anidadas para colección y planas para ítem: desviación justificada de GAL-001 sección 5.8.
@@ -1333,9 +1339,10 @@ el path, 404 para el recurso pedido por id) y vive en `PacienteService`, no en l
 ## usuario
 
 Módulo de cuentas del personal: la colección cuelga de la organización
-(`/api/v1/organizaciones/{organizacionId}/usuarios`) y el ítem es plano. Esta nota cubre solo la
-forma del correo; el resto de las decisiones del módulo vive en el Javadoc de `UsuarioController`
-y de `UsuarioRequest`.
+(`/api/v1/organizaciones/{organizacionId}/usuarios`) y el ítem es plano. Esta nota cubre la forma del
+correo y los datos de la persona que el alta y la edición piden desde la entrega de «alta de cuentas»;
+el resto de las decisiones del módulo vive en el Javadoc de `UsuarioController` y de
+`UsuarioRequest`.
 
 ### Decisiones
 
@@ -1366,16 +1373,75 @@ y de `UsuarioRequest`.
    regla del proyecto —con su mensaje en español— nunca llegaba a verse. Si el backend rechaza
    igual, su mensaje se muestra con `mensajeDelBackend`, como en los demás formularios.
 
+2. **El alta pide el nombre completo (obligatorio) y el teléfono (opcional) de la persona**
+   (S1-S5). El administrador creaba cuentas con correo y rol, sin un solo dato de la persona, y la
+   lista del personal mostraba solo el correo: la cuenta se leía como un identificador y no como
+   alguien que trabaja en la clínica. Los dos campos van en el **mismo `UsuarioRequest`** del alta y
+   de la edición, así que la validación no diverge entre las dos operaciones, y la respuesta los
+   devuelve en `UsuarioResponse` para que la pantalla no necesite una segunda consulta (S3).
+   - **Formato:** el nombre usa `PatronesDeFormato.TEXTO_SIN_DIGITOS` —la regla de las personas: en
+     el nombre de quien administra, recibe o atiende un número no es parte del nombre— y el teléfono
+     usa `PatronesDeFormato.TELEFONO`, el mismo de médico y paciente. Las dos son las reglas
+     compartidas, con espejo en `frontend/src/lib/patronesDeFormato.ts`, y la pantalla las repite
+     antes de enviar con el mensaje junto al campo (S7).
+   - **Persistencia:** `usuario.nombre` y `usuario.telefono` existen desde la **V10**, nulables. No
+     hay migración nueva y no se tocó ninguna anterior (S2).
+   - **Un solo camino de alta:** el nombre viaja dentro del request, así que
+     `UsuarioService.crear(organizacionId, tenantId, request)` lo persiste sin parámetros extra y
+     **se retiró la sobrecarga de `UsuarioMapper.aEntidad` que creaba la cuenta con `null`**: no
+     queda una ruta que pueda crear una cuenta sin nombre por olvido. `crearAdministrador` —el
+     camino del registro público— arma el request con el nombre y sin teléfono, de modo que las dos
+     rutas escriben la fila por el mismo mapeo. La entidad tiene un único constructor de negocio con
+     los dos campos: una cuenta sin nombre solo puede nacer declarando `null` de forma explícita, que
+     es el estado de las filas anteriores y lo que los fixtures declaran.
+   - **La lista muestra personas (S4):** la columna «Persona» pinta el **nombre** como dato
+     principal y el **correo como secundario** —sigue siendo el identificador con el que se inicia
+     sesión—. La búsqueda encuentra por nombre y por correo.
+   - **Las cuentas anteriores no se rellenan (S4):** las creadas antes de esta entrega tienen
+     `nombre` nulo y la lista las muestra **con el correo**, sin derivar un nombre de la dirección
+     (`pablo@correo.mx` **no** se convierte en «Pablo»). Un dato inventado es peor que el dato
+     ausente, y es la misma regla que la V10 declaró al hacer las columnas nulables.
+   - **Editar también lo pide (S5):** el formulario de edición prellena nombre y teléfono, y **el
+     nombre es obligatorio para guardar**. Consecuencia asumida: editar una cuenta anterior obliga a
+     completarle el nombre, igual que el paciente con CURP duplicada obliga a corregirla al guardar.
+     Un nombre nulo guardado en la edición no pisa el anterior: el `PUT` reemplaza los cinco campos.
+   - **El registro público no cambia (S6):** sigue pidiendo el nombre de quien administra y no pide
+     teléfono; su cuenta nace con `telefono` nulo.
+   - **El formulario lleva `noValidate`**, igual que el registro de clínica: con el atributo
+     `required` el navegador bloqueaba el envío con su propio aviso —en el idioma del navegador y sin
+     llegar al formulario—, y la regla del proyecto quedaba invisible. Con `noValidate` el mensaje es
+     el de la pantalla, en español y junto al campo, incluida la obligatoriedad del correo.
+
 ### Riesgos declarados
 
 - **Un correo con forma válida que no exista sigue siendo posible**: la forma no es la existencia.
   La cuenta quedará creada y el rechazo lo dará el servicio de identidad al iniciar sesión, fuera de
   este borde.
 - **La regla está escrita dos veces** —Java y TypeScript— y solo las pruebas de los dos lados
-  detectan un desajuste; los dos archivos tienen que cambiar juntos.
+  detectan un desajuste; los dos archivos tienen que cambiar juntos. Vale también para el nombre de
+  persona y el teléfono: `PatronesDeFormato` y `patronesDeFormato.ts` son el mismo contrato.
 - **El correo del paciente sigue sin regla de formato** (decisión 3 del módulo de paciente). Quien
   lea este módulo y generalice la validación al dato de contacto revierte una decisión que no es
   suya.
+- **La barra lateral sigue mostrando el correo.** Mostrar el nombre ahí exige llevarlo a la sesión, y
+  la sesión se arma con el token, que no lo trae. Es la misma conversación que el nombre de la
+  clínica: o se consulta, o viaja como claim. Queda **fuera de alcance** de esta entrega, declarado
+  en la spec.
+- **El nombre no es único ni identificador.** Dos personas con el mismo nombre son dos cuentas; el
+  correo sigue siendo lo que identifica la fila y la unicidad por organización no cambió.
+- **Toda cuenta nacida por el alta lleva nombre, pero la base no lo impone.** La obligación vive en el
+  DTO —una columna `NOT NULL` habría exigido inventar un valor para las filas anteriores—, así que
+  una inserción por SQL directo sigue pudiendo dejar `nombre` nulo. La pantalla lo tolera a
+  propósito: la muestra por correo.
+
+### Verificación registrada
+
+- Backend: `cd backend && env -u AUTH_PUBLIC_KEY ./mvnw -q test` → **942 tests** (62 clases), 0 fallos,
+  0 errores, 0 omitidos (antes de esta tarea: 921).
+- Frontend: `pnpm.cmd test` → **278 tests** (antes: 267), `pnpm.cmd build` y `pnpm.cmd lint` sin
+  errores.
+- Compuerta de seguridad: `sh scripts/verificar-seguridad.sh` → sin cambios (esta entrega no agrega
+  rutas ni toca la matriz).
 
 ---
 
@@ -1477,11 +1543,14 @@ límites de cada plan —1/1, 10/6, sin tope— y el catálogo público los publ
 `V10__usuario_nombre.sql` agrega dos columnas **nulables** a `usuario`:
 
 - `nombre VARCHAR(120)` — el nombre de la persona que administra la clínica. El registro público lo
-  pide y lo valida; la obligación vive en el DTO del alta y no en la tabla.
+  pide y lo valida; la obligación vive en el DTO del alta y no en la tabla. El alta administrativa de
+  cuentas lo escribe por el mismo camino desde la entrega de «alta de cuentas» (ver la nota del
+  módulo `usuario`).
 - `telefono VARCHAR(20)` — el contacto del trabajador, con el mismo tipo que el de médico y el de
   paciente. **El registro público no lo pide** (su formulario no tiene ese campo), así que las cuentas
-  que crea el onboarding nacen con `telefono` nulo; la columna queda lista para el alta administrativa
-  de cuentas, que es la tarea siguiente.
+  que crea el onboarding nacen con `telefono` nulo; el alta administrativa de cuentas ya lo captura
+  como opcional. La asimetría entre las dos rutas es deliberada y está acotada: el nombre lo piden
+  las dos, el teléfono solo la administrativa.
 
 Las dos son nulables porque las cuentas anteriores no tienen esos datos y no hay de dónde derivarlos,
 y porque ninguno identifica a la cuenta —ése es el correo— ni participa en una unicidad. No se
@@ -1539,13 +1608,17 @@ validación a medias.
   comprobación y el segundo choca contra `organizacion_slug_key`: recibe un error de integridad, no
   un slug duplicado. No hay reintento automático; el caso es improbable y el fallo es seguro (no
   corrompe nada).
-- **`usuario.nombre` solo lo escribe el registro.** El alta de cuentas de la administración no pide
-  nombre y deja la columna en `null`; la barra lateral no lo muestra todavía (fuera de alcance).
-- **`usuario.telefono` no lo escribe nadie todavía.** La columna y la entidad están listas, pero ni el
-  registro público ni el alta administrativa lo capturan: toda cuenta nace con `telefono` nulo. Se
-  incorpora en la tarea del alta administrativa.
-- **El nombre del administrador no se devuelve** en `RegistroResponse` ni en `UsuarioResponse`: el
-  formulario ya lo conoce y ampliar la respuesta de un endpoint público no aportaba nada.
+- **`usuario.nombre` lo escriben las dos rutas de alta** —el registro público y el alta
+  administrativa de cuentas—, y el teléfono solo la administrativa, que lo pide como opcional. La
+  barra lateral sigue mostrando el correo: llevar el nombre a la sesión exige el token o una consulta
+  aparte, y queda fuera de alcance (declarado en la nota del módulo `usuario`).
+- **El nombre del administrador no se devuelve** en `RegistroResponse` —el formulario ya lo conoce y
+  ampliar la respuesta de un endpoint público no aportaba nada—, pero **sí viaja en
+  `UsuarioResponse`**, que es la respuesta de la administración de cuentas (S3 de la entrega de alta
+  de cuentas).
+- **La asimetría de la V10 quedó cerrada**: los `COMMENT` de las columnas y la nota de esta decisión
+  describen la regla («nulo en las cuentas anteriores», «obligatorio en las altas nuevas») y ya no un
+  estado pasajero del código.
 - **La regla de nombre de local está escrita dos veces** —Java y TypeScript— igual que la del correo;
   los dos archivos tienen que cambiar juntos.
 - **`MigracionV9SqlDirectoTest` cambió de «exactamente 9 migraciones» a «al menos 9»**: la serie crece
@@ -1556,7 +1629,8 @@ validación a medias.
 - Compuerta de seguridad: `sh scripts/verificar-seguridad.sh` → OK, 5 ocurrencias de `permitAll()`
   revisadas; `sh scripts/verificar-seguridad.test.sh` → 29 casos, 0 fallos.
 - Backend: `cd backend && env -u AUTH_PUBLIC_KEY ./mvnw -q test` → **921 tests** (62 clases), 0 fallos, 0 errores,
-  0 omitidos (antes de esta tarea: 882).
+  0 omitidos (antes de esta tarea: 882). Los conteos de las entregas siguientes están en sus propias
+  notas; el número de esta entrada es el de este corte.
 - Frontend: `pnpm.cmd test` → **267 tests** (antes: 258), `pnpm.cmd build` y `pnpm.cmd lint` sin
   errores. El detalle por comando está en la entrega de la tarea.
 

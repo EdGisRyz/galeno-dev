@@ -70,6 +70,8 @@ import static org.mockito.Mockito.when;
 class UsuarioServiceTest {
 
     private static final String EMAIL = "laura.mendez@example.com";
+    private static final String NOMBRE = "Laura Méndez";
+    private static final String TELEFONO = "+52 55 5555 9876";
 
     @Mock
     private UsuarioRepository usuarioRepository;
@@ -246,6 +248,105 @@ class UsuarioServiceTest {
     }
 
     // ─────────────────────────────────────────
+    // S1-S3 · el nombre y el teléfono de la persona
+    // ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("S1-S2: crear guarda el nombre y el teléfono que llegaron en el alta")
+    void crear_shouldPersistTheNameAndPhoneOfThePerson() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.empty());
+        when(usuarioRepository.save(any(Usuario.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = usuarioService.crear(organizacionId, organizacionId,
+                new UsuarioRequest(EMAIL, RolUsuario.RECEPCIONISTA, null, NOMBRE, TELEFONO));
+
+        var captor = ArgumentCaptor.forClass(Usuario.class);
+        verify(usuarioRepository).save(captor.capture());
+        assertThat(captor.getValue().getNombre())
+                .as("el nombre de la persona se persiste en la columna que existe desde la V10")
+                .isEqualTo(NOMBRE);
+        assertThat(captor.getValue().getTelefono()).isEqualTo(TELEFONO);
+        assertThat(respuesta.nombre()).isEqualTo(NOMBRE);
+        assertThat(respuesta.telefono()).isEqualTo(TELEFONO);
+    }
+
+    @Test
+    @DisplayName("S1: el teléfono es opcional y la cuenta se crea sin él")
+    void crear_shouldPersistANullPhone_whenItWasNotRegistered() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.empty());
+        when(usuarioRepository.save(any(Usuario.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = usuarioService.crear(organizacionId, organizacionId,
+                new UsuarioRequest(EMAIL, RolUsuario.ADMIN, null, NOMBRE, null));
+
+        var captor = ArgumentCaptor.forClass(Usuario.class);
+        verify(usuarioRepository).save(captor.capture());
+        assertThat(captor.getValue().getTelefono()).isNull();
+        assertThat(respuesta.nombre()).isEqualTo(NOMBRE);
+        assertThat(respuesta.telefono()).isNull();
+    }
+
+    @Test
+    @DisplayName("S5: actualizar completa el nombre de una cuenta anterior y guarda el teléfono")
+    void actualizar_shouldPersistTheNameOfALegacyAccount() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var cuenta = usuarioPersistido(organizacion, null, EMAIL, RolUsuario.RECEPCIONISTA,
+                UUID.randomUUID());
+        when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.of(cuenta));
+        when(usuarioRepository.save(any(Usuario.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        assertThat(cuenta.getNombre())
+                .as("las cuentas anteriores a la V10 no tienen nombre: la lista las muestra por correo")
+                .isNull();
+
+        var respuesta = usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
+                new UsuarioRequest(EMAIL, RolUsuario.RECEPCIONISTA, null, NOMBRE, TELEFONO));
+
+        assertThat(cuenta.getNombre())
+                .as("guardar una cuenta anterior obliga a completarle el nombre")
+                .isEqualTo(NOMBRE);
+        assertThat(cuenta.getTelefono()).isEqualTo(TELEFONO);
+        assertThat(respuesta.nombre()).isEqualTo(NOMBRE);
+        assertThat(respuesta.telefono()).isEqualTo(TELEFONO);
+    }
+
+    @Test
+    @DisplayName("S6: crearAdministrador conserva el nombre del registro y nace sin teléfono")
+    void crearAdministrador_shouldKeepTheNameAndLeaveThePhoneEmpty() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.empty());
+        when(usuarioRepository.save(any(Usuario.class)))
+                .thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = usuarioService.crearAdministrador(organizacion, NOMBRE, EMAIL);
+
+        var captor = ArgumentCaptor.forClass(Usuario.class);
+        verify(usuarioRepository).save(captor.capture());
+        assertThat(captor.getValue().getNombre()).isEqualTo(NOMBRE);
+        assertThat(captor.getValue().getTelefono())
+                .as("el formulario público no pide teléfono: su cuenta nace sin él")
+                .isNull();
+        assertThat(captor.getValue().getRol()).isEqualTo(RolUsuario.ADMIN);
+        assertThat(respuesta.nombre()).isEqualTo(NOMBRE);
+    }
+
+    // ─────────────────────────────────────────
     // R3 · rol del conjunto cerrado
     // ─────────────────────────────────────────
 
@@ -362,7 +463,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
         var respuesta = usuarioService.crear(organizacionId, organizacionId,
-                new UsuarioRequest(EMAIL, RolUsuario.ADMIN, medico.getId()));
+                new UsuarioRequest(EMAIL, RolUsuario.ADMIN, medico.getId(), NOMBRE, null));
 
         assertThat(respuesta.rol()).isEqualTo(RolUsuario.ADMIN);
         assertThat(respuesta.medicoId()).isEqualTo(medico.getId());
@@ -511,7 +612,7 @@ class UsuarioServiceTest {
                 .thenReturn(1L);
 
         assertThatThrownBy(() -> usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
-                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null)))
+                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null, NOMBRE, null)))
                 .as("cambiar el rol de la única administradora deja a la organización sin administración")
                 .isInstanceOf(UltimaAdministradoraException.class)
                 .hasMessageContaining("última");
@@ -534,7 +635,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
         var respuesta = usuarioService.actualizar(actor(organizacionId), cuenta.getId(),
-                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null));
+                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null, NOMBRE, null));
 
         assertThat(respuesta.rol()).isEqualTo(RolUsuario.PACIENTE);
         assertThat(respuesta.medicoId())
@@ -621,7 +722,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.findById(cuenta.getId())).thenReturn(Optional.of(cuenta));
 
         assertThatThrownBy(() -> usuarioService.actualizar(actorDe(cuenta, organizacionId), cuenta.getId(),
-                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null)))
+                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null, NOMBRE, null)))
                 .as("un administrador que se quita el rol se deja fuera del sistema por un clic")
                 .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
                 .hasMessageContaining("su propia cuenta");
@@ -642,7 +743,7 @@ class UsuarioServiceTest {
         when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
 
         var respuesta = usuarioService.actualizar(actorDe(cuenta, organizacionId), cuenta.getId(),
-                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null));
+                new UsuarioRequest(EMAIL, RolUsuario.PACIENTE, null, NOMBRE, null));
 
         assertThat(respuesta.email())
                 .as("la regla solo protege la baja y el cambio de rol, no el resto de los datos")
@@ -673,7 +774,7 @@ class UsuarioServiceTest {
         var actor = new AuthenticatedUser(cuenta.getAuthUserId(), "propia@example.com", "ADMIN", organizacionId, null);
 
         assertThatThrownBy(() -> usuarioService.actualizar(actor, cuenta.getId(),
-                new UsuarioRequest("propia@example.com", RolUsuario.PACIENTE, null)))
+                new UsuarioRequest("propia@example.com", RolUsuario.PACIENTE, null, NOMBRE, null)))
                 .isInstanceOf(OperacionSobreLaPropiaCuentaException.class)
                 .hasMessageContaining("su propia cuenta");
         assertThat(cuenta.getRol()).isEqualTo(RolUsuario.ADMIN);
@@ -756,7 +857,7 @@ class UsuarioServiceTest {
 
     /** Request de una cuenta administrativa sin médico asociado. */
     private static UsuarioRequest requestAdmin(String email) {
-        return new UsuarioRequest(email, RolUsuario.ADMIN, null);
+        return new UsuarioRequest(email, RolUsuario.ADMIN, null, NOMBRE, null);
     }
 
     /**
@@ -785,7 +886,7 @@ class UsuarioServiceTest {
 
     /** Request de una cuenta de médico con el médico indicado (o sin él). */
     private static UsuarioRequest requestMedico(String email, UUID medicoId) {
-        return new UsuarioRequest(email, RolUsuario.MEDICO, medicoId);
+        return new UsuarioRequest(email, RolUsuario.MEDICO, medicoId, NOMBRE, null);
     }
 
     /**
@@ -825,10 +926,14 @@ class UsuarioServiceTest {
 
     /**
      * Cuenta transitoria, sin identidad simulada: sirve cuando la prueba no lee su id.
+     *
+     * <p>Nace <strong>sin nombre ni teléfono</strong>, que es el estado de las cuentas anteriores a
+     * la V10: la columna es nulable y ningún dato se inventa para rellenarla. La obligación del
+     * nombre vive en el DTO del alta, no en la entidad.</p>
      */
     private static Usuario usuarioTransitorio(Organizacion organizacion, Medico medico, String email,
             RolUsuario rol, UUID authUserId) {
-        return new Usuario(organizacion, medico, email, rol, authUserId);
+        return new Usuario(organizacion, medico, null, null, email, rol, authUserId);
     }
 
     /** Cuenta con aspecto de registro persistido: id simulado que conserva el dominio real. */

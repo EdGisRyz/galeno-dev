@@ -80,6 +80,8 @@ class UsuarioControllerTest {
     private static final UUID CUENTA_ID = UUID.fromString("b7d4f2c8-1a3e-4c59-8f60-2d7b9e5a4c13");
     private static final UUID MEDICO_ID = UUID.fromString("5b2e9c1a-7d34-4f80-9a2b-6c1d9e0f3a41");
     private static final String EMAIL = "laura.mendez@example.com";
+    private static final String NOMBRE = "Administración";
+    private static final String TELEFONO = "+52 55 5555 9876";
     private static final OffsetDateTime CREADA_EN = OffsetDateTime.parse("2025-01-15T10:30:00-06:00");
 
     private static final String MENSAJE_CUERPO_MAL_FORMADO =
@@ -87,7 +89,17 @@ class UsuarioControllerTest {
     private static final String RESTRICCION_CORREO = "usuario_organizacion_id_email_key";
 
     private static final String CUERPO_VALIDO = """
-            {"email":"laura.mendez@example.com","rol":"MEDICO","medicoId":"5b2e9c1a-7d34-4f80-9a2b-6c1d9e0f3a41"}
+            {"email":"laura.mendez@example.com","rol":"MEDICO","medicoId":"5b2e9c1a-7d34-4f80-9a2b-6c1d9e0f3a41","nombre":"Administración","telefono":"+52 55 5555 9876"}
+            """;
+
+    /** Cuerpo del alta con el nombre indicado y sin teléfono: teléfono es opcional (S1). */
+    private static final String CUERPO_SIN_TELEFONO = """
+            {"email":"laura.mendez@example.com","rol":"RECEPCIONISTA","nombre":"Administración"}
+            """;
+
+    /** Cuerpo sin nombre: el único dato que le falta al alta obligatorio desde S1. */
+    private static final String CUERPO_SIN_NOMBRE = """
+            {"email":"laura.mendez@example.com","rol":"RECEPCIONISTA"}
             """;
 
     /** Actor de la sesión: una cuenta distinta de la que se opera en la mayoría de los casos. */
@@ -136,7 +148,7 @@ class UsuarioControllerTest {
                 .andExpect(jsonPath("$.authUserId").doesNotExist());
 
         verify(usuarioService).crear(TENANT_ID, TENANT_ID, new UsuarioRequest(
-                EMAIL, RolUsuario.MEDICO, MEDICO_ID));
+                EMAIL, RolUsuario.MEDICO, MEDICO_ID, NOMBRE, TELEFONO));
     }
 
     @Test
@@ -155,7 +167,7 @@ class UsuarioControllerTest {
                         .value("/api/v1/organizaciones/" + OTRA_ORGANIZACION_ID + "/usuarios"));
 
         verify(usuarioService).crear(OTRA_ORGANIZACION_ID, TENANT_ID, new UsuarioRequest(
-                EMAIL, RolUsuario.MEDICO, MEDICO_ID));
+                EMAIL, RolUsuario.MEDICO, MEDICO_ID, NOMBRE, TELEFONO));
     }
 
     @Test
@@ -177,7 +189,7 @@ class UsuarioControllerTest {
     void crear_shouldReturn400_whenTheRoleIsMissing() throws Exception {
         mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
                         """
-                                {"email":"laura.mendez@example.com"}
+                                {"email":"laura.mendez@example.com","nombre":"Administración"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.codigo").value(400))
@@ -261,7 +273,7 @@ class UsuarioControllerTest {
                 .andExpect(status().isCreated());
 
         verify(usuarioService).crear(TENANT_ID, TENANT_ID,
-                new UsuarioRequest(email, RolUsuario.RECEPCIONISTA, null));
+                new UsuarioRequest(email, RolUsuario.RECEPCIONISTA, null, NOMBRE, null));
     }
 
     @ParameterizedTest(name = "PUT con el correo \"{0}\" responde 400 y no llega al service")
@@ -285,7 +297,7 @@ class UsuarioControllerTest {
                 .andExpect(status().isOk());
 
         verify(usuarioService).actualizar(ACTOR, CUENTA_ID,
-                new UsuarioRequest(email, RolUsuario.RECEPCIONISTA, null));
+                new UsuarioRequest(email, RolUsuario.RECEPCIONISTA, null, NOMBRE, null));
     }
 
     @ParameterizedTest(name = "POST con el correo \"{0}\" rodeado de espacios responde 201 y se recorta antes de validarlo")
@@ -334,6 +346,117 @@ class UsuarioControllerTest {
                 .andExpect(jsonPath("$.mensaje")
                         .value("El campo email tiene una longitud fuera del rango permitido"));
         verifyNoInteractions(usuarioService);
+    }
+
+    // ------------------------------------------------------------------
+    // Nombre obligatorio y teléfono opcional (S1, S3, S7)
+    // ------------------------------------------------------------------
+
+    @ParameterizedTest(name = "POST con el nombre \"{0}\" responde 400 y no llega al service")
+    @ValueSource(strings = {"   "})
+    void crear_shouldReturn400_whenTheNameIsBlank(String nombre) throws Exception {
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConNombre(nombre)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre no puede estar vacío"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @Test
+    @DisplayName("POST sin el campo nombre responde 400: el alta no crea cuentas sin nombre")
+    void crear_shouldReturn400_whenTheNameIsMissing() throws Exception {
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        CUERPO_SIN_NOMBRE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre no puede estar vacío"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @Test
+    @DisplayName("POST con dígitos en el nombre responde 400: la regla es la de las personas")
+    void crear_shouldReturn400_whenTheNameHasDigits() throws Exception {
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConNombre("Administrador 123")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre es inválido"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @Test
+    @DisplayName("POST con un nombre de 121 caracteres responde 400: el máximo es el de la columna")
+    void crear_shouldReturn400_whenTheNameExceedsTheColumnLength() throws Exception {
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConNombre("a".repeat(121))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.mensaje")
+                        .value("El campo nombre tiene una longitud fuera del rango permitido"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @ParameterizedTest(name = "POST con el teléfono \"{0}\" responde 400 y no llega al service")
+    @ValueSource(strings = {"vvvvvuvu", "12345", "123456789012345678901", "555 555 5555x", "--"})
+    void crear_shouldReturn400_whenThePhoneHasNoPhoneShape(String telefono) throws Exception {
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConNombreYTelefono(NOMBRE, telefono)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo telefono es inválido"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @ParameterizedTest(name = "POST con el teléfono \"{0}\" responde 201")
+    @ValueSource(strings = {"+52 55 5555 9876", "(951) 111 1111", "951-501-2001"})
+    void crear_shouldReturn201_whenThePhoneHasPhoneShape(String telefono) throws Exception {
+        when(usuarioService.crear(eq(TENANT_ID), eq(TENANT_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConNombreYTelefono(NOMBRE, telefono)))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("POST sin teléfono responde 201: el teléfono es opcional")
+    void crear_shouldReturn201_whenThePhoneIsMissing() throws Exception {
+        when(usuarioService.crear(eq(TENANT_ID), eq(TENANT_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        CUERPO_SIN_TELEFONO))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("PUT sin nombre responde 400: editar una cuenta anterior obliga a completarle el nombre")
+    void actualizar_shouldReturn400_whenTheNameIsMissing() throws Exception {
+        mockMvc.perform(conCuerpo(put("/api/v1/usuarios/{id}", CUENTA_ID), CUERPO_SIN_NOMBRE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo nombre no puede estar vacío"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @Test
+    @DisplayName("la respuesta del alta devuelve el nombre y el teléfono de la cuenta")
+    void crear_shouldReturnTheNameAndPhoneOfTheAccount() throws Exception {
+        when(usuarioService.crear(eq(TENANT_ID), eq(TENANT_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        CUERPO_VALIDO))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nombre").value(NOMBRE))
+                .andExpect(jsonPath("$.telefono").value(TELEFONO));
+    }
+
+    @Test
+    @DisplayName("el GET por id devuelve el nombre y el teléfono de la cuenta")
+    void buscarPorId_shouldReturnTheNameAndPhoneOfTheAccount() throws Exception {
+        when(usuarioService.buscarPorId(CUENTA_ID, TENANT_ID)).thenReturn(respuesta(true));
+
+        mockMvc.perform(get("/api/v1/usuarios/{id}", CUENTA_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nombre").value(NOMBRE))
+                .andExpect(jsonPath("$.telefono").value(TELEFONO));
     }
 
     // ------------------------------------------------------------------
@@ -402,7 +525,7 @@ class UsuarioControllerTest {
                 .andExpect(jsonPath("$.id").value(CUENTA_ID.toString()));
 
         verify(usuarioService).actualizar(ACTOR, CUENTA_ID,
-                new UsuarioRequest(EMAIL, RolUsuario.MEDICO, MEDICO_ID));
+                new UsuarioRequest(EMAIL, RolUsuario.MEDICO, MEDICO_ID, NOMBRE, TELEFONO));
     }
 
     @Test
@@ -548,14 +671,14 @@ class UsuarioControllerTest {
     // ------------------------------------------------------------------
 
     /**
-     * Representación de salida que devolvería el service, con los siete campos del contrato.
+     * Representación de salida que devolvería el service, con los nueve campos del contrato.
      *
      * @param activo estado lógico de la cuenta
      * @return la respuesta esperada
      */
     private static UsuarioResponse respuesta(boolean activo) {
-        return new UsuarioResponse(CUENTA_ID, TENANT_ID, MEDICO_ID, EMAIL, RolUsuario.MEDICO, activo,
-                CREADA_EN);
+        return new UsuarioResponse(CUENTA_ID, TENANT_ID, MEDICO_ID, NOMBRE, TELEFONO, EMAIL,
+                RolUsuario.MEDICO, activo, CREADA_EN);
     }
 
     /**
@@ -569,8 +692,33 @@ class UsuarioControllerTest {
      */
     private static String cuerpoConEmail(String email) {
         return """
-                {"email":"%s","rol":"RECEPCIONISTA"}
+                {"email":"%s","rol":"RECEPCIONISTA","nombre":"Administración"}
                 """.formatted(email);
+    }
+
+    /**
+     * Cuerpo del alta con el nombre indicado, sin teléfono: el teléfono es opcional y así la única
+     * regla que puede rechazar el cuerpo es la del nombre.
+     *
+     * @param nombre nombre tal como viaja en el cuerpo
+     * @return el cuerpo JSON de la petición
+     */
+    private static String cuerpoConNombre(String nombre) {
+        return """
+                {"email":"laura.mendez@example.com","rol":"RECEPCIONISTA","nombre":"%s"}
+                """.formatted(nombre);
+    }
+    /**
+     * Cuerpo del alta con el nombre y el teléfono indicados, para ejercer la regla del teléfono.
+     *
+     * @param nombre   nombre de la persona
+     * @param telefono teléfono tal como viaja en el cuerpo
+     * @return el cuerpo JSON de la petición
+     */
+    private static String cuerpoConNombreYTelefono(String nombre, String telefono) {
+        return """
+                {"email":"laura.mendez@example.com","rol":"RECEPCIONISTA","nombre":"%s","telefono":"%s"}
+                """.formatted(nombre, telefono);
     }
 
     /**

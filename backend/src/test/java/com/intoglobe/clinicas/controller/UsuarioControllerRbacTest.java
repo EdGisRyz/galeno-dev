@@ -76,7 +76,7 @@ class UsuarioControllerRbacTest {
     private static final String EMAIL = "laura.mendez@example.com";
 
     private static final String CUERPO_VALIDO = """
-            {"email":"laura.mendez@example.com","rol":"ADMIN","medicoId":null}
+            {"email":"laura.mendez@example.com","rol":"ADMIN","medicoId":null,"nombre":"Administración"}
             """;
 
     private static final String TOKEN_ADMIN = ClaveRsaDePrueba.tokenPara("ADMIN", TENANT_ID);
@@ -135,7 +135,7 @@ class UsuarioControllerRbacTest {
                 .andExpect(content().string(""));
 
         verify(usuarioService).crear(TENANT_ID, TENANT_ID, new UsuarioRequest(
-                EMAIL, RolUsuario.ADMIN, null));
+                EMAIL, RolUsuario.ADMIN, null, "Administración", null));
         verify(usuarioService).listarPorOrganizacion(TENANT_ID, TENANT_ID);
         verify(usuarioService).buscarPorId(CUENTA_ID, TENANT_ID);
         verify(usuarioService).activar(CUENTA_ID, TENANT_ID);
@@ -256,8 +256,8 @@ class UsuarioControllerRbacTest {
      * @return la respuesta esperada
      */
     private static UsuarioResponse respuesta(boolean activo) {
-        return new UsuarioResponse(CUENTA_ID, TENANT_ID, null, EMAIL, RolUsuario.ADMIN, activo,
-                OffsetDateTime.parse("2025-01-15T10:30:00-06:00"));
+        return new UsuarioResponse(CUENTA_ID, TENANT_ID, null, "Administración", null, EMAIL,
+                RolUsuario.ADMIN, activo, OffsetDateTime.parse("2025-01-15T10:30:00-06:00"));
     }
 
     /**

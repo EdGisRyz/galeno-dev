@@ -50,6 +50,8 @@ class UsuarioRepositoryTest {
 
     private static final String EMAIL = "laura.mendez@example.com";
     private static final String NOMBRE_MEDICO = "Laura Méndez";
+    private static final String NOMBRE_PERSONA = "Administración";
+    private static final String TELEFONO = "+52 55 5555 9876";
 
     @Autowired
     private UsuarioRepository usuarioRepository;
@@ -63,7 +65,8 @@ class UsuarioRepositoryTest {
         var organizacion = persistirOrganizacion("Clínica Centro");
         var medico = persistirMedico(organizacion, NOMBRE_MEDICO);
         var authUserId = UUID.randomUUID();
-        var usuario = new Usuario(organizacion, medico, EMAIL, RolUsuario.MEDICO, authUserId);
+        var usuario = new Usuario(organizacion, medico, NOMBRE_PERSONA, TELEFONO, EMAIL,
+                RolUsuario.MEDICO, authUserId);
         entityManager.persist(usuario);
         entityManager.flush();
         UUID id = usuario.getId();
@@ -75,6 +78,10 @@ class UsuarioRepositoryTest {
         assertThat(encontrado.getOrganizacion().getId()).isEqualTo(organizacion.getId());
         assertThat(encontrado.getMedico()).isNotNull();
         assertThat(encontrado.getMedico().getId()).isEqualTo(medico.getId());
+        assertThat(encontrado.getNombre())
+                .as("nombre y teléfono se persisten en las columnas que la V10 ya había creado")
+                .isEqualTo(NOMBRE_PERSONA);
+        assertThat(encontrado.getTelefono()).isEqualTo(TELEFONO);
         assertThat(encontrado.getEmail()).isEqualTo(EMAIL);
         assertThat(encontrado.getRol()).isEqualTo(RolUsuario.MEDICO);
         assertThat(encontrado.getAuthUserId())
@@ -87,10 +94,29 @@ class UsuarioRepositoryTest {
     }
 
     @Test
+    @DisplayName("una cuenta anterior sin nombre ni teléfono se guarda y se relee con los dos nulos")
+    void saveAndLoad_shouldAllowAnAccountWithoutNameNorPhone() {
+        var organizacion = persistirOrganizacion("Clínica Sin Nombre");
+
+        var usuario = persistirCuenta(organizacion, EMAIL, RolUsuario.ADMIN);
+        UUID id = usuario.getId();
+        entityManager.clear();
+
+        var encontrado = usuarioRepository.findById(id).orElseThrow();
+
+        assertThat(encontrado.getNombre())
+                .as("las filas anteriores a la V10 siguen siendo válidas y no se les inventa un nombre")
+                .isNull();
+        assertThat(encontrado.getTelefono())
+                .as("el teléfono es opcional: la columna acepta el nulo")
+                .isNull();
+    }
+
+    @Test
     @DisplayName("la cuenta arranca activa y sin created_at hasta que la base inserta la fila")
     void save_shouldStartActivatedAndFillCreatedAt() {
         var organizacion = persistirOrganizacion("Clínica Sur");
-        var usuario = new Usuario(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        var usuario = cuentaSinNombre(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
 
         assertThat(usuario.isActivo())
                 .as("el inicializador debe dejar activo en true: el default del primitivo es false")
@@ -114,7 +140,7 @@ class UsuarioRepositoryTest {
     @DisplayName("guarda el correo en minúsculas aunque llegue con mayúsculas")
     void save_shouldNormalizeEmailToLowerCase() {
         var organizacion = persistirOrganizacion("Clínica Normaliza");
-        var usuario = new Usuario(organizacion, null, "Laura.Mendez@Example.COM", RolUsuario.ADMIN,
+        var usuario = cuentaSinNombre(organizacion, null, "Laura.Mendez@Example.COM", RolUsuario.ADMIN,
                 UUID.randomUUID());
 
         assertThat(usuario.getEmail())
@@ -144,7 +170,7 @@ class UsuarioRepositoryTest {
                 .as("la búsqueda normalizada del servicio encuentra la cuenta guardada con espacios")
                 .isPresent();
 
-        var mismoSinEspacios = new Usuario(organizacion, null, "juan@dominio.com", RolUsuario.ADMIN,
+        var mismoSinEspacios = cuentaSinNombre(organizacion, null, "juan@dominio.com", RolUsuario.ADMIN,
                 UUID.randomUUID());
 
         assertThatThrownBy(() -> usuarioRepository.saveAndFlush(mismoSinEspacios))
@@ -158,9 +184,9 @@ class UsuarioRepositoryTest {
     void save_shouldRejectDuplicateEmailInSameOrganization() {
         var organizacion = persistirOrganizacion("Clínica Única");
         usuarioRepository.saveAndFlush(
-                new Usuario(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID()));
+                cuentaSinNombre(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID()));
 
-        var repetido = new Usuario(organizacion, null, "LAURA.MENDEZ@example.com", RolUsuario.PACIENTE,
+        var repetido = cuentaSinNombre(organizacion, null, "LAURA.MENDEZ@example.com", RolUsuario.PACIENTE,
                 UUID.randomUUID());
 
         assertThatThrownBy(() -> usuarioRepository.saveAndFlush(repetido))
@@ -175,8 +201,8 @@ class UsuarioRepositoryTest {
         var primera = persistirOrganizacion("Clínica Uno");
         var segunda = persistirOrganizacion("Clínica Dos");
 
-        var cuentaUno = new Usuario(primera, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
-        var cuentaDos = new Usuario(segunda, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        var cuentaUno = cuentaSinNombre(primera, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        var cuentaDos = cuentaSinNombre(segunda, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
 
         assertThatCode(() -> usuarioRepository.saveAllAndFlush(List.of(cuentaUno, cuentaDos)))
                 .as("son dos cuentas independientes: el correo es único por organización, no global")
@@ -191,9 +217,9 @@ class UsuarioRepositoryTest {
         var organizacion = persistirOrganizacion("Clínica Identidad");
         var authUserId = UUID.randomUUID();
         usuarioRepository.saveAndFlush(
-                new Usuario(organizacion, null, EMAIL, RolUsuario.ADMIN, authUserId));
+                cuentaSinNombre(organizacion, null, EMAIL, RolUsuario.ADMIN, authUserId));
 
-        var repetida = new Usuario(organizacion, null, "otra@example.com", RolUsuario.ADMIN, authUserId);
+        var repetida = cuentaSinNombre(organizacion, null, "otra@example.com", RolUsuario.ADMIN, authUserId);
 
         assertThatThrownBy(() -> usuarioRepository.saveAndFlush(repetida))
                 .as("usuario_auth_user_id_key impide dos cuentas con la misma identidad en la organización")
@@ -208,8 +234,8 @@ class UsuarioRepositoryTest {
         var authUserId = UUID.randomUUID();
 
         assertThatCode(() -> usuarioRepository.saveAllAndFlush(List.of(
-                new Usuario(primera, null, EMAIL, RolUsuario.ADMIN, authUserId),
-                new Usuario(segunda, null, "otra@example.com", RolUsuario.ADMIN, authUserId))))
+                cuentaSinNombre(primera, null, EMAIL, RolUsuario.ADMIN, authUserId),
+                cuentaSinNombre(segunda, null, "otra@example.com", RolUsuario.ADMIN, authUserId))))
                 .as("la unicidad de la identidad también es por organización")
                 .doesNotThrowAnyException();
     }
@@ -225,10 +251,10 @@ class UsuarioRepositoryTest {
         var medico = persistirMedico(organizacion, NOMBRE_MEDICO);
 
         var cuentas = List.of(
-                new Usuario(organizacion, null, "admin@example.com", RolUsuario.ADMIN, UUID.randomUUID()),
-                new Usuario(organizacion, medico, "medico@example.com", RolUsuario.MEDICO, UUID.randomUUID()),
-                new Usuario(organizacion, null, "paciente@example.com", RolUsuario.PACIENTE, UUID.randomUUID()),
-                new Usuario(organizacion, null, "recepcion@example.com", RolUsuario.RECEPCIONISTA,
+                cuentaSinNombre(organizacion, null, "admin@example.com", RolUsuario.ADMIN, UUID.randomUUID()),
+                cuentaSinNombre(organizacion, medico, "medico@example.com", RolUsuario.MEDICO, UUID.randomUUID()),
+                cuentaSinNombre(organizacion, null, "paciente@example.com", RolUsuario.PACIENTE, UUID.randomUUID()),
+                cuentaSinNombre(organizacion, null, "recepcion@example.com", RolUsuario.RECEPCIONISTA,
                         UUID.randomUUID()));
 
         assertThatCode(() -> usuarioRepository.saveAllAndFlush(cuentas))
@@ -258,7 +284,7 @@ class UsuarioRepositoryTest {
     @DisplayName("rechaza un MEDICO sin su fila de médico")
     void save_shouldRejectRolMedicoWithoutMedico() {
         var organizacion = persistirOrganizacion("Clínica Sin Médico");
-        var sinMedico = new Usuario(organizacion, null, EMAIL, RolUsuario.MEDICO, UUID.randomUUID());
+        var sinMedico = cuentaSinNombre(organizacion, null, EMAIL, RolUsuario.MEDICO, UUID.randomUUID());
 
         assertThatThrownBy(() -> usuarioRepository.saveAndFlush(sinMedico))
                 .as("usuario_rol_medico_coherente_check: un MEDICO siempre tiene su fila de médico")
@@ -271,7 +297,7 @@ class UsuarioRepositoryTest {
         var organizacion = persistirOrganizacion("Clínica Propia");
         var otra = persistirOrganizacion("Clínica Ajena");
         var medicoAjeno = persistirMedico(otra, "Profesional Ajeno");
-        var cuenta = new Usuario(organizacion, medicoAjeno, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        var cuenta = cuentaSinNombre(organizacion, medicoAjeno, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
 
         assertThatThrownBy(() -> usuarioRepository.saveAndFlush(cuenta))
                 .as("la clave foránea compuesta (medico_id, organizacion_id) hace imposible asignar "
@@ -360,7 +386,7 @@ class UsuarioRepositoryTest {
     void findById_shouldKeepAssociationsLazy() {
         var organizacion = persistirOrganizacion("Clínica Pérezosa");
         var medico = persistirMedico(organizacion, NOMBRE_MEDICO);
-        var usuario = new Usuario(organizacion, medico, EMAIL, RolUsuario.MEDICO, UUID.randomUUID());
+        var usuario = cuentaSinNombre(organizacion, medico, EMAIL, RolUsuario.MEDICO, UUID.randomUUID());
         entityManager.persist(usuario);
         entityManager.flush();
         UUID id = usuario.getId();
@@ -383,8 +409,8 @@ class UsuarioRepositoryTest {
     @DisplayName("la igualdad se apoya solo en el id y el hash no cambia al persistir")
     void equalsAndHashCode_shouldDependOnlyOnTheId() {
         var organizacion = persistirOrganizacion("Clínica Igualdad");
-        var primera = new Usuario(organizacion, null, "uno@example.com", RolUsuario.ADMIN, UUID.randomUUID());
-        var segunda = new Usuario(organizacion, null, "dos@example.com", RolUsuario.ADMIN, UUID.randomUUID());
+        var primera = cuentaSinNombre(organizacion, null, "uno@example.com", RolUsuario.ADMIN, UUID.randomUUID());
+        var segunda = cuentaSinNombre(organizacion, null, "dos@example.com", RolUsuario.ADMIN, UUID.randomUUID());
 
         assertThat(primera.getId()).isNull();
         assertThat(primera).isNotEqualTo(segunda);
@@ -420,10 +446,30 @@ class UsuarioRepositoryTest {
 
     /** Persiste una cuenta activa con el correo y rol indicados. */
     private Usuario persistirCuenta(Organizacion organizacion, String email, RolUsuario rol) {
-        var usuario = new Usuario(organizacion, null, email, rol, UUID.randomUUID());
+        var usuario = cuentaSinNombre(organizacion, null, email, rol, UUID.randomUUID());
         entityManager.persist(usuario);
         entityManager.flush();
         return usuario;
+    }
+
+    /**
+     * Cuenta <strong>anterior a la V10</strong>: sin nombre ni teléfono.
+     *
+     * <p>La entidad tiene un solo constructor de negocio y exige los dos campos, así que este estado
+     * se declara con dos {@code null} explícitos y no por una sobrecarga que los omita: una cuenta sin
+     * nombre solo puede nacer así, nunca por olvido en un camino nuevo. La obligación del nombre en el
+     * alta vive en el DTO, que es el único punto donde puede exigirse sin invalidar estas filas.</p>
+     *
+     * @param organizacion organización dueña
+     * @param medico       médico asociado, o {@code null} si la cuenta no atiende
+     * @param email        correo de la cuenta
+     * @param rol          rol de la cuenta
+     * @param authUserId   identidad de la cuenta en el servicio de autenticación
+     * @return la cuenta transitoria lista para persistir
+     */
+    private static Usuario cuentaSinNombre(Organizacion organizacion, Medico medico, String email,
+            RolUsuario rol, UUID authUserId) {
+        return new Usuario(organizacion, medico, null, null, email, rol, authUserId);
     }
 
     /** Persiste y hace flush de una organización para que tenga identidad. */
