@@ -572,10 +572,30 @@ export function setupMockAdapter(axiosInstance: AxiosInstance) {
     // ─────────────────────────────────────────
     // ONBOARDING · REGISTRO PÚBLICO DE CLÍNICA
     // ─────────────────────────────────────────
-    // Sin contrato real: `POST /api/v1/organizaciones` del backend está bloqueado a propósito
-    // (exige un token ya autenticado y aun así responde 403 hasta el onboarding de Sprint 2 —
-    // ver `OrganizacionController`). Esta ruta es exclusiva del mock para poder dibujar la
-    // pantalla; no existe en el backend real y nunca debe confundirse con la colección.
+    // Estas dos rutas SÍ existen en el backend real y son públicas: `POST /onboarding/registro-clinica`
+    // crea la organización y su primer administrador en una transacción, y `GET /onboarding/planes`
+    // publica las etiquetas y los límites de cada plan. El mock replica sus contratos para poder
+    // recorrer la pantalla sin base de datos; no es una ruta paralela ni una maqueta: si el contrato
+    // cambia, cambian los dos lados.
+    //
+    // El cuerpo que llega es { nombreClinica, plan, nombreAdmin, correoAdmin }: la contraseña y los
+    // límites no viajan, porque no se guardan (la primera) ni los elige el cliente (los segundos).
+    if (ruta === '/onboarding/planes' && method === 'get') {
+      await delay(150);
+      config.adapter = async () => ({
+        data: [
+          { plan: 'SOLO', etiqueta: 'Solo (un profesional)', maxMedicos: 1, maxConsultorios: 1 },
+          { plan: 'CLINICA', etiqueta: 'Clínica (varios profesionales)', maxMedicos: 10, maxConsultorios: 6 },
+          { plan: 'ENTERPRISE', etiqueta: 'Empresarial (varias sedes)', maxMedicos: null, maxConsultorios: null },
+        ],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      });
+      return config;
+    }
+
     if (ruta === '/onboarding/registro-clinica' && method === 'post') {
       await delay(400);
       const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;

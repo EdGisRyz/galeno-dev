@@ -11,14 +11,16 @@
 export const PATRON_TEXTO_SIN_DIGITOS = /^[\p{L}\p{M} .,'-]*$/u;
 
 /**
- * Nombre de un local —hoy solo el consultorio—: admite dígitos, pero exige al menos una letra.
+ * Nombre de un local —un consultorio o una clínica—: admite dígitos, pero exige al menos una letra.
  *
  * `Consultorio 2` y `Sala 3` son nombres reales y el patrón de las personas los rechazaba; `454545`,
- * `123` y `---` no son nombres. Se aplica **solo** al nombre del consultorio: en el nombre de un
- * médico o de un paciente un número no es parte del nombre. La alternativa de solo espacios deja el
- * blanco a `@NotBlank`, que tiene su mensaje propio.
+ * `123` y `---` no son nombres. Se aplica al nombre de un **local** —el consultorio y la
+ * organización— y nunca al de una persona: en el nombre de un médico, de un paciente o de una
+ * administradora un número no es parte del nombre, y allí vale `PATRON_TEXTO_SIN_DIGITOS`. La
+ * alternativa de solo espacios deja el blanco a la comprobación de obligatoriedad, que tiene su
+ * mensaje propio.
  */
-export const PATRON_NOMBRE_DE_CONSULTORIO = /^(?:| *|(?=.*\p{L})[\p{L}\p{M} .,'\-0-9]*)$/u;
+export const PATRON_NOMBRE_DE_LOCAL = /^(?:| *|(?=.*\p{L})[\p{L}\p{M} .,'\-0-9]*)$/u;
 
 /**
  * Teléfono: dígitos con un `+` inicial opcional, espacios, guiones y paréntesis; de 7 a 20 caracteres
@@ -124,7 +126,7 @@ export function errorDeNombreDeLocal(
   if (maximo !== undefined && valor.length > maximo) {
     return mensajeDeLongitudMaxima(etiqueta, maximo);
   }
-  return PATRON_NOMBRE_DE_CONSULTORIO.test(valor) ? undefined : mensajeDeNombreDeLocal(etiqueta);
+  return PATRON_NOMBRE_DE_LOCAL.test(valor) ? undefined : mensajeDeNombreDeLocal(etiqueta);
 }
 
 /** Error de una cédula profesional, o `undefined` si cumple. La cadena vacía se acepta. */
