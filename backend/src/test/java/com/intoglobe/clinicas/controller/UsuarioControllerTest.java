@@ -8,6 +8,9 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
@@ -225,6 +228,112 @@ class UsuarioControllerTest {
                         .value(containsString(EMAIL)))
                 .andExpect(jsonPath("$.ruta")
                         .value("/api/v1/organizaciones/" + TENANT_ID + "/usuarios"));
+    }
+
+    // ------------------------------------------------------------------
+    // Forma del correo de la cuenta (S1, S3)
+    // ------------------------------------------------------------------
+
+    @ParameterizedTest(name = "POST con el correo \"{0}\" responde 400 y no llega al service")
+    @ValueSource(strings = {"juan@", "juan", "@dominio.com", "juan@dominio", "juan @dominio.com",
+            "juan@@dominio.com", "juan@.com"})
+    void crear_shouldReturn400_whenTheEmailHasNoMailShape(String email) throws Exception {
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConEmail(email)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.mensaje").value("El campo email es inválido"))
+                .andExpect(jsonPath("$.ruta")
+                        .value("/api/v1/organizaciones/" + TENANT_ID + "/usuarios"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @ParameterizedTest(name = "POST con el correo \"{0}\" responde 201")
+    @ValueSource(strings = {"admin@dev-auth.local", "medico@dev-auth.local",
+            "recepcion@dev-auth.local", "paciente@dev-auth.local", "ejemplo@gmail.com",
+            "nombre+etiqueta@dominio.com.mx", "Laura.Mendez@Example.COM"})
+    void crear_shouldReturn201_whenTheEmailHasMailShape(String email) throws Exception {
+        when(usuarioService.crear(eq(TENANT_ID), eq(TENANT_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConEmail(email)))
+                .andExpect(status().isCreated());
+
+        verify(usuarioService).crear(TENANT_ID, TENANT_ID,
+                new UsuarioRequest(email, RolUsuario.RECEPCIONISTA, null));
+    }
+
+    @ParameterizedTest(name = "PUT con el correo \"{0}\" responde 400 y no llega al service")
+    @ValueSource(strings = {"juan@", "juan", "@dominio.com", "juan@dominio", "juan @dominio.com",
+            "juan@@dominio.com", "juan@.com"})
+    void actualizar_shouldReturn400_whenTheEmailHasNoMailShape(String email) throws Exception {
+        mockMvc.perform(conCuerpo(put("/api/v1/usuarios/{id}", CUENTA_ID), cuerpoConEmail(email)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje").value("El campo email es inválido"));
+        verifyNoInteractions(usuarioService);
+    }
+
+    @ParameterizedTest(name = "PUT con el correo \"{0}\" responde 200")
+    @ValueSource(strings = {"admin@dev-auth.local", "ejemplo@gmail.com",
+            "nombre+etiqueta@dominio.com.mx", "Laura.Mendez@Example.COM"})
+    void actualizar_shouldReturn200_whenTheEmailHasMailShape(String email) throws Exception {
+        when(usuarioService.actualizar(eq(ACTOR), eq(CUENTA_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(put("/api/v1/usuarios/{id}", CUENTA_ID), cuerpoConEmail(email)))
+                .andExpect(status().isOk());
+
+        verify(usuarioService).actualizar(ACTOR, CUENTA_ID,
+                new UsuarioRequest(email, RolUsuario.RECEPCIONISTA, null));
+    }
+
+    @ParameterizedTest(name = "POST con el correo \"{0}\" rodeado de espacios responde 201 y se recorta antes de validarlo")
+    @ValueSource(strings = {"  juan@dominio.com  ", "\u00A0juan@dominio.com\u00A0"})
+    void crear_shouldReturn201AndTrimTheEmail_whenItArrivesWithSurroundingSpaces(String crudo)
+            throws Exception {
+        when(usuarioService.crear(eq(TENANT_ID), eq(TENANT_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConEmail(crudo)))
+                .andExpect(status().isCreated());
+
+        // El 201 ya demuestra que el patrón vio el valor recortado: el crudo no tiene forma de
+        // correo. El captor fija además qué valor recibe el servicio. El segundo caso es el espacio
+        // duro que deja un pegado desde un documento, que `String#strip` no recorta.
+        var captor = ArgumentCaptor.forClass(UsuarioRequest.class);
+        verify(usuarioService).crear(eq(TENANT_ID), eq(TENANT_ID), captor.capture());
+        assertThat(captor.getValue().email())
+                .as("el correo viaja recortado al servicio y a la base")
+                .isEqualTo("juan@dominio.com");
+    }
+
+    @Test
+    @DisplayName("PUT con espacios alrededor del correo responde 200 y recorta el valor antes de validarlo")
+    void actualizar_shouldReturn200AndTrimTheEmail_whenItArrivesWithSurroundingSpaces() throws Exception {
+        when(usuarioService.actualizar(eq(ACTOR), eq(CUENTA_ID), any())).thenReturn(respuesta(true));
+
+        mockMvc.perform(conCuerpo(put("/api/v1/usuarios/{id}", CUENTA_ID),
+                        cuerpoConEmail("  laura.mendez@example.com  ")))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UsuarioRequest.class);
+        verify(usuarioService).actualizar(eq(ACTOR), eq(CUENTA_ID), captor.capture());
+        assertThat(captor.getValue().email()).isEqualTo(EMAIL);
+    }
+
+    @Test
+    @DisplayName("POST con un correo de 181 caracteres sigue devolviendo 400 de longitud: la regla de forma no relaja el máximo de la columna")
+    void crear_shouldReturn400_whenTheEmailExceedsTheColumnLength() throws Exception {
+        String emailLargo = "a".repeat(174) + "@dominio.com";
+
+        mockMvc.perform(conCuerpo(post("/api/v1/organizaciones/{organizacionId}/usuarios", TENANT_ID),
+                        cuerpoConEmail(emailLargo)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(400))
+                .andExpect(jsonPath("$.mensaje")
+                        .value("El campo email tiene una longitud fuera del rango permitido"));
+        verifyNoInteractions(usuarioService);
     }
 
     // ------------------------------------------------------------------
@@ -447,6 +556,21 @@ class UsuarioControllerTest {
     private static UsuarioResponse respuesta(boolean activo) {
         return new UsuarioResponse(CUENTA_ID, TENANT_ID, MEDICO_ID, EMAIL, RolUsuario.MEDICO, activo,
                 CREADA_EN);
+    }
+
+    /**
+     * Cuerpo mínimo del alta y la edición de una cuenta con el correo indicado.
+     *
+     * <p>El rol elegido, {@code RECEPCIONISTA}, no exige médico, así que el único dato que varía —y
+     * el único que puede producir el 400 de forma— es el correo.</p>
+     *
+     * @param email correo tal como viaja en el cuerpo
+     * @return el cuerpo JSON de la petición
+     */
+    private static String cuerpoConEmail(String email) {
+        return """
+                {"email":"%s","rol":"RECEPCIONISTA"}
+                """.formatted(email);
     }
 
     /**

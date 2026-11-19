@@ -129,6 +129,31 @@ class UsuarioRepositoryTest {
     }
 
     @Test
+    @DisplayName("S6: guarda el correo sin los espacios de los extremos y el mismo sin ellos choca con la unicidad")
+    void save_shouldTrimTheEmail_andTheSameEmailWithoutSpacesShouldCollide() {
+        var organizacion = persistirOrganizacion("Clínica Recorte");
+        var usuario = persistirCuenta(organizacion, "  juan@dominio.com  ", RolUsuario.ADMIN);
+        UUID id = usuario.getId();
+        entityManager.clear();
+
+        assertThat(usuarioRepository.findById(id).orElseThrow().getEmail())
+                .as("los espacios de los extremos no llegan a la columna")
+                .isEqualTo("juan@dominio.com");
+        assertThat(usuarioRepository.buscarPorOrganizacionYEmail(organizacion.getId(),
+                "juan@dominio.com"))
+                .as("la búsqueda normalizada del servicio encuentra la cuenta guardada con espacios")
+                .isPresent();
+
+        var mismoSinEspacios = new Usuario(organizacion, null, "juan@dominio.com", RolUsuario.ADMIN,
+                UUID.randomUUID());
+
+        assertThatThrownBy(() -> usuarioRepository.saveAndFlush(mismoSinEspacios))
+                .as("un correo con espacios alrededor y el mismo sin ellos son la misma cuenta: "
+                        + "usuario_organizacion_id_email_key no deja crear dos")
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     @DisplayName("rechaza el mismo correo dos veces en la misma organización, aunque cambie la caja")
     void save_shouldRejectDuplicateEmailInSameOrganization() {
         var organizacion = persistirOrganizacion("Clínica Única");

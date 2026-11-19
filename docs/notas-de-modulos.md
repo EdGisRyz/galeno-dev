@@ -1217,3 +1217,52 @@ el path, 404 para el recurso pedido por id) y vive en `PacienteService`, no en l
 - [ ] Confirmé que el 404 queda para el paciente de otra organización pedido por id.
 - [ ] Confirmé que los conteos salen de surefire y que `AislamientoYMatrizRbacTest` no perdió celdas.
 - [ ] Confirmé que este corte **no** tiene review nativa aprobada.
+
+---
+
+## usuario
+
+Módulo de cuentas del personal: la colección cuelga de la organización
+(`/api/v1/organizaciones/{organizacionId}/usuarios`) y el ítem es plano. Esta nota cubre solo la
+forma del correo; el resto de las decisiones del módulo vive en el Javadoc de `UsuarioController`
+y de `UsuarioRequest`.
+
+### Decisiones
+
+1. **El correo de la cuenta valida su forma; el del paciente no, y no es una contradicción.**
+   `usuario.email` es el **identificador de inicio de sesión**: una cuenta creada con `juan@` nacía
+   sin que nadie pudiera entrar con ella, y el sistema no lo avisaba en ningún punto.
+   `paciente.email` es un **dato de contacto** opcional: si está mal, no se puede escribir, pero la
+   ficha sigue siendo válida y el paciente se atiende igual. Esa es la decisión 3 del módulo de
+   paciente (5-nov-2026), que **sigue vigente y no se toca**; lo que se acota ahora es su alcance,
+   porque este módulo heredó el párrafo del dato de contacto sin considerar que su propio dato
+   había cambiado de función (decisión de producto, 18-nov-2026).
+   La regla es **estructural, no la RFC completa**: una parte local, una `@`, un dominio y un punto
+   con al menos dos letras después (`algo@dominio.mx`). No comprueba que la dirección exista —eso es
+   del servicio de identidad, que es quien autentica— ni impone longitudes de la parte local. Se
+   aplica en el alta y en la edición, porque las dos operaciones comparten un único
+   `UsuarioRequest`; vive en `PatronesDeFormato.CORREO_CUENTA`, con espejo en
+   `frontend/src/lib/patronesDeFormato.ts`, y la pantalla la repite antes de enviar con el error
+   junto al campo del correo. Acepta mayúsculas a propósito: la normalización a minúsculas ocurre
+   **después** de validar (`Usuario.normalizarEmail`), así que rechazarlas dejaría fuera correos
+   válidos. Los correos que ya existen —`admin@dev-auth.local`, `medico@dev-auth.local`,
+   `recepcion@dev-auth.local`, `paciente@dev-auth.local`, `ejemplo@gmail.com`— pasan todos, y la
+   semilla del emisor con dominio sintético no se queda afuera. [Probada: `UsuarioControllerTest`
+   (un 400 por cada caso inválido y un 201/200 por cada válido, en el alta y en la edición) y
+   `UsuariosPage.validacion.test.tsx` (un correo inválido no llama a la API; uno válido sale tal
+   como se escribió).]
+   La pantalla usa `type="text"` con `inputMode="email"` en ese campo: con `type="email"` el
+   navegador rechazaba por su cuenta varios de esos correos con un aviso en su propio idioma y la
+   regla del proyecto —con su mensaje en español— nunca llegaba a verse. Si el backend rechaza
+   igual, su mensaje se muestra con `mensajeDelBackend`, como en los demás formularios.
+
+### Riesgos declarados
+
+- **Un correo con forma válida que no exista sigue siendo posible**: la forma no es la existencia.
+  La cuenta quedará creada y el rechazo lo dará el servicio de identidad al iniciar sesión, fuera de
+  este borde.
+- **La regla está escrita dos veces** —Java y TypeScript— y solo las pruebas de los dos lados
+  detectan un desajuste; los dos archivos tienen que cambiar juntos.
+- **El correo del paciente sigue sin regla de formato** (decisión 3 del módulo de paciente). Quien
+  lea este módulo y generalice la validación al dato de contacto revierte una decisión que no es
+  suya.

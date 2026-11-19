@@ -136,6 +136,46 @@ class UsuarioServiceTest {
     }
 
     @Test
+    @DisplayName("S6: crear con espacios alrededor del correo lo guarda recortado")
+    void crear_shouldPersistTheEmailTrimmed_whenItArrivesWithSurroundingSpaces() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.empty());
+        when(usuarioRepository.save(any(Usuario.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        var respuesta = usuarioService.crear(organizacionId, organizacionId,
+                requestAdmin("  laura.mendez@example.com  "));
+
+        assertThat(respuesta.email()).isEqualTo(EMAIL);
+        var captor = ArgumentCaptor.forClass(Usuario.class);
+        verify(usuarioRepository).save(captor.capture());
+        assertThat(captor.getValue().getEmail())
+                .as("los espacios de los extremos no llegan a la columna")
+                .isEqualTo(EMAIL);
+    }
+
+    @Test
+    @DisplayName("S6: un correo con espacios alrededor es el mismo que sin ellos, así que responde 409")
+    void crear_shouldThrowCorreoDuplicado_whenTheSameEmailArrivesWithSurroundingSpaces() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionTransitoria();
+        var existente = usuarioTransitorio(organizacion, null, EMAIL, RolUsuario.ADMIN, UUID.randomUUID());
+        when(organizacionRepository.findById(organizacionId)).thenReturn(Optional.of(organizacion));
+        when(usuarioRepository.buscarPorOrganizacionYEmail(organizacionId, EMAIL))
+                .thenReturn(Optional.of(existente));
+
+        assertThatThrownBy(() -> usuarioService.crear(organizacionId, organizacionId,
+                requestAdmin("  LAURA.MENDEZ@example.com  ")))
+                .as("la búsqueda usa el correo recortado y en minúsculas: el espacio no esquiva la unicidad")
+                .isInstanceOf(CorreoDuplicadoEnOrganizacionException.class)
+                .hasMessageContaining(EMAIL);
+        verify(usuarioRepository).buscarPorOrganizacionYEmail(organizacionId, EMAIL);
+        verify(usuarioRepository, never()).save(any(Usuario.class));
+    }
+
+    @Test
     @DisplayName("R2: crear con un correo ya ocupado en la organización responde 409 y no guarda")
     void crear_shouldThrowCorreoDuplicadoAndNotSave_whenTheEmailIsAlreadyUsedInTheOrganization() {
         var organizacionId = UUID.randomUUID();
