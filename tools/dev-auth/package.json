@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node server.mjs",
+    "start": "node --env-file-if-exists=.env server.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

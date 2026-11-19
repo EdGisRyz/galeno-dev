@@ -50,6 +50,32 @@ datos:
 
 ## Cómo se ejecuta
 
+### Con un archivo de entorno (recomendado)
+
+Creá **una vez** `tools/dev-auth/.env` con tus valores. Está ignorado por git (`.env*` en el
+`.gitignore` de la raíz), así que las credenciales no salen de tu máquina:
+
+```bash
+cat > tools/dev-auth/.env <<'EOF'
+AUTH_PRIVATE_KEY_PATH=C:/ruta/a/tu/private.pem
+DEV_AUTH_PASSWORD=la-que-elijas
+DEV_AUTH_PORT=4501
+DATABASE_URL=postgresql://usuario:clave@localhost:5432/galeno_clinica
+EOF
+```
+
+Después, arrancar es un solo comando y no hay que exportar nada:
+
+```bash
+cd tools/dev-auth && npm start
+```
+
+`npm start` ejecuta `node --env-file-if-exists=.env server.mjs`, así que **el archivo es
+opcional**: si preferís exportar las variables en la terminal, funciona igual y las del entorno
+tienen prioridad sobre las del archivo.
+
+### Exportando las variables en la terminal
+
 ```bash
 # 1) una sola vez: instala la dependencia pg (única del directorio)
 cd tools/dev-auth && npm install
@@ -67,8 +93,8 @@ export DATABASE_URL='postgresql://postgres:postgres@localhost:5432/galeno_clinic
 npm start
 ```
 
-`npm start` ejecuta `node server.mjs`; también vale `node tools/dev-auth/server.mjs` desde la
-raíz del repositorio. El emisor **no se conecta al arrancar sin comprobar primero** la conexión:
+También vale `node tools/dev-auth/server.mjs` desde la raíz del repositorio, con las variables ya
+exportadas. El emisor **no se conecta al arrancar sin comprobar primero** la conexión:
 si PostgreSQL no responde, falla ahí y no en el primer login.
 
 Salida esperada al arrancar (extracto):
