@@ -18,6 +18,11 @@ código; **no sustituyen la review humana ni la review externa**.
 - Módulo `configuracion-tenant`: alcance parcial (entidad + repositorio + tests de
   integración), replicando el patrón del módulo 00. La aceptación nativa y la review
   externa del módulo 00 siguen pendientes y NO se asumen aprobadas.
+- Módulo `registro` (onboarding): alcance **COMPLETO** para la landing. Dos rutas públicas
+  —`POST /api/v1/onboarding/registro-clinica` y `GET /api/v1/onboarding/planes`—, una sola
+  transacción para la organización y su administrador, y las notas del módulo al final de este
+  archivo. Verificación de esta tarea: backend **921 tests**, frontend **267 tests**, `build` y
+  `lint` sin errores.
 - Módulo `consultorio`: alcance **COMPLETO** (dominio, repositorio, DTOs, mapper,
   service, controller, tests y notas). Es el molde de los módulos 3-10. Rutas
   anidadas para colección y planas para ítem: desviación justificada de GAL-001 sección 5.8.
@@ -1371,3 +1376,183 @@ y de `UsuarioRequest`.
 - **El correo del paciente sigue sin regla de formato** (decisión 3 del módulo de paciente). Quien
   lea este módulo y generalice la validación al dato de contacto revierte una decisión que no es
   suya.
+
+---
+
+## onboarding
+
+Alta pública de una clínica desde la landing: `POST /api/v1/onboarding/registro-clinica` crea la
+organización y su primer administrador en **una sola transacción**, y
+`GET /api/v1/onboarding/planes` publica las etiquetas y los límites de cada plan. Las dos son las
+únicas rutas públicas de la API aparte de la documentación, y la primera es la única escritura
+pública que existe.
+
+### Decisión 1 — La ruta y la respuesta las fija el cliente, no el servidor
+
+El formulario de la landing ya existía y ya posteaba a `/onboarding/registro-clinica` esperando
+`{ organizacionId, nombreClinica }`. El servidor se implementó **contra ese contrato**, sin renombrar
+la ruta ni ampliar la respuesta: `RegistroResponse` tiene exactamente esos dos campos y ningún dato de
+autenticación. No se emite cabecera `Location`: el recurso creado está detrás de la matriz
+(leer la organización exige un token de su propio tenant y quien se registra todavía no tiene sesión),
+así que apuntaría a una ruta que responde `401`.
+
+`POST /api/v1/organizaciones` **sigue en `denyAll()`**. Un endpoint público que crea organizaciones
+sueltas permite llenar la base de clínicas sin administración; el alta de la landing crea las dos
+filas o ninguna.
+
+### Decisión 2 — Una transacción, con las dos escrituras reutilizando lo que ya existía
+
+`OnboardingService.registrar` es el **único** punto con `@Transactional`. Dentro llama a:
+
+- `OrganizacionService.crearParaRegistro` — la organización, con su plan y su slug. Reutiliza
+  `OrganizacionMapper.aEntidad`, el mismo camino del alta de administración.
+- `UsuarioService.crearAdministrador` — la cuenta, por el mismo camino que `UsuarioService.crear`:
+  rol `ADMIN`, `auth_user_id` nuevo, sin médico y correo comprobado dentro de la organización. **No
+  hay una segunda forma de crear un administrador**; el registro público no arma una entidad por su
+  cuenta.
+
+`OnboardingRollbackTest` prueba el fallo a mitad: se sustituye solo `UsuarioService` por un doble que
+**afirma desde dentro de su propia llamada que la organización ya está escrita** (así se demuestra
+que la fila intermedia existió) y después lanza. La aserción final es que la organización desapareció
+y que el conteo de organizaciones y cuentas quedó igual: sin la transacción, la clínica habría
+quedado sin nadie que pudiera entrar a administrarla.
+
+### Decisión 3 — La celda pública es exacta, y se prueba por lo que **no** abre
+
+En `SecurityConfig` las dos celdas se declaran con verbo y ruta exactos, sin comodines:
+
+| Operación | Celda |
+|---|---|
+| `POST /api/v1/onboarding/registro-clinica` | `permitAll()` |
+| `GET /api/v1/onboarding/planes` | `permitAll()` |
+
+`OnboardingRutasPublicasTest` fija tres cosas, y el orden importa:
+
+1. Las dos celdas responden **sin token** (201 y 200) y el alta escribe de verdad las dos filas.
+2. Ninguna otra escritura se abrió: sin token, `POST /organizaciones`, `PUT|DELETE
+   /organizaciones/{id}`, `POST /organizaciones/{id}/{consultorios|medicos|pacientes|usuarios}`,
+   las cuatro reactivaciones y `PUT /pacientes|usuarios/{id}` responden `401` con el contrato de
+   error y no dejan filas. `POST /organizaciones` sigue además `403` para `ADMIN`.
+3. La celda no es un prefijo: `GET` sobre la ruta de alta, `POST` sobre el catálogo, un segmento de
+   más (`/registro-clinica/otra-cosa`) y la ruta padre (`/api/v1/onboarding`) quedan cerrados.
+
+### Decisión 4 — El slug se deriva del nombre y la unicidad la sostiene la base
+
+`organizacion.slug` es `VARCHAR(60)` y **ya era única** desde la V2 (`organizacion_slug_key`), así que
+no hizo falta migrar nada para eso. `GeneradorDeSlug` compone el texto: descompone los acentos
+(`NFKD`), descarta las marcas, pasa a minúsculas, cambia toda racha de caracteres no alfanuméricos por
+un guion y recorta a 60 sin dejar un guion colgando. Si el nombre no aporta ninguna letra latina ni
+dígito, cae en `clinica`.
+
+`OrganizacionService.slugDisponible` consulta la tabla y, si el base está tomado, prueba `-2`, `-3`…
+El sufijo se reserva **antes** de recortar, para que `base-12` quepa completo y el sufijo no se
+pierda. La búsqueda no filtra por `activo`: un slug sigue ocupado aunque su organización esté dada de
+baja. La restricción única de la base es la última palabra en una carrera entre dos registros
+simultáneos (ver riesgos).
+
+### Decisión 5 — El plan se persiste como lo eligió la persona; `ENTERPRISE` ya existía
+
+La spec se contradecía sobre el plan: S2 decía que el endpoint lo recibe y S4 que la organización nace
+con `CLINICA`. Se resolvió **respetando la elección** (decisión de producto, 19-nov): el `plan` del
+cuerpo se valida contra `PlanTipo` y se persiste tal cual. El Javadoc de `RegistroRequest` lo dice
+explícitamente para que nadie lo «simplifique» a una constante.
+
+`ENTERPRISE` **ya estaba** en el enum `PlanTipo` y en el `CHECK organizacion_plan_check` de la V1. No
+se agregó ninguna migración para el plan; lo único nuevo es que el enum lleva la etiqueta y los
+límites de cada plan —1/1, 10/6, sin tope— y el catálogo público los publica desde ahí. Un límite
+`null` significa «sin tope» y se publica como `null`, no como un número enorme.
+
+### Decisión 6 — El nombre y el teléfono del trabajador se guardan (V10)
+
+`V10__usuario_nombre.sql` agrega dos columnas **nulables** a `usuario`:
+
+- `nombre VARCHAR(120)` — el nombre de la persona que administra la clínica. El registro público lo
+  pide y lo valida; la obligación vive en el DTO del alta y no en la tabla.
+- `telefono VARCHAR(20)` — el contacto del trabajador, con el mismo tipo que el de médico y el de
+  paciente. **El registro público no lo pide** (su formulario no tiene ese campo), así que las cuentas
+  que crea el onboarding nacen con `telefono` nulo; la columna queda lista para el alta administrativa
+  de cuentas, que es la tarea siguiente.
+
+Las dos son nulables porque las cuentas anteriores no tienen esos datos y no hay de dónde derivarlos,
+y porque ninguno identifica a la cuenta —ése es el correo— ni participa en una unicidad. No se
+modificó ninguna migración anterior. Los `COMMENT` de las columnas describen **la regla** («nulo en
+las cuentas anteriores a la V10», «obligatorio en las altas nuevas»), no el estado pasajero del
+código: un comentario que dice «todavía no» envejece y nadie vuelve a corregirlo.
+
+Las dos reglas de nombre son distintas a propósito: el **nombre de la clínica** usa la regla de los
+locales (`NOMBRE_DE_LOCAL`, renombrada desde `NOMBRE_DE_CONSULTORIO` porque ya no es solo del
+consultorio) y admite dígitos si hay al menos una letra; el **nombre de la persona** usa la regla de
+las personas (`TEXTO_SIN_DIGITOS`). Aplicarlas al revés dejaría entrar «Administrador 123» o echaría
+fuera «Consultorio 2».
+
+### Decisión 7 — La contraseña se pide, se valida en el cliente y no viaja
+
+El formulario conserva contraseña y confirmación y valida que coincidan, pero **no las envía**:
+`cuerpoDeRegistro` arma solo `{ nombreClinica, plan, nombreAdmin, correoAdmin }` y una prueba afirma
+que el cuerpo no tiene `password`, `confirmarPassword`, `maxMedicos` ni `maxConsultorios`. El DTO del
+backend tampoco las declara, así que no hay campo que las reciba ni log que las escriba. Después de
+registrar, la pantalla dice con qué entrar —su correo y `DEV_AUTH_PASSWORD` del entorno— y aclara que
+la contraseña escrita no se guardó, porque quien la escribió va a intentar usarla.
+
+Los campos que la base no puede guardar salieron del formulario (S2 bis): `maxMedicos` y
+`maxConsultorios` se muestran en solo lectura según el plan, y `nombreCompleto` pasó a
+`nombreAdmin`, que sí se persiste.
+
+### Deuda declarada: abuso del endpoint público (S9)
+
+**Un endpoint público que crea filas es un objetivo evidente de spam.** Por decisión de producto
+queda **fuera de alcance** para esta entrega: no hay captcha, ni límite de tasa, ni verificación de
+correo, ni cuota por origen. Cualquiera puede llamar `POST /api/v1/onboarding/registro-clinica` en
+bucle y crear organizaciones y cuentas `ADMIN` con correos inventados.
+
+Consecuencias conocidas, para que no se lean como sorpresas:
+
+- La base puede llenarse de clínicas basura; no hay purga ni panel de moderación.
+- Como el correo es único **por organización**, un mismo correo puede repetirse sin límite entre
+  clínicas.
+- El slug único hace que un ataque con nombres repetidos genere sufijos crecientes (`-2`, `-3`, …),
+  cada uno con su propia consulta.
+
+Mitigación mínima cuando se priorice: límite de tasa por origen en el proxy, captcha en el formulario
+y verificación de correo antes de habilitar el acceso. **No está hecho y no se declara como hecho.**
+
+### Límites del plan: publicados, todavía no aplicados
+
+Los límites se publican y la pantalla los muestra, pero **ningún punto del sistema los hace cumplir**
+hoy: crear un médico o un consultorio no comprueba la cuota del plan. Esta tarea publica el dato y
+retira los campos del formulario; el control de cuotas es una tarea aparte y no se simuló con una
+validación a medias.
+
+### Riesgos declarados
+
+- **Carrera de slug.** Dos registros simultáneos con el mismo nombre pueden pasar los dos la
+  comprobación y el segundo choca contra `organizacion_slug_key`: recibe un error de integridad, no
+  un slug duplicado. No hay reintento automático; el caso es improbable y el fallo es seguro (no
+  corrompe nada).
+- **`usuario.nombre` solo lo escribe el registro.** El alta de cuentas de la administración no pide
+  nombre y deja la columna en `null`; la barra lateral no lo muestra todavía (fuera de alcance).
+- **`usuario.telefono` no lo escribe nadie todavía.** La columna y la entidad están listas, pero ni el
+  registro público ni el alta administrativa lo capturan: toda cuenta nace con `telefono` nulo. Se
+  incorpora en la tarea del alta administrativa.
+- **El nombre del administrador no se devuelve** en `RegistroResponse` ni en `UsuarioResponse`: el
+  formulario ya lo conoce y ampliar la respuesta de un endpoint público no aportaba nada.
+- **La regla de nombre de local está escrita dos veces** —Java y TypeScript— igual que la del correo;
+  los dos archivos tienen que cambiar juntos.
+- **`MigracionV9SqlDirectoTest` cambió de «exactamente 9 migraciones» a «al menos 9»**: la serie crece
+  con cada migración nueva y una igualdad la rompía sin que el esquema de la V9 hubiera cambiado.
+
+### Verificación registrada
+
+- Backend: `cd backend && env -u AUTH_PUBLIC_KEY ./mvnw -q test` → **921 tests** (62 clases), 0 fallos, 0 errores,
+  0 omitidos (antes de esta tarea: 882).
+- Frontend: `pnpm.cmd test` → **267 tests** (antes: 258), `pnpm.cmd build` y `pnpm.cmd lint` sin
+  errores. El detalle por comando está en la entrega de la tarea.
+
+### Checklist de lectura
+
+- [ ] Confirmé que `POST /organizaciones` sigue cerrado y que ninguna otra escritura quedó pública.
+- [ ] Confirmé que la organización y el administrador se crean en una transacción, y vi la prueba del
+      rollback.
+- [ ] Confirmé que las únicas migraciones nuevas son la V10 y que no se tocó ninguna anterior.
+- [ ] Confirmé que la contraseña no viaja y que la pantalla explica con qué entrar.
+- [ ] Confirmé que la deuda de abuso (S9) está declarada y **no** resuelta.
