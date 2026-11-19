@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.intoglobe.clinicas.dto.request.MedicoRequest;
 import com.intoglobe.clinicas.dto.response.MedicoResponse;
 import com.intoglobe.clinicas.exception.CambioDeConsultorioNoPermitidoException;
+import com.intoglobe.clinicas.exception.MedicoConConsultorioPrincipalInactivoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.Medico;
@@ -256,6 +257,31 @@ class MedicoServiceTest {
     }
 
     @Test
+    @DisplayName("listarPorOrganizacion incluye a los médicos dados de baja cuando se piden (S8)")
+    void listarPorOrganizacion_shouldIncludeInactive_whenFlagIsTrue() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var consultorio = consultorioConId(organizacion, UUID.randomUUID());
+        var activo = medicoPersistidoConNombre(organizacion, consultorio, "Dra. Alfa Salud");
+        var inactivo = medicoPersistidoConNombre(organizacion, consultorio, "Dr. Beta Baja");
+        inactivo.desactivar();
+        when(organizacionRepository.existsById(organizacionId)).thenReturn(true);
+        when(medicoRepository.listarPorOrganizacion(organizacionId))
+                .thenReturn(List.of(activo, inactivo));
+
+        var respuestas = medicoService.listarPorOrganizacion(organizacionId, true);
+
+        assertThat(respuestas)
+                .extracting(MedicoResponse::nombre)
+                .containsExactly("Dra. Alfa Salud", "Dr. Beta Baja");
+        assertThat(respuestas)
+                .extracting(MedicoResponse::activo)
+                .containsExactly(true, false);
+        verify(medicoRepository).listarPorOrganizacion(organizacionId);
+        verify(medicoRepository, never()).listarActivosPorOrganizacion(any(UUID.class));
+    }
+
+    @Test
     @DisplayName("listarPorOrganizacion lanza ResourceNotFoundException y no consulta la lista cuando la organización no existe")
     void listarPorOrganizacion_shouldThrowResourceNotFoundExceptionAndNotQuery_whenOrganizationMissing() {
         var organizacionId = UUID.randomUUID();
@@ -430,6 +456,92 @@ class MedicoServiceTest {
 
         assertThatThrownBy(() -> medicoService.desactivar(id, otroTenant))
                 .isInstanceOf(ResourceNotFoundException.class);
+        verify(medicoRepository, never()).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("activar reactiva un médico dado de baja cuyo principal está activo y solo cambia activo")
+    void activar_shouldReactivate_whenMedicoIsInactive() {
+        var organizacion = organizacionConId(UUID.randomUUID());
+        var consultorio = consultorioTransitorio(organizacion);
+        var medico = medicoPersistido(organizacion, consultorio);
+        medico.desactivar();
+        assertThat(medico.isActivo()).isFalse();
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacion.getId()))
+                .thenReturn(Optional.of(medico));
+        when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        medicoService.activar(medico.getId(), organizacion.getId());
+
+        assertThat(medico.isActivo()).isTrue();
+        assertThat(medico.getOrganizacion()).isSameAs(organizacion);
+        assertThat(medico.getConsultorio()).isSameAs(consultorio);
+        verify(medicoRepository).save(medico);
+    }
+
+    @Test
+    @DisplayName("activar es idempotente sobre un médico ya activo: no lanza y lo deja activo")
+    void activar_shouldRemainIdempotent_whenMedicoIsAlreadyActive() {
+        var organizacion = organizacionConId(UUID.randomUUID());
+        var consultorio = consultorioTransitorio(organizacion);
+        var medico = medicoPersistido(organizacion, consultorio);
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacion.getId()))
+                .thenReturn(Optional.of(medico));
+        when(medicoRepository.save(any(Medico.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        assertThatCode(() -> {
+            medicoService.activar(medico.getId(), organizacion.getId());
+            medicoService.activar(medico.getId(), organizacion.getId());
+        }).doesNotThrowAnyException();
+
+        assertThat(medico.isActivo()).isTrue();
+        verify(medicoRepository, times(2)).save(medico);
+    }
+
+    @Test
+    @DisplayName("activar lanza ResourceNotFoundException cuando el médico no existe")
+    void activar_shouldThrowResourceNotFoundException_whenMedicoMissing() {
+        var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> medicoService.activar(id, tenantId))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Medico")
+                .hasMessageContaining(id.toString());
+        verify(medicoRepository, never()).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("activar un médico de otro tenant no lo reactiva (404, no 403)")
+    void activar_shouldNotReactivate_whenMedicoBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        when(medicoRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> medicoService.activar(id, otroTenant))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verify(medicoRepository, never()).save(any(Medico.class));
+    }
+
+    @Test
+    @DisplayName("activar responde 409 cuando el consultorio principal está dado de baja (S7)")
+    void activar_shouldThrowConsultorioPrincipalInactivo_whenPrincipalIsInactive() {
+        var organizacion = organizacionConId(UUID.randomUUID());
+        var consultorio = consultorioTransitorio(organizacion);
+        consultorio.desactivar();
+        var medico = medicoPersistido(organizacion, consultorio);
+        medico.desactivar();
+        when(medicoRepository.buscarPorIdYOrganizacion(medico.getId(), organizacion.getId()))
+                .thenReturn(Optional.of(medico));
+
+        assertThatThrownBy(() -> medicoService.activar(medico.getId(), organizacion.getId()))
+                .isInstanceOf(MedicoConConsultorioPrincipalInactivoException.class)
+                .hasMessageContaining("consultorio principal")
+                .hasMessageContaining("Reactiva primero el consultorio");
+        assertThat(medico.isActivo())
+                .as("un rechazo no debe reactivar al médico")
+                .isFalse();
         verify(medicoRepository, never()).save(any(Medico.class));
     }
 

@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.intoglobe.clinicas.dto.request.MedicoRequest;
 import com.intoglobe.clinicas.dto.response.MedicoResponse;
 import com.intoglobe.clinicas.exception.CambioDeConsultorioNoPermitidoException;
+import com.intoglobe.clinicas.exception.MedicoConConsultorioPrincipalInactivoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.security.ClaveRsaDePrueba;
 import com.intoglobe.clinicas.security.SecurityConfig;
@@ -30,6 +31,7 @@ import com.intoglobe.clinicas.service.MedicoService;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -146,7 +148,7 @@ class MedicoControllerTest {
     @Test
     @DisplayName("GET anidado devuelve 200 con el arreglo de médicos activos")
     void listarPorOrganizacion_shouldReturn200WithArray() throws Exception {
-        when(medicoService.listarPorOrganizacion(ORG_ID)).thenReturn(List.of(
+        when(medicoService.listarPorOrganizacion(ORG_ID, false)).thenReturn(List.of(
                 respuesta(UUID.randomUUID(), ORG_ID, CONSULTORIO_ID, "Dra. Ana Torres", null,
                         null, null, "500.00", true),
                 respuesta(UUID.randomUUID(), ORG_ID, CONSULTORIO_ID, "Dr. Bruno Salas", null,
@@ -160,13 +162,28 @@ class MedicoControllerTest {
                 .andExpect(jsonPath("$[1].nombre").value("Dr. Bruno Salas"))
                 .andExpect(jsonPath("$[*].organizacionId",
                         org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(ORG_ID.toString()))));
-        verify(medicoService).listarPorOrganizacion(ORG_ID);
+        verify(medicoService).listarPorOrganizacion(ORG_ID, false);
+    }
+
+    @Test
+    @DisplayName("GET anidado con incluirInactivos=true propaga el parámetro al servicio (S8)")
+    void listarPorOrganizacion_shouldPassIncluirInactivos_whenRequested() throws Exception {
+        when(medicoService.listarPorOrganizacion(ORG_ID, true)).thenReturn(List.of(
+                respuesta(UUID.randomUUID(), ORG_ID, CONSULTORIO_ID, "Dra. Ana Torres", null,
+                        null, null, "500.00", false)));
+
+        perform(get("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID)
+                        .param("incluirInactivos", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].activo").value(false));
+        verify(medicoService).listarPorOrganizacion(ORG_ID, true);
     }
 
     @Test
     @DisplayName("GET anidado con organización inexistente devuelve 404 con ErrorResponse")
     void listarPorOrganizacion_shouldReturn404WithErrorResponse_whenOrganizationIsMissing() throws Exception {
-        when(medicoService.listarPorOrganizacion(ORG_ID))
+        when(medicoService.listarPorOrganizacion(ORG_ID, false))
                 .thenThrow(new ResourceNotFoundException("Organizacion", ORG_ID));
 
         perform(get("/api/v1/organizaciones/{organizacionId}/medicos", ORG_ID))
@@ -278,6 +295,20 @@ class MedicoControllerTest {
     }
 
     @Test
+    @DisplayName("POST /{id}/activar devuelve 204 sin cuerpo y es idempotente al repetirse")
+    void activar_shouldReturn204WithoutBody_andRemain204_whenRepeated() throws Exception {
+        perform(post("/api/v1/medicos/{id}/activar", ID))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        perform(post("/api/v1/medicos/{id}/activar", ID))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        verify(medicoService, times(2)).activar(ID, ORG_ID);
+    }
+
+    @Test
     @DisplayName("GET /{id} inexistente devuelve 404 con ErrorResponse")
     void buscarPorId_shouldReturn404WithErrorResponse_whenMissing() throws Exception {
         when(medicoService.buscarPorId(ID, ORG_ID))
@@ -321,6 +352,38 @@ class MedicoControllerTest {
                 .andExpect(jsonPath("$.error").value("Not Found"))
                 .andExpect(jsonPath("$.mensaje").value(MENSAJE_MEDICO_NO_ENCONTRADO))
                 .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + ID));
+    }
+
+    @Test
+    @DisplayName("POST /{id}/activar con el consultorio principal inactivo devuelve 409 con ErrorResponse (S7)")
+    void activar_shouldReturn409_whenThePrincipalConsultorioIsInactive() throws Exception {
+        var mensaje = MedicoConConsultorioPrincipalInactivoException.porTenerElPrincipalDadoDeBaja()
+                .getMessage();
+        doThrow(MedicoConConsultorioPrincipalInactivoException.porTenerElPrincipalDadoDeBaja())
+                .when(medicoService).activar(ID, ORG_ID);
+
+        perform(post("/api/v1/medicos/{id}/activar", ID))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(mensaje))
+                .andExpect(jsonPath("$.mensaje",
+                        org.hamcrest.Matchers.containsString("Reactiva primero el consultorio")))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + ID + "/activar"));
+    }
+
+    @Test
+    @DisplayName("POST /{id}/activar inexistente devuelve 404 con ErrorResponse")
+    void activar_shouldReturn404_whenMissing() throws Exception {
+        doThrow(new ResourceNotFoundException("Medico", ID))
+                .when(medicoService).activar(ID, ORG_ID);
+
+        perform(post("/api/v1/medicos/{id}/activar", ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.codigo").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.mensaje").value(MENSAJE_MEDICO_NO_ENCONTRADO))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + ID + "/activar"));
     }
 
     @Test

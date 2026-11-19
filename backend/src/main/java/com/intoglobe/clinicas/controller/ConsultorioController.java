@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.intoglobe.clinicas.dto.request.ConsultorioRequest;
@@ -50,7 +51,7 @@ import jakarta.validation.Valid;
  * reverso.</p>
  *
  * <p><strong>Tenant y rol (R-SEG-04 a R-SEG-06, ADR-013):</strong> la cadena de filtros
- * exige {@code ADMIN} para crear, actualizar y desactivar, y admite {@code MEDICO} solo en
+ * exige {@code ADMIN} para crear, actualizar, desactivar y reactivar, y admite {@code MEDICO} solo en
  * las lecturas. El {@code organizacionId} del path se acepta únicamente si coincide con el
  * {@code tenantId} del token —{@link TenantAccessGuard} responde {@code 403} en caso
  * contrario, sin exención de {@code ADMIN}— y es el tenant del claim el que se propaga al
@@ -59,7 +60,7 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/v1")
-@Tag(name = "v1 · consultorios", description = "Alta, consulta, actualización y baja lógica de consultorios.")
+@Tag(name = "v1 · consultorios", description = "Alta, consulta, actualización, baja lógica y reactivación de consultorios.")
 public class ConsultorioController {
 
     private final ConsultorioService consultorioService;
@@ -107,16 +108,19 @@ public class ConsultorioController {
      *
      * <p>La existencia del padre es parte del contrato de la ruta anidada: un id
      * inexistente responde 404 en vez de un {@code 200 []} que ocultaría el error
-     * del cliente. Esa comprobación vive en el service, no aquí.</p>
+     * del cliente. Esa comprobación vive en el service, no aquí. Por omisión el listado trae solo
+     * los activos; {@code incluirInactivos} agrega los dados de baja para que la pantalla pueda
+     * ofrecer la reactivación en la misma fila (S8).</p>
      *
      * @param organizacionId organización dueña de los consultorios, validada contra el token
-     * @return 200 con el arreglo de consultorios activos
+     * @param incluirInactivos si se incluyen también los consultorios dados de baja
+     * @return 200 con el arreglo de consultorios
      */
     @GetMapping("/organizaciones/{organizacionId}/consultorios")
-    @Operation(summary = "Listar consultorios activos de una organización",
-            description = "Devuelve los consultorios activos de la organización indicada, ordenados alfabéticamente por nombre.")
+    @Operation(summary = "Listar consultorios de una organización",
+            description = "Devuelve los consultorios activos de la organización indicada, ordenados alfabéticamente por nombre. Con incluirInactivos=true devuelve también los dados de baja.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Listado de consultorios activos",
+            @ApiResponse(responseCode = "200", description = "Listado de consultorios",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConsultorioResponse.class)))),
             @ApiResponse(responseCode = "400", description = "Identificador de la organización con formato inválido",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -125,9 +129,12 @@ public class ConsultorioController {
     })
     public ResponseEntity<List<ConsultorioResponse>> listarPorOrganizacion(
             @Parameter(description = "Identificador UUID de la organización cuyos consultorios se listan.", example = "3f1c2b7a-8d4e-4a9b-9c1f-2e6d5a7b8c90")
-            @PathVariable UUID organizacionId) {
+            @PathVariable UUID organizacionId,
+            @Parameter(description = "Incluye también los consultorios dados de baja, para poder reactivarlos.")
+            @RequestParam(name = "incluirInactivos", defaultValue = "false") boolean incluirInactivos) {
         return ResponseEntity.ok(
-                consultorioService.listarPorOrganizacion(tenantAccessGuard.exigirTenantDeLaRuta(organizacionId)));
+                consultorioService.listarPorOrganizacion(
+                        tenantAccessGuard.exigirTenantDeLaRuta(organizacionId), incluirInactivos));
     }
 
     /**
@@ -209,6 +216,34 @@ public class ConsultorioController {
             @Parameter(description = "Identificador UUID del consultorio a desactivar.", example = "7d2e4c18-5b6a-4f3d-8e01-9a2b3c4d5e6f")
             @PathVariable UUID id) {
         consultorioService.desactivar(id, tenantAccessGuard.tenantActual());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Reactiva un consultorio dado de baja lógica. Es idempotente: activar un consultorio que
+     * ya está activo sigue devolviendo 204 y no duplica la fila.
+     *
+     * <p>El caso típico es el consultorio que se dio de baja por una refacción: vuelve el
+     * mismo registro, con sus médicos y su historial, en lugar de un alta nueva.</p>
+     *
+     * @param id identificador del consultorio
+     * @return 204 sin cuerpo
+     */
+    @PostMapping("/consultorios/{id}/activar")
+    @Operation(summary = "Reactivar consultorio",
+            description = "Revierte la baja lógica de un consultorio existente. La operación es idempotente y no devuelve cuerpo.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Consultorio reactivado, sin cuerpo",
+                    content = @Content),
+            @ApiResponse(responseCode = "400", description = "Identificador con formato inválido",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Consultorio inexistente",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<Void> activar(
+            @Parameter(description = "Identificador UUID del consultorio a reactivar.", example = "7d2e4c18-5b6a-4f3d-8e01-9a2b3c4d5e6f")
+            @PathVariable UUID id) {
+        consultorioService.activar(id, tenantAccessGuard.tenantActual());
         return ResponseEntity.noContent().build();
     }
 }

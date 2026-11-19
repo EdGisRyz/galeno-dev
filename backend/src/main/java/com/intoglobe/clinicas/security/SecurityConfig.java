@@ -71,7 +71,7 @@ import tools.jackson.databind.json.JsonMapper;
  * la cadena la escribe {@link RestAccessDeniedHandler}.</p>
  *
  * <table>
- *   <caption>Matriz aplicada a las treinta y cinco operaciones de la API</caption>
+ *   <caption>Matriz aplicada a las treinta y siete operaciones de la API</caption>
  *   <tr><th>Operación</th><th>ADMIN</th><th>MEDICO</th><th>PACIENTE</th><th>RECEPCIONISTA</th></tr>
  *   <tr><td>{@code POST /organizaciones}</td><td>403</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones}</td><td>solo la suya</td><td>403</td><td>403</td><td>403</td></tr>
@@ -81,10 +81,12 @@ import tools.jackson.databind.json.JsonMapper;
  *   <tr><td>{@code GET /organizaciones/{orgId}/consultorios}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
  *   <tr><td>{@code GET /consultorios/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
  *   <tr><td>{@code PUT|DELETE /consultorios/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /consultorios/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code POST /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /organizaciones/{orgId}/medicos}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
  *   <tr><td>{@code GET /medicos/{id}}</td><td>propio tenant</td><td>propio tenant</td><td>403</td><td>propio tenant</td></tr>
  *   <tr><td>{@code PUT|DELETE /medicos/{id}}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
+ *   <tr><td>{@code POST /medicos/{id}/activar}</td><td>propio tenant</td><td>403</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code POST /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td><td>403</td></tr>
  *   <tr><td>{@code GET /medicos/{id}/horarios}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td><td>propio tenant</td></tr>
  *   <tr><td>{@code GET|PUT|DELETE /horarios/{id}}</td><td>propio tenant</td><td>su propia agenda</td><td>403</td><td>{@code GET} sí; {@code PUT|DELETE} 403</td></tr>
@@ -199,7 +201,7 @@ import tools.jackson.databind.json.JsonMapper;
  * venir acompañado del onboarding que haga alcanzable la organización creada, y de un test que
  * lo demuestre.</p>
  *
- * <p>{@code PACIENTE} recibe {@code 403} en las treinta y cinco operaciones. Desde este módulo
+ * <p>{@code PACIENTE} recibe {@code 403} en las treinta y siete operaciones. Desde este módulo
  * existe contrato de pacientes, así que su {@code 403} ya no es ausencia de endpoint:
  * <strong>hoy no se emiten tokens {@code PACIENTE}</strong> —el rol existe en el schema y se
  * conserva para una implementación futura, pero no hay cuentas de paciente— y por eso no
@@ -251,10 +253,10 @@ public class SecurityConfig {
     /** Ruta base de organizaciones, dueña de consultorios y médicos en las rutas anidadas. */
     private static final String RUTA_ORGANIZACIONES = "/api/v1/organizaciones";
 
-    /** Ruta base de los consultorios pedidos por id. */
+    /** Ruta base de los consultorios pedidos por id y de su reactivación. */
     private static final String RUTA_CONSULTORIOS = "/api/v1/consultorios";
 
-    /** Ruta base de los médicos pedidos por id. */
+    /** Ruta base de los médicos pedidos por id y de su reactivación. */
     private static final String RUTA_MEDICOS = "/api/v1/medicos";
 
     /** Ruta base de los bloques de disponibilidad pedidos por id. */
@@ -339,11 +341,17 @@ public class SecurityConfig {
                         .hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.POST, RUTA_ORGANIZACIONES + "/*/medicos")
                         .hasRole(ROL_ADMIN)
-                        // Mutaciones por id: solo ADMIN de su propio tenant.
+                        // Mutaciones por id: solo ADMIN de su propio tenant. La reactivación se
+                        // nombra aparte porque POST /consultorios/* y POST /medicos/* no la alcanzan
+                        // (son dos segmentos después de la base).
                         .requestMatchers(HttpMethod.PUT, RUTA_CONSULTORIOS + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_CONSULTORIOS + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.POST, RUTA_CONSULTORIOS + "/*/activar")
+                        .hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.PUT, RUTA_MEDICOS + "/*").hasRole(ROL_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, RUTA_MEDICOS + "/*").hasRole(ROL_ADMIN)
+                        .requestMatchers(HttpMethod.POST, RUTA_MEDICOS + "/*/activar")
+                        .hasRole(ROL_ADMIN)
                         // Organizaciones: el alta está bloqueada para los cuatro roles
                         // (decisión de producto del 2026-10-29: la organización creada
                         // quedaría inalcanzable por el aislamiento por tenant). Se declara con

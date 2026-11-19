@@ -79,9 +79,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       y {@link #medicoLeePacientesDeSuPropioTenant()}), los cinco endpoints de horarios sobre
  *       su propia agenda ({@link #medicoOperaSuPropiaAgendaDeHorarios()}) y la lista de
  *       consultorios asignados a su propio médico
- *       ({@link #medicoLeeLosConsultoriosDeSuPropioMedico()})— y las veintidós operaciones
+ *       ({@link #medicoLeeLosConsultoriosDeSuPropioMedico()})— y las veinticuatro operaciones
  *       restantes {@code 403} ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
- *   <li><strong>PACIENTE</strong>: las treinta y cinco operaciones {@code 403}
+ *   <li><strong>PACIENTE</strong>: las treinta y siete operaciones {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError}).</li>
  *   <li><strong>RECEPCIONISTA</strong>: las catorce celdas que le concede la matriz —la lectura de
  *       la propia organización, las siete lecturas de consultorios, médicos, horarios y
@@ -89,7 +89,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       (S3)— ejercidas de extremo a extremo con su código de éxito
  *       ({@link #recepcionConsultaConsultoriosDeSuOrganizacion()},
  *       {@link #recepcionistaLeeElNombreDeSuPropiaOrganizacion()} y las demás pruebas
- *       {@code recepcion*}), y las veintiuna operaciones restantes {@code 403}
+ *       {@code recepcion*}), y las veintitrés operaciones restantes {@code 403}
  *       ({@link #celdaDenegadaResponde403ConElContratoDeError} y
  *       {@link #familiaDenegadaDeRecepcionResponde403}).</li>
  *   <li><strong>IDOR por id</strong>: token de A contra recursos de B en las operaciones por id de
@@ -412,6 +412,120 @@ class AislamientoYMatrizRbacTest {
         ejecutar(delete(rutaOrganizacionA), tokenAdminA)
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
+    }
+
+    /**
+     * Reactivación de `médico` y `consultorio` sobre la cadena real: la celda de la matriz es
+     * solo de `ADMIN` y el servicio devuelve el registro a la vida sin duplicarlo. La
+     * reactivación es idempotente (204 las dos veces) y el recurso queda activo de verdad, no
+     * solo con la respuesta correcta. El orden respeta la invariante de S6 y S7: para dar de baja
+     * el consultorio principal, el médico tiene que estar inactivo, y el médico solo se reactiva
+     * con su principal activo. La segunda mitad —reactivar sin el principal activo responde
+     * 409— se ejerce en {@link #reactivarElMedicoSinElPrincipalActivoResponde409()}.
+     */
+    @Test
+    @DisplayName("ADMIN reactiva un médico y un consultorio de su propio tenant (204 idempotente)")
+    void adminReactivaMedicoYConsultorioDeSuPropioTenant() throws Exception {
+        String rutaMedicosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/medicos";
+        String rutaConsultoriosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/consultorios";
+        ejecutar(delete("/api/v1/medicos/" + medicoA.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+
+        // S8: el listado por defecto sigue mostrando solo activos, y el de bajas deja alcanzable
+        // la reactivación desde la tabla.
+        ejecutar(get(rutaMedicosA), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers
+                        .not(org.hamcrest.Matchers.hasItem(medicoA.getId().toString()))));
+        ejecutar(get(rutaMedicosA).param("incluirInactivos", "true"), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '" + medicoA.getId() + "')].activo",
+                        org.hamcrest.Matchers.contains(false)));
+
+        ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/activar"), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/activar"), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId()), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activo").value(true));
+
+        // Un bloque existente se crea con el médico activo; después se comprueba que su agenda no
+        // se edita con el médico de baja (S10) y que el borrado sigue permitido para limpiar datos.
+        String horarioDeMedicoA = idDe(ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/horarios")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(CUERPO_HORARIO_NUEVO), tokenAdminA)
+                .andExpect(status().isCreated())
+                .andReturn());
+
+        // Su consultorio principal solo se puede dar de baja con el médico inactivo (S6).
+        ejecutar(delete("/api/v1/medicos/" + medicoA.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+        ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/horarios")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"diaSemana":4,"horaInicio":"09:00:00","horaFin":"11:00:00","duracionConsulta":30}
+                        """), tokenAdminA)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.mensaje", org.hamcrest.Matchers
+                        .containsString("Reactiva primero al médico")));
+        ejecutar(delete("/api/v1/horarios/" + horarioDeMedicoA), tokenAdminA)
+                .andExpect(status().isNoContent());
+        ejecutar(delete("/api/v1/consultorios/" + consultorioA.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+
+        ejecutar(get(rutaConsultoriosA), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id", org.hamcrest.Matchers
+                        .not(org.hamcrest.Matchers.hasItem(consultorioA.getId().toString()))));
+        ejecutar(get(rutaConsultoriosA).param("incluirInactivos", "true"), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '" + consultorioA.getId() + "')].activo",
+                        org.hamcrest.Matchers.contains(false)));
+
+        ejecutar(post("/api/v1/consultorios/" + consultorioA.getId() + "/activar"), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(post("/api/v1/consultorios/" + consultorioA.getId() + "/activar"), tokenAdminA)
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        ejecutar(get("/api/v1/consultorios/" + consultorioA.getId()), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activo").value(true));
+    }
+
+    /**
+     * S6 y S7 de extremo a extremo, con la base real: no se da de baja el consultorio principal
+     * de un médico activo, y no se reactiva un médico cuyo principal está dado de baja. Las dos
+     * respuestas son {@code 409} con el mensaje que indica el camino, y el estado queda intacto.
+     */
+    @Test
+    @DisplayName("S6 y S7: el consultorio principal y el médico activo no se separan (409)")
+    void reactivarElMedicoSinElPrincipalActivoResponde409() throws Exception {
+        ejecutar(delete("/api/v1/consultorios/" + consultorioA.getId()), tokenAdminA)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.mensaje", org.hamcrest.Matchers
+                        .containsString("Da de baja primero al médico")));
+        ejecutar(get("/api/v1/consultorios/" + consultorioA.getId()), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activo").value(true));
+
+        ejecutar(delete("/api/v1/medicos/" + medicoA.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+        ejecutar(delete("/api/v1/consultorios/" + consultorioA.getId()), tokenAdminA)
+                .andExpect(status().isNoContent());
+        ejecutar(post("/api/v1/medicos/" + medicoA.getId() + "/activar"), tokenAdminA)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.mensaje", org.hamcrest.Matchers
+                        .containsString("Reactiva primero el consultorio")));
+        ejecutar(get("/api/v1/medicos/" + medicoA.getId()), tokenAdminA)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activo").value(false));
     }
 
     // ------------------------------------------------------------------
@@ -1136,8 +1250,8 @@ class AislamientoYMatrizRbacTest {
     // ------------------------------------------------------------------
 
     /**
-     * Celdas {@code 403} de la matriz: las treinta y cinco operaciones para {@code PACIENTE}, las
-     * veintidós que {@code MEDICO} no tiene permitidas y las veintiuna que {@code RECEPCIONISTA}
+     * Celdas {@code 403} de la matriz: las treinta y siete operaciones para {@code PACIENTE}, las
+     * veinticuatro que {@code MEDICO} no tiene permitidas y las veintitrés que {@code RECEPCIONISTA}
      * no tiene, todas con el tenant correcto en el path para que lo que se ejerza sea el rol y no
      * el aislamiento. Las trece celdas que la matriz concede a {@code MEDICO} no aparecen aquí:
      * cuatro se ejercen en {@link #medicoLeeSuPropioTenant()}, una en
@@ -1221,6 +1335,8 @@ class AislamientoYMatrizRbacTest {
                         "/api/v1/consultorios/" + consultorioA.getId(), CUERPO_CONSULTORIO_ACTUALIZADO),
                 Arguments.of(rol, "DELETE consultorio", "DELETE",
                         "/api/v1/consultorios/" + consultorioA.getId(), null),
+                Arguments.of(rol, "POST activar consultorio", "POST",
+                        "/api/v1/consultorios/" + consultorioA.getId() + "/activar", null),
                 Arguments.of(rol, "POST médico", "POST",
                         "/api/v1/organizaciones/" + organizacionA.getId() + "/medicos",
                         cuerpoMedico(consultorioA.getId().toString(), "Dr. Nuevo")),
@@ -1231,6 +1347,8 @@ class AislamientoYMatrizRbacTest {
                 Arguments.of(rol, "PUT médico", "PUT", "/api/v1/medicos/" + medicoA.getId(),
                         cuerpoMedico(consultorioA.getId().toString(), "Dr. Nuevo")),
                 Arguments.of(rol, "DELETE médico", "DELETE", "/api/v1/medicos/" + medicoA.getId(), null),
+                Arguments.of(rol, "POST activar médico", "POST",
+                        "/api/v1/medicos/" + medicoA.getId() + "/activar", null),
                 Arguments.of(rol, "POST horario", "POST",
                         "/api/v1/medicos/" + medicoA.getId() + "/horarios", CUERPO_HORARIO_NUEVO),
                 Arguments.of(rol, "GET horarios anidados", "GET",
@@ -1802,11 +1920,13 @@ class AislamientoYMatrizRbacTest {
                 GET    /api/v1/consultorios/{con}                 PERMITIDA
                 PUT    /api/v1/consultorios/{con}                 DENEGADA
                 DELETE /api/v1/consultorios/{con}                 DENEGADA
+                POST   /api/v1/consultorios/{con}/activar         DENEGADA
                 POST   /api/v1/organizaciones/{org}/medicos       DENEGADA
                 GET    /api/v1/organizaciones/{org}/medicos       PERMITIDA
                 GET    /api/v1/medicos/{med}                      PERMITIDA
                 PUT    /api/v1/medicos/{med}                      DENEGADA
                 DELETE /api/v1/medicos/{med}                      DENEGADA
+                POST   /api/v1/medicos/{med}/activar              DENEGADA
                 POST   /api/v1/medicos/{med}/horarios             DENEGADA
                 GET    /api/v1/medicos/{med}/horarios             PERMITIDA
                 GET    /api/v1/horarios/{hor}                     PERMITIDA
@@ -1848,7 +1968,7 @@ class AislamientoYMatrizRbacTest {
             }
         }
         assertThat(permitidas).as("S3 concede catorce celdas a recepción").isEqualTo(14);
-        assertThat(denegadas).as("las otras veintiuna quedan denegadas").isEqualTo(21);
+        assertThat(denegadas).as("las otras veintitrés quedan denegadas").isEqualTo(23);
     }
 
     /**

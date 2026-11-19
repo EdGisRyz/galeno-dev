@@ -142,6 +142,33 @@ class ConsultorioRepositoryTest {
     }
 
     @Test
+    void listarPorOrganizacion_shouldIncludeInactiveAndSortByName() {
+        var organizacion = persistirOrganizacion("Clínica Con Bajas");
+        var otraOrganizacion = persistirOrganizacion("Clínica Ajena Con Bajas");
+        var zeta = new Consultorio(organizacion, "Zeta Consultorio", DIRECCION, TELEFONO);
+        var inactivo = new Consultorio(organizacion, "Alfa Consultorio", DIRECCION, TELEFONO);
+        inactivo.desactivar();
+        var ajeno = new Consultorio(otraOrganizacion, "Consultorio Ajeno", DIRECCION, TELEFONO);
+        entityManager.persist(zeta);
+        entityManager.persist(inactivo);
+        entityManager.persist(ajeno);
+        entityManager.flush();
+        entityManager.clear();
+
+        var todos = consultorioRepository.listarPorOrganizacion(organizacion.getId());
+
+        assertThat(todos)
+                .extracting(Consultorio::getNombre)
+                .containsExactly("Alfa Consultorio", "Zeta Consultorio");
+        assertThat(todos)
+                .extracting(Consultorio::getId)
+                .doesNotContain(ajeno.getId());
+        assertThat(todos)
+                .as("el listado con bajas tiene que traer al consultorio inactivo")
+                .anyMatch(consultorio -> !consultorio.isActivo());
+    }
+
+    @Test
     void desactivar_shouldBeIdempotentAndRemoveFromActiveListing() {
         var organizacion = persistirOrganizacion("Clínica Baja");
         var consultorio = new Consultorio(organizacion, "Consultorio Baja", DIRECCION, TELEFONO);

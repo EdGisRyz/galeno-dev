@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.intoglobe.clinicas.dto.request.MedicoRequest;
 import com.intoglobe.clinicas.dto.response.MedicoResponse;
 import com.intoglobe.clinicas.exception.CambioDeConsultorioNoPermitidoException;
+import com.intoglobe.clinicas.exception.MedicoConConsultorioPrincipalInactivoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.mapper.MedicoMapper;
 import com.intoglobe.clinicas.model.Medico;
@@ -44,9 +45,9 @@ import com.intoglobe.clinicas.repository.OrganizacionRepository;
  * probada en {@code AislamientoYMatrizRbacTest}. También está deliberadamente ausente el
  * listado de médicos por consultorio, porque V1 no indexa {@code medico.consultorio_id}.</p>
  *
- * <p><strong>Aislamiento por tenant (R-SEG-04, D5.6):</strong> las tres operaciones por id
- * reciben el {@code tenantId} del token y consultan con
- * {@link MedicoRepository#buscarPorIdYOrganizacion}. Un médico de otra organización responde
+ * <p><strong>Aislamiento por tenant (R-SEG-04, D5.6):</strong> las cuatro operaciones por id
+ * —buscar, actualizar, dar de baja y reactivar— reciben el {@code tenantId} del token y consultan
+ * con {@link MedicoRepository#buscarPorIdYOrganizacion}. Un médico de otra organización responde
  * {@code 404}, igual que un identificador inexistente, para no revelar que existe. El tenant
  * lo aporta el llamador desde el claim del token —nunca desde el path sin validar— porque el
  * controlador ya lo obtuvo de {@code TenantAccessGuard}.</p>
@@ -140,10 +141,35 @@ public class MedicoService {
      */
     @Transactional(readOnly = true)
     public List<MedicoResponse> listarPorOrganizacion(UUID organizacionId) {
+        return listarPorOrganizacion(organizacionId, false);
+    }
+
+    /**
+     * Lista los médicos de una organización.
+     *
+     * <p>Por omisión devuelve solo los activos, que es el contrato declarado del listado. Con
+     * {@code incluirInactivos} devuelve también los dados de baja, para que la pantalla pueda
+     * ofrecer la reactivación en la misma fila (S8): sin ellos, el médico recién dado de baja
+     * desaparece de la tabla y la operación queda inalcanzable.</p>
+     *
+     * <p>Las comprobaciones de acceso son las mismas en los dos casos y no dependen del
+     * parámetro: la organización del path ya la contrastó el controlador contra el claim y aquí
+     * se comprueba que exista.</p>
+     *
+     * @param organizacionId organización dueña de los médicos
+     * @param incluirInactivos si se incluyen también los médicos dados de baja
+     * @return médicos de esa organización en su representación de salida
+     * @throws ResourceNotFoundException si no existe una organización con ese id
+     */
+    @Transactional(readOnly = true)
+    public List<MedicoResponse> listarPorOrganizacion(UUID organizacionId, boolean incluirInactivos) {
         if (!organizacionRepository.existsById(organizacionId)) {
             throw new ResourceNotFoundException("Organizacion", organizacionId);
         }
-        return medicoRepository.listarActivosPorOrganizacion(organizacionId).stream()
+        var medicos = incluirInactivos
+                ? medicoRepository.listarPorOrganizacion(organizacionId)
+                : medicoRepository.listarActivosPorOrganizacion(organizacionId);
+        return medicos.stream()
                 .map(MedicoMapper::aResponse)
                 .toList();
     }
@@ -196,6 +222,41 @@ public class MedicoService {
     public void desactivar(UUID id, UUID tenantId) {
         var medico = buscarDelTenant(id, tenantId);
         medico.desactivar();
+        medicoRepository.save(medico);
+    }
+
+    /**
+     * Reactiva un médico dado de baja lógica. Es idempotente: activar uno que ya está activo
+     * no produce error ni duplica la fila. Solo cambia {@code activo}.
+     *
+     * <p><strong>Por qué existe:</strong> un médico dado de baja por error solo volvía
+     * creando otro, y con el alta nueva se perdían sus bloques de horario y sus asignaciones
+     * de consultorio. La baja es lógica justamente para que el registro se pueda recuperar;
+     * esta operación es esa vuelta.</p>
+     *
+     * <p><strong>No reactiva la cuenta de usuario</strong> (S5): el acceso de un médico se cierra
+     * por su {@code activo}, no por la cuenta, así que reactivarlo no reactiva ninguna cuenta
+     * y una cuenta dada de baja sigue de baja.</p>
+     *
+     * <p><strong>El consultorio principal tiene que estar activo (S7).</strong> Es la otra mitad
+     * de la invariante de S6: un médico activo con su principal dado de baja dejaría la agenda
+     * apuntando a una sala cerrada. Se responde
+     * {@link MedicoConConsultorioPrincipalInactivoException} —{@code 409}— con el camino para
+     * desbloquear la operación: reactivar primero el consultorio.</p>
+     *
+     * @param id       identificador del médico a reactivar
+     * @param tenantId organización del token de la petición
+     * @throws ResourceNotFoundException si no existe un médico con ese id en ese tenant
+     * @throws MedicoConConsultorioPrincipalInactivoException si su consultorio principal está
+     *                                   dado de baja; el handler lo traduce a 409
+     */
+    @Transactional
+    public void activar(UUID id, UUID tenantId) {
+        var medico = buscarDelTenant(id, tenantId);
+        if (!medico.getConsultorio().isActivo()) {
+            throw MedicoConConsultorioPrincipalInactivoException.porTenerElPrincipalDadoDeBaja();
+        }
+        medico.activar();
         medicoRepository.save(medico);
     }
 

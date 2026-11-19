@@ -183,6 +183,74 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Responde 409 cuando se intenta dar de baja el consultorio principal de un médico activo.
+     *
+     * <p>Es la primera mitad de la invariante «un médico activo tiene un consultorio principal
+     * activo» (S6). La petición está bien formada y el consultorio existe: lo que choca es el
+     * estado del médico, así que el conflicto es de negocio y no de validación. El mensaje dice el
+     * motivo y el camino —dar de baja primero al médico—. Si el único médico que lo tiene como
+     * principal está inactivo, la baja se permite; esta excepción no se lanza en ese caso.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(ConsultorioPrincipalConMedicoActivoException.class)
+    public ResponseEntity<ErrorResponse> manejarConsultorioPrincipalConMedicoActivo(
+            ConsultorioPrincipalConMedicoActivoException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 409 cuando se intenta reactivar un médico cuyo consultorio principal está dado de
+     * baja.
+     *
+     * <p>Es la segunda mitad de la invariante de S6 (S7): sin este rechazo, el estado incoherente
+     * se colaría dando de baja el consultorio de un médico inactivo y reactivando después al
+     * médico. El mensaje indica el camino —reactivar primero el consultorio—.</p>
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(MedicoConConsultorioPrincipalInactivoException.class)
+    public ResponseEntity<ErrorResponse> manejarMedicoConConsultorioPrincipalInactivo(
+            MedicoConConsultorioPrincipalInactivoException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 409 cuando se intenta crear o modificar un bloque de la agenda de un médico dado de
+     * baja (S10). La petición está bien formada y el médico existe: lo que choca es su estado. El
+     * mensaje indica el camino —reactivar al médico—. Borrar un bloque no pasa por aquí: limpiar
+     * datos de un médico que ya no atiende tiene que ser posible.
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(AgendaDeMedicoInactivoException.class)
+    public ResponseEntity<ErrorResponse> manejarAgendaDeMedicoInactivo(
+            AgendaDeMedicoInactivoException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
+     * Responde 409 cuando se intenta crear un bloque —o moverlo— a un consultorio dado de baja
+     * (S11). La petición está bien formada y el consultorio existe: lo que choca es su estado. El
+     * mensaje indica el camino —reactivar el consultorio—.
+     *
+     * @param excepcion excepción de negocio con el mensaje seguro
+     * @param peticion  petición que originó el error
+     * @return respuesta 409 con {@link ErrorResponse}
+     */
+    @ExceptionHandler(ConsultorioInactivoParaBloqueException.class)
+    public ResponseEntity<ErrorResponse> manejarConsultorioInactivoParaBloque(
+            ConsultorioInactivoParaBloqueException excepcion, HttpServletRequest peticion) {
+        return construir(HttpStatus.CONFLICT, excepcion.getMessage(), peticion);
+    }
+
+    /**
      * Responde 409 cuando el bloque de horario apunta a un consultorio que no está asignado al
      * médico.
      *

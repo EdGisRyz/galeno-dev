@@ -16,14 +16,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.intoglobe.clinicas.dto.request.ConsultorioRequest;
 import com.intoglobe.clinicas.dto.response.ConsultorioResponse;
+import com.intoglobe.clinicas.exception.ConsultorioPrincipalConMedicoActivoException;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.model.Consultorio;
 import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.PlanTipo;
 import com.intoglobe.clinicas.repository.ConsultorioRepository;
+import com.intoglobe.clinicas.repository.MedicoRepository;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -54,6 +57,9 @@ class ConsultorioServiceTest {
 
     @Mock
     private OrganizacionRepository organizacionRepository;
+
+    @Mock
+    private MedicoRepository medicoRepository;
 
     @InjectMocks
     private ConsultorioService consultorioService;
@@ -173,6 +179,29 @@ class ConsultorioServiceTest {
 
         assertThat(respuestas).isEmpty();
         verify(consultorioRepository).listarActivosPorOrganizacion(organizacionId);
+    }
+
+    @Test
+    @DisplayName("listarPorOrganizacion incluye a los consultorios dados de baja cuando se piden (S8)")
+    void listarPorOrganizacion_shouldIncludeInactive_whenFlagIsTrue() {
+        var organizacionId = UUID.randomUUID();
+        var organizacion = organizacionConId(organizacionId);
+        var activo = consultorioPersistido(organizacion, "Alfa Salud", "Av. Uno 1, CDMX", "555-0001", true);
+        var inactivo = consultorioPersistido(organizacion, "Beta En Refacción", null, null, false);
+        when(organizacionRepository.existsById(organizacionId)).thenReturn(true);
+        when(consultorioRepository.listarPorOrganizacion(organizacionId))
+                .thenReturn(List.of(activo, inactivo));
+
+        var respuestas = consultorioService.listarPorOrganizacion(organizacionId, true);
+
+        assertThat(respuestas)
+                .extracting(ConsultorioResponse::nombre)
+                .containsExactly("Alfa Salud", "Beta En Refacción");
+        assertThat(respuestas)
+                .extracting(ConsultorioResponse::activo)
+                .containsExactly(true, false);
+        verify(consultorioRepository).listarPorOrganizacion(organizacionId);
+        verify(consultorioRepository, never()).listarActivosPorOrganizacion(any(UUID.class));
     }
 
     @Test
@@ -326,6 +355,103 @@ class ConsultorioServiceTest {
         assertThatThrownBy(() -> consultorioService.desactivar(id, otroTenant))
                 .isInstanceOf(ResourceNotFoundException.class);
         verify(consultorioRepository, never()).save(any(Consultorio.class));
+    }
+
+    @Test
+    @DisplayName("activar reactiva un consultorio dado de baja y solo cambia activo")
+    void activar_shouldReactivate_whenConsultorioIsInactive() {
+        var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
+        var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Inactivo", null, null);
+        consultorio.desactivar();
+        assertThat(consultorio.isActivo()).isFalse();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        consultorioService.activar(id, tenantId);
+
+        assertThat(consultorio.isActivo()).isTrue();
+        verify(consultorioRepository).save(consultorio);
+    }
+
+    @Test
+    @DisplayName("activar es idempotente sobre un consultorio ya activo: no lanza y lo deja activo")
+    void activar_shouldRemainIdempotent_whenConsultorioIsAlreadyActive() {
+        var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
+        var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Activo", null, null);
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
+        when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        assertThatCode(() -> {
+            consultorioService.activar(id, tenantId);
+            consultorioService.activar(id, tenantId);
+        }).doesNotThrowAnyException();
+
+        assertThat(consultorio.isActivo()).isTrue();
+        verify(consultorioRepository, times(2)).buscarPorIdYOrganizacion(id, tenantId);
+        verify(consultorioRepository, times(2)).save(consultorio);
+    }
+
+    @Test
+    @DisplayName("activar lanza ResourceNotFoundException cuando el consultorio no existe")
+    void activar_shouldThrowResourceNotFoundException_whenConsultorioMissing() {
+        var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> consultorioService.activar(id, tenantId))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Consultorio")
+                .hasMessageContaining(id.toString());
+        verify(consultorioRepository, never()).save(any(Consultorio.class));
+    }
+
+    @Test
+    @DisplayName("activar un consultorio de otro tenant no lo reactiva (404, no 403)")
+    void activar_shouldNotReactivate_whenConsultorioBelongsToAnotherTenant() {
+        var id = UUID.randomUUID();
+        var otroTenant = UUID.randomUUID();
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, otroTenant)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> consultorioService.activar(id, otroTenant))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verify(consultorioRepository, never()).save(any(Consultorio.class));
+    }
+
+    @Test
+    @DisplayName("desactivar responde 409 cuando el consultorio es el principal de un médico activo (S6)")
+    void desactivar_shouldThrowPrincipalConMedicoActivo_whenAnActiveMedicoHasItAsPrincipal() {
+        var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
+        var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Principal", null, null);
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
+        when(medicoRepository.contarActivosPorConsultorioPrincipal(id, tenantId)).thenReturn(1L);
+
+        assertThatThrownBy(() -> consultorioService.desactivar(id, tenantId))
+                .isInstanceOf(ConsultorioPrincipalConMedicoActivoException.class)
+                .hasMessageContaining("consultorio principal")
+                .hasMessageContaining("Da de baja primero al médico");
+        assertThat(consultorio.isActivo())
+                .as("un rechazo no debe dar de baja el consultorio")
+                .isTrue();
+        verify(consultorioRepository, never()).save(any(Consultorio.class));
+    }
+
+    @Test
+    @DisplayName("desactivar permite la baja cuando ese principal solo lo usa un médico inactivo (S6)")
+    void desactivar_shouldAllow_whenTheOnlyMedicoWithItAsPrincipalIsInactive() {
+        var id = UUID.randomUUID();
+        var tenantId = UUID.randomUUID();
+        var consultorio = new Consultorio(organizacionTransitoria(), "Consultorio Liberado", null, null);
+        when(consultorioRepository.buscarPorIdYOrganizacion(id, tenantId)).thenReturn(Optional.of(consultorio));
+        when(medicoRepository.contarActivosPorConsultorioPrincipal(id, tenantId)).thenReturn(0L);
+        when(consultorioRepository.save(any(Consultorio.class))).thenAnswer(invocacion -> invocacion.getArgument(0));
+
+        consultorioService.desactivar(id, tenantId);
+
+        assertThat(consultorio.isActivo()).isFalse();
+        verify(consultorioRepository).save(consultorio);
     }
 
     /**

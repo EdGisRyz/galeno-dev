@@ -21,6 +21,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.intoglobe.clinicas.dto.request.HorarioMedicoRequest;
 import com.intoglobe.clinicas.dto.response.HorarioMedicoResponse;
+import com.intoglobe.clinicas.exception.AgendaDeMedicoInactivoException;
+import com.intoglobe.clinicas.exception.ConsultorioInactivoParaBloqueException;
 import com.intoglobe.clinicas.exception.ConsultorioNoAsignadoAlMedicoException;
 import com.intoglobe.clinicas.exception.DuracionConsultaInvalidaException;
 import com.intoglobe.clinicas.exception.RangoHorarioInvalidoException;
@@ -107,6 +109,10 @@ class HorarioMedicoControllerTest {
             "El consultorio " + CONSULTORIO_NORTE_ID + " no está asignado al médico " + MEDICO_ID
                     + ": primero hay que asignarlo al médico y después crear o mover el bloque"
                     + " de horario a ese consultorio";
+    private static final String MENSAJE_MEDICO_INACTIVO =
+            AgendaDeMedicoInactivoException.porSerDeUnMedicoDadoDeBaja().getMessage();
+    private static final String MENSAJE_CONSULTORIO_INACTIVO =
+            ConsultorioInactivoParaBloqueException.porEstarDadoDeBaja().getMessage();
     private static final String MENSAJE_CUERPO_MAL_FORMADO =
             "El cuerpo de la petición no es válido o está mal formado";
     private static final String MENSAJE_ID_INVALIDO =
@@ -168,6 +174,48 @@ class HorarioMedicoControllerTest {
                 .andExpect(jsonPath("$.diaSemana").value(6))
                 .andExpect(jsonPath("$.duracionConsulta").value(60));
         verify(horarioMedicoService).crear(any(AuthenticatedUser.class), eq(MEDICO_ID), any(HorarioMedicoRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST en la agenda de un médico dado de baja devuelve 409 con ErrorResponse (S10)")
+    void crear_shouldReturn409_whenTheMedicoIsInactive() throws Exception {
+        when(horarioMedicoService.crear(any(AuthenticatedUser.class), eq(MEDICO_ID),
+                any(HorarioMedicoRequest.class)))
+                .thenThrow(AgendaDeMedicoInactivoException.porSerDeUnMedicoDadoDeBaja());
+
+        perform(post("/api/v1/medicos/{medicoId}/horarios", MEDICO_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"diaSemana":1,"horaInicio":"09:00:00","horaFin":"13:00:00","duracionConsulta":30}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(MENSAJE_MEDICO_INACTIVO))
+                .andExpect(jsonPath("$.mensaje",
+                        org.hamcrest.Matchers.containsString("Reactiva primero al médico")))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + MEDICO_ID + "/horarios"));
+    }
+
+    @Test
+    @DisplayName("POST en un consultorio dado de baja devuelve 409 con ErrorResponse (S11)")
+    void crear_shouldReturn409_whenTheConsultorioIsInactive() throws Exception {
+        when(horarioMedicoService.crear(any(AuthenticatedUser.class), eq(MEDICO_ID),
+                any(HorarioMedicoRequest.class)))
+                .thenThrow(ConsultorioInactivoParaBloqueException.porEstarDadoDeBaja());
+
+        perform(post("/api/v1/medicos/{medicoId}/horarios", MEDICO_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"diaSemana":1,"horaInicio":"09:00:00","horaFin":"13:00:00","duracionConsulta":30,"consultorioId":"%s"}
+                                """.formatted(CONSULTORIO_NORTE_ID)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.codigo").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.mensaje").value(MENSAJE_CONSULTORIO_INACTIVO))
+                .andExpect(jsonPath("$.mensaje",
+                        org.hamcrest.Matchers.containsString("Reactiva primero el consultorio")))
+                .andExpect(jsonPath("$.ruta").value("/api/v1/medicos/" + MEDICO_ID + "/horarios"));
     }
 
     @Test
