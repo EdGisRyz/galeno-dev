@@ -117,7 +117,11 @@ export function MedicosPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [erroresForm, setErroresForm] = useState<ErroresDeMedico>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // S1: el aviso del alta o de la edición vive dentro del diálogo, junto a los botones de acción.
+  // La baja ocurre con el diálogo cerrado y tiene su propio aviso de página: un único estado para
+  // los dos casos dejaría el de la baja dentro de un modal que ya no está en pantalla.
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [bajaError, setBajaError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
@@ -306,6 +310,7 @@ export function MedicosPage() {
   // crear/listar/buscar/actualizar/desactivar). Misma brecha señalada en Consultorios (HU3-5).
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
+    setBajaError(null);
     try {
       setIsDeactivating(true);
       await api.delete(`/medicos/${deactivatingId}`);
@@ -317,7 +322,7 @@ export function MedicosPage() {
     } catch (err) {
       console.error('Error al desactivar médico:', resumenDeErrorHttp(err));
       setAlertNotice(null);
-      setSaveError(MENSAJE_ERROR_BAJA);
+      setBajaError(MENSAJE_ERROR_BAJA);
     } finally {
       setIsDeactivating(false);
       setDeactivatingId(null);
@@ -566,9 +571,11 @@ export function MedicosPage() {
           {alertNotice}
         </Alert>
       )}
-      {saveError && (
-        <Alert variant="error" title="Error">
-          {saveError}
+      {/* S1: la baja ocurre con el diálogo cerrado, así que su aviso se lee en la página. El del
+          alta y la edición se pinta dentro del modal (ver abajo). */}
+      {bajaError && (
+        <Alert variant="error" title="No se pudo desactivar el médico">
+          {bajaError}
         </Alert>
       )}
 
@@ -850,6 +857,12 @@ export function MedicosPage() {
               onChange={(e) => setForm((f) => ({ ...f, tarifaBase: e.target.value }))}
             />
           </div>
+
+          {saveError && (
+            <Alert variant="error" title="No se pudo guardar el médico">
+              {saveError}
+            </Alert>
+          )}
 
           <div className="flex justify-end gap-2 pt-4 border-t border-[#F1F5F9]">
             <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>

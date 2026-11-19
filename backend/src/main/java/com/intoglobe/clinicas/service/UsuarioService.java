@@ -48,11 +48,11 @@ import com.intoglobe.clinicas.security.AuthenticatedUser;
  * médico inexistente <em>y</em> un correo repetido es primero un 404, que es el error más
  * específico.</p>
  *
- * <p><strong>El correo se normaliza a minúsculas</strong> en dos puntos que usan la misma
- * definición, {@link Usuario#normalizarEmail(String)}: la entidad al guardar y este servicio al
- * buscar si el correo está ocupado. La unicidad es por organización —el mismo correo puede tener
- * cuentas independientes en dos clínicas— y la restricción de la base sigue siendo la última
- * palabra frente a dos peticiones simultáneas.</p>
+ * <p><strong>El correo se normaliza a minúsculas y sin espacios en los extremos</strong> en dos
+ * puntos que usan la misma definición, {@link Usuario#normalizarEmail(String)}: la entidad al
+ * guardar y este servicio al buscar si el correo está ocupado. La unicidad es por organización —el
+ * mismo correo puede tener cuentas independientes en dos clínicas— y la restricción de la base sigue
+ * siendo la última palabra frente a dos peticiones simultáneas.</p>
  *
  * <p><strong>La identidad de autenticación la aporta este servicio</strong> (R6): en local se
  * genera un UUID v4 al crear la cuenta, porque el emisor de desarrollo consulta esta misma tabla
@@ -308,8 +308,9 @@ public class UsuarioService {
     /**
      * Exige que el correo esté libre dentro de la organización (R2).
      *
-     * <p>El correo se busca normalizado a minúsculas, con la misma definición que usa la entidad al
-     * guardar, de modo que {@code Juan@x.com} y {@code juan@x.com} compiten por el mismo hueco. La
+     * <p>El correo se busca normalizado —recortado y en minúsculas—, con la misma definición que usa
+     * la entidad al guardar, de modo que {@code Juan@x.com}, {@code juan@x.com} y
+     * {@code "  juan@x.com  "} compiten por el mismo hueco. La
      * consulta está acotada a la organización: el mismo correo en otra clínica es otra cuenta y no un
      * duplicado. La comprobación previa da un 409 entendible; la restricción de unicidad de la base
      * sigue siendo la última palabra si dos peticiones llegan a la vez.</p>

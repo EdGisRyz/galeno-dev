@@ -4,8 +4,9 @@ package com.intoglobe.clinicas.validation;
  * Patrones de formato compartidos por los DTO de entrada de la API.
  *
  * <p>Son las reglas de <em>forma</em> de los datos que el usuario teclea en los formularios:
- * «texto sin dígitos» y «teléfono con formato». Viven en un solo sitio porque las usan varios
- * módulos —médico, paciente y consultorio— y una copia por módulo es una oportunidad de que una
+ * «texto sin dígitos», «teléfono con formato» y la forma del correo de una cuenta. Viven en un
+ * solo sitio porque las usan varios módulos —médico, paciente, consultorio y usuario— y una copia
+ * por módulo es una oportunidad de que una
  * acepte lo que otra rechaza, sin que nadie sepa cuál manda. Aquí hay <strong>una</strong>
  * definición por regla; los DTO las referencian y no escriben expresiones propias.</p>
  *
@@ -84,6 +85,46 @@ public final class PatronesDeFormato {
      * los dos produciría dos mensajes para el mismo dato.
      */
     public static final String CEDULA_PROFESIONAL = "^$|^[0-9]{5,10}$";
+
+    /**
+     * Correo de una <strong>cuenta de usuario</strong> (identificador de inicio de sesión): una
+     * parte local, una {@code @}, un dominio y un punto con al menos dos letras después
+     * ({@code algo@dominio.mx}).
+     *
+     * <p><strong>Es estructural, no la RFC completa.</strong> Comprueba que el dato pueda ser la
+     * credencial de alguien: una cuenta creada con {@code juan@} nace sin que nadie pueda iniciar
+     * sesión con ella. Que la dirección exista de verdad, o que su parte local respete la longitud
+     * que impone una norma, es competencia del servicio de identidad, que es quien autentica; este
+     * borde solo rechaza lo que no puede ser un correo.</p>
+     *
+     * <p><strong>Se aplica solo al correo de la cuenta, no al del paciente.</strong>
+     * {@code paciente.email} es un dato de contacto opcional y sigue sin regla de formato
+     * (decisión de producto, 2026-11-05): si está mal, no se puede escribir, pero la ficha sigue
+     * siendo válida y el paciente se atiende igual. Aquí el dato es el identificador con el que se
+     * entra al sistema, así que un valor sin forma de correo es una cuenta inutilizable.</p>
+     *
+     * <p><strong>Acepta mayúsculas a propósito.</strong> La normalización a minúsculas de las cuentas
+     * ocurre después de validar, en {@code Usuario#normalizarEmail(String)} y en el servicio, de modo
+     * que lo que se valida es el valor tal como llegó: rechazar mayúsculas dejaría fuera correos
+     * válidos que el sistema guarda en minúsculas.</p>
+     *
+     * <p><strong>Los espacios de los extremos no se aceptan aquí porque el DTO ya los recortó.</strong>
+     * {@code UsuarioRequest} aplica {@code Usuario#recortarEmail(String)} en su constructor compacto,
+     * que corre antes de Bean Validation: un correo pegado con un espacio invisible se valida ya
+     * recortado y se guarda así. El patrón sigue rechazando un espacio interior
+     * ({@code juan @dominio.com}), que sí forma parte del dato.</p>
+     *
+     * <p>El punto de la parte local se admite porque {@code laura.mendez@example.com} es un correo
+     * real, y el {@code +} porque {@code nombre+etiqueta@dominio.com.mx} también lo es. Los dominios
+     * internacionales en forma no ASCII quedan fuera: no hay ninguno guardado y no es la regla que
+     * este borde necesita.</p>
+     *
+     * <p>Acepta la cadena vacía porque el correo de la cuenta es obligatorio y quien lo rechaza es
+     * {@code @NotBlank}, con su mensaje propio: si el patrón también lo rechazara, la respuesta
+     * llevaría dos motivos para el mismo campo en un orden que no se controla.</p>
+     */
+    public static final String CORREO_CUENTA =
+            "^$|^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\.)+[A-Za-z]{2,}$";
 
     private PatronesDeFormato() {
     }

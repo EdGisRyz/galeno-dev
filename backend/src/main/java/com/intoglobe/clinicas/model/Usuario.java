@@ -35,12 +35,12 @@ import jakarta.persistence.Table;
  *       modo que apuntar a un médico de otra organización es imposible incluso por SQL
  *       directo; Hibernate solo mapea {@code medico_id} porque {@code organizacion_id} ya
  *       pertenece a la otra asociación.</li>
- *   <li>{@link #email} es la identidad de negocio y se guarda <strong>normalizado a
+ *   <li>{@link #email} es la identidad de negocio y se guarda <strong>recortado y normalizado a
  *       minúsculas</strong> por {@link #normalizarEmail(String)}. Esa normalización ocurre
  *       en el constructor y en {@link #actualizarDatos}, es decir en la única vía de
  *       escritura que tiene la entidad: no existe setter ni ruta alternativa, así que
- *       {@code Juan@x.com} y {@code juan@x.com} son la misma cuenta dentro de la
- *       organización. La unicidad la impone la base
+ *       {@code Juan@x.com}, {@code juan@x.com} y {@code "  juan@x.com  "} son la misma cuenta
+ *       dentro de la organización. La unicidad la impone la base
  *       ({@code usuario_organizacion_id_email_key} sobre la pareja organización-correo), no
  *       esta clase: el mismo correo puede existir en dos clínicas como dos cuentas
  *       independientes.</li>
@@ -120,8 +120,8 @@ public class Usuario {
      * @param organizacion organización dueña de la cuenta (obligatoria)
      * @param medico       médico asociado, o {@code null} si la cuenta no atiende
      *                     (obligatorio cuando {@code rol} es {@link RolUsuario#MEDICO})
-     * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda en
-     *                     minúsculas
+     * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda
+     *                     recortado y en minúsculas
      * @param rol          rol de la cuenta (obligatorio, uno de {@link RolUsuario})
      * @param authUserId   identidad de la cuenta en el servicio de autenticación (obligatoria)
      */
@@ -138,19 +138,68 @@ public class Usuario {
      * Normaliza un correo para almacenarlo y para buscarlo.
      *
      * <p>Es la única definición de «el mismo correo» del módulo, y por eso es estática y
-     * pública: la usan el constructor, {@link #actualizarDatos} y el servicio cuando consulta
-     * si un correo ya está ocupado. Sin un único lugar, guardar en minúsculas y buscar en
-     * mayúsculas daría dos respuestas distintas a la misma pregunta.</p>
+     * pública: la usan el constructor, {@link #actualizarDatos}, el DTO al recibir el cuerpo y el
+     * servicio cuando consulta si un correo ya está ocupado. Sin un único lugar, guardar en
+     * minúsculas y buscar en mayúsculas daría dos respuestas distintas a la misma pregunta.</p>
      *
-     * <p>Solo cambia la caja, que es lo que la decisión de producto fijó: dos correos que
-     * difieren únicamente en mayúsculas son la misma persona. Un {@code null} se conserva
-     * como {@code null} para que la validación de obligatoriedad siga siendo del DTO.</p>
+     * <p>Hace las dos cosas que fijan «el mismo correo»: recorta los espacios de los extremos
+     * —ver {@link #recortarEmail(String)}— y pasa la caja a minúsculas. Dos correos que difieren
+     * solo en la caja o en un espacio pegado son la misma persona y la misma fila. Un
+     * {@code null} se conserva como {@code null} para que la validación de obligatoriedad siga
+     * siendo del DTO.</p>
      *
      * @param email correo tal como llegó del cliente, o {@code null}
-     * @return el correo en minúsculas, o {@code null} si la entrada era nula
+     * @return el correo recortado y en minúsculas, o {@code null} si la entrada era nula
      */
     public static String normalizarEmail(String email) {
-        return email == null ? null : email.toLowerCase(Locale.ROOT);
+        var recortado = recortarEmail(email);
+        return recortado == null ? null : recortado.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Recorta los espacios de los extremos de un correo sin tocar su contenido ni su caja.
+     *
+     * <p>Un correo pegado desde un documento llega muchas veces con un espacio invisible al final,
+     * y ese espacio no forma parte del correo: el valor se guarda recortado y la unicidad lo trata
+     * como el mismo. El recorte se separa de {@link #normalizarEmail(String)} porque
+     * <strong>tiene que ocurrir antes de validar</strong>: el patrón de
+     * {@code PatronesDeFormato.CORREO_CUENTA} rechaza los extremos en blanco y Bean Validation
+     * corre sobre el DTO, antes de que exista una entidad. Por eso el DTO recorta con esta misma
+     * función en su constructor compacto y la entidad vuelve a aplicarla al guardar.</p>
+     *
+     * <p>Se consideran espacios los de {@link Character#isWhitespace(char)} más el espacio duro
+     * ({@code U+00A0}) y la marca de orden de byte ({@code U+FEFF}), que son los que aparecen al
+     * pegar desde un documento o una página y que {@code String#strip()} no recorta. El espejo del
+     * formulario —{@code String.prototype.trim} de JavaScript— cubre ese mismo conjunto y algunos
+     * espacios Unicode más, así que el cliente puede recortar de más, nunca de menos.</p>
+     *
+     * @param email correo tal como llegó del cliente, o {@code null}
+     * @return el correo sin espacios en los extremos, o {@code null} si la entrada era nula
+     */
+    public static String recortarEmail(String email) {
+        if (email == null) {
+            return null;
+        }
+        int inicio = 0;
+        int fin = email.length();
+        while (inicio < fin && esEspacioDeLosExtremos(email.charAt(inicio))) {
+            inicio++;
+        }
+        while (fin > inicio && esEspacioDeLosExtremos(email.charAt(fin - 1))) {
+            fin--;
+        }
+        return email.substring(inicio, fin);
+    }
+
+    /**
+     * Caracteres que un pegado puede dejar en los extremos de un correo y que no forman parte de
+     * él: el espacio duro y la marca de orden de byte se suman a los que ya reconoce Java.
+     *
+     * @param caracter carácter a clasificar
+     * @return {@code true} si es un espacio de los extremos
+     */
+    private static boolean esEspacioDeLosExtremos(char caracter) {
+        return Character.isWhitespace(caracter) || caracter == '\u00A0' || caracter == '\uFEFF';
     }
 
     /**
@@ -164,7 +213,8 @@ public class Usuario {
      * cuenta de organización dejaría su historial en otra clínica.</p>
      *
      * @param medico nuevo médico asociado, o {@code null} para liberar la asociación
-     * @param email  nuevo correo (obligatorio, 1..180 caracteres); se guarda en minúsculas
+     * @param email  nuevo correo (obligatorio, 1..180 caracteres); se guarda recortado y en
+     *               minúsculas
      * @param rol    nuevo rol (obligatorio, uno de {@link RolUsuario})
      */
     public void actualizarDatos(Medico medico, String email, RolUsuario rol) {
