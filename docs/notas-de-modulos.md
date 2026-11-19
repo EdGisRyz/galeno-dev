@@ -1436,6 +1436,16 @@ En `SecurityConfig` las dos celdas se declaran con verbo y ruta exactos, sin com
 3. La celda no es un prefijo: `GET` sobre la ruta de alta, `POST` sobre el catálogo, un segmento de
    más (`/registro-clinica/otra-cosa`) y la ruta padre (`/api/v1/onboarding`) quedan cerrados.
 
+Las dos rutas viven en su propia constante, `RUTAS_PUBLICAS_DE_ONBOARDING`, y no dentro de
+`RUTAS_PUBLICAS`: esa constante se aplica con un matcher único sin verbo, y el onboarding necesita
+`POST` solo para el alta y `GET` solo para el catálogo. La compuerta de CI
+(`scripts/verificar-seguridad.sh`) acepta el **nombre completo** de la constante como motivo, y
+compara identificadores completos y no subcadenas: `RUTAS_PUBLICAS_DE_ONBOARDING` contiene
+`RUTAS_PUBLICAS`, así que una búsqueda por subcadena habría aceptado también un invento como
+`RUTAS_PUBLICAS_DE_MAS`, es decir una ruta pública abierta sin que nadie lo hubiera decidido. Las
+pruebas de la compuerta cubren los dos lados (el nombre exacto pasa; los nombres que solo contienen
+un motivo fallan). Ver ADR-008.
+
 ### Decisión 4 — El slug se deriva del nombre y la unicidad la sostiene la base
 
 `organizacion.slug` es `VARCHAR(60)` y **ya era única** desde la V2 (`organizacion_slug_key`), así que
@@ -1543,6 +1553,8 @@ validación a medias.
 
 ### Verificación registrada
 
+- Compuerta de seguridad: `sh scripts/verificar-seguridad.sh` → OK, 5 ocurrencias de `permitAll()`
+  revisadas; `sh scripts/verificar-seguridad.test.sh` → 29 casos, 0 fallos.
 - Backend: `cd backend && env -u AUTH_PUBLIC_KEY ./mvnw -q test` → **921 tests** (62 clases), 0 fallos, 0 errores,
   0 omitidos (antes de esta tarea: 882).
 - Frontend: `pnpm.cmd test` → **267 tests** (antes: 258), `pnpm.cmd build` y `pnpm.cmd lint` sin

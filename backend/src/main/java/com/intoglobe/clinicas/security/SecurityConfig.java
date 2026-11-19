@@ -33,7 +33,8 @@ import tools.jackson.databind.json.JsonMapper;
  * ({@code /v3/api-docs/**}, {@code /swagger-ui/**} y {@code /swagger-ui.html}), el endpoint
  * de error {@code /error}, que responde con el contrato {@code ErrorResponse} del proyecto y
  * nunca con el cuerpo por defecto del framework, y las <strong>dos celdas del onboarding</strong>:
- * {@code POST /api/v1/onboarding/registro-clinica} y {@code GET /api/v1/onboarding/planes}.</p>
+ * {@code POST /api/v1/onboarding/registro-clinica} y {@code GET /api/v1/onboarding/planes}, las dos
+ * de {@code RUTAS_PUBLICAS_DE_ONBOARDING}.</p>
  *
  * <p><strong>El onboarding es la única escritura pública de la API.</strong> Registrar una clínica
  * desde la landing no puede exigir un token: quien se registra todavía no tiene cuenta. El alta crea
@@ -286,6 +287,32 @@ public class SecurityConfig {
      */
     private static final String RUTA_ONBOARDING = "/api/v1/onboarding";
 
+    /**
+     * Las dos rutas públicas del onboarding, agrupadas con un nombre propio que la compuerta de
+     * seguridad reconoce.
+     *
+     * <p><strong>No se suman a {@link #RUTAS_PUBLICAS} a propósito.</strong> Esa constante se aplica
+     * con un matcher único sin verbo, y el onboarding necesita verbs distintos: el alta solo
+     * {@code POST} y el catálogo solo {@code GET}. Sumarlas allí obligaría a abrirlas con
+     * {@code permitAll()} sobre el arreglo, sin verbo, y se perdería esa distinción —que es lo que S8
+     * protege—: un {@code GET} sobre la ruta de alta o un {@code POST} sobre el catálogo quedarían
+     * abiertos sin que nadie lo hubiera decidido.</p>
+     *
+     * <p>El orden es parte del contrato de esta constante: {@code [0]} es el alta y {@code [1]} el
+     * catálogo, y las dos celdas de la cadena los usan con su verbo exacto.
+     * {@code OnboardingRutasPublicasTest} fija ambas rutas y ambos verbos, así que invertirlas rompe
+     * una prueba antes que producción.</p>
+     *
+     * <p>Su <strong>nombre completo</strong> es el motivo que acepta
+     * {@code scripts/verificar-seguridad.sh}: la compuerta compara nombres de constante y no
+     * subcadenas, porque este nombre contiene {@code RUTAS_PUBLICAS} y una búsqueda por subcadena
+     * aceptaría cualquier invento con ese prefijo.</p>
+     */
+    private static final String[] RUTAS_PUBLICAS_DE_ONBOARDING = {
+            RUTA_ONBOARDING + "/registro-clinica",
+            RUTA_ONBOARDING + "/planes"
+    };
+
     /** Endpoint de error del contenedor, servido por {@code RestErrorController}. */
     private static final String RUTA_ERROR = "/error";
 
@@ -348,8 +375,10 @@ public class SecurityConfig {
                         // comodín o la ruta padre abrirían rutas que nadie pidió. El alta crea la
                         // organización Y su administrador en una transacción, así que no es la
                         // colección de organizaciones —que sigue en denyAll() más abajo—.
-                        .requestMatchers(HttpMethod.POST, RUTA_ONBOARDING + "/registro-clinica").permitAll()
-                        .requestMatchers(HttpMethod.GET, RUTA_ONBOARDING + "/planes").permitAll()
+                        // Se usan los dos elementos de RUTAS_PUBLICAS_DE_ONBOARDING por separado, y
+                        // no un matcher sobre el arreglo: cada celda tiene su verbo.
+                        .requestMatchers(HttpMethod.POST, RUTAS_PUBLICAS_DE_ONBOARDING[0]).permitAll()
+                        .requestMatchers(HttpMethod.GET, RUTAS_PUBLICAS_DE_ONBOARDING[1]).permitAll()
                         // Lecturas compartidas por ADMIN, MEDICO y RECEPCIONISTA de su propio
                         // tenant. Recepción las necesita para responder dónde y cuándo atiende
                         // cada médico y para atender el mostrador.
