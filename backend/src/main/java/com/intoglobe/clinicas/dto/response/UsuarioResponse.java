@@ -23,9 +23,17 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * <p>El correo se devuelve tal como está almacenado, es decir normalizado a minúsculas, para
  * que la respuesta no sugiera que conviven dos formas del mismo correo.</p>
  *
+ * <p><strong>El nombre y el teléfono viajan en la respuesta (S3)</strong> para que la lista del
+ * personal muestre a la persona sin una segunda consulta. Los dos son <em>nulables</em> y el contrato
+ * lo dice: las cuentas anteriores a la V10 no tienen ninguno de los dos, y el teléfono es opcional en
+ * el alta. Un {@code nombre} nulo no se rellena con nada —la pantalla muestra el correo como dato
+ * principal— porque un nombre inventado a partir de la dirección es peor que el dato ausente.</p>
+ *
  * @param id             identificador único asignado por el sistema
  * @param organizacionId identificador de la organización dueña de la cuenta
  * @param medicoId       identificador del médico asociado, o {@code null} si la cuenta no atiende
+ * @param nombre         nombre de la persona, o {@code null} en las cuentas anteriores a la V10
+ * @param telefono       teléfono de contacto, o {@code null} si no se registró
  * @param email          correo de la cuenta, normalizado a minúsculas
  * @param rol            rol de la cuenta
  * @param activo         {@code true} si la cuenta está activa, {@code false} si fue dada de baja
@@ -44,6 +52,15 @@ public record UsuarioResponse(
         @Schema(description = "Identificador del médico asociado; null si la cuenta no atiende.",
                 example = "5b2e9c1a-7d34-4f80-9a2b-6c1d9e0f3a41")
         UUID medicoId,
+
+        @Schema(description = "Nombre de la persona; null en las cuentas anteriores a la V10. La "
+                + "pantalla muestra el correo cuando no hay nombre, sin inventarlo.",
+                example = "Administración")
+        String nombre,
+
+        @Schema(description = "Teléfono de contacto de la persona; null si no se registró (es opcional).",
+                example = "+52 55 5555 9876")
+        String telefono,
 
         @Schema(description = "Correo de la cuenta, normalizado a minúsculas.",
                 example = "laura.mendez@example.com")

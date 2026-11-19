@@ -45,7 +45,9 @@ import jakarta.validation.Valid;
  * dueño inmediato ({@code /organizaciones/{organizacionId}/usuarios}) y las operaciones de ítem son
  * planas ({@code /usuarios/{id}}). La organización no viaja en el cuerpo —en el alta llega por el
  * path y la actualización no la recibe—, así que un único {@link UsuarioRequest} sirve para las dos
- * operaciones y el cuerpo no puede expresar un cambio de dueño. La cabecera {@code Location} del alta
+ * operaciones y el cuerpo no puede expresar un cambio de dueño. Ese mismo DTO pide los datos de la
+ * persona: <strong>nombre completo obligatorio y teléfono opcional</strong>, validados en el borde con
+ * las reglas compartidas de nombre de persona y de teléfono. La cabecera {@code Location} del alta
  * apunta a la ruta plana del ítem y se emite como ruta relativa, para que siga siendo correcta detrás
  * de cualquier proxy reverso.</p>
  *
@@ -85,17 +87,22 @@ public class UsuarioController {
      * sea de esa misma organización y que el correo esté libre. La identidad de autenticación
      * ({@code authUserId}) la genera el servicio y no se recibe ni se devuelve.</p>
      *
+     * <p>El cuerpo trae además el <strong>nombre completo de la persona, que es
+     * obligatorio</strong>, y el <strong>teléfono, que es opcional</strong>: los dos se persisten en
+     * las columnas que la V10 ya creó y se devuelven en la respuesta. Un alta sin nombre responde
+     * 400 con el motivo del campo y nunca llega al servicio.</p>
+     *
      * @param organizacionId organización dueña tomada del path
      * @param request        datos de entrada validados
      * @return 201 con la cuenta creada y la cabecera {@code Location} hacia su recurso
      */
     @PostMapping("/organizaciones/{organizacionId}/usuarios")
     @Operation(summary = "Crear cuenta de usuario",
-            description = "Crea una cuenta dentro de la organización indicada en la ruta y devuelve su representación junto con la cabecera Location apuntando a la ruta plana del recurso creado. La identidad de autenticación la genera el servidor y no se expone.")
+            description = "Crea una cuenta dentro de la organización indicada en la ruta y devuelve su representación junto con la cabecera Location apuntando a la ruta plana del recurso creado. Exige el nombre completo de la persona y acepta un teléfono opcional. La identidad de autenticación la genera el servidor y no se expone.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Cuenta creada",
                     content = @Content(schema = @Schema(implementation = UsuarioResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos, rol fuera del conjunto admitido, JSON mal formado o falta el médico de una cuenta MEDICO",
+            @ApiResponse(responseCode = "400", description = "Datos inválidos, falta el nombre, teléfono sin forma de teléfono, rol fuera del conjunto admitido, JSON mal formado o falta el médico de una cuenta MEDICO",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "La organización de la ruta no es la del token",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -170,12 +177,15 @@ public class UsuarioController {
     }
 
     /**
-     * Reemplaza el correo, el rol y el médico de una cuenta existente.
+     * Reemplaza el correo, el rol, el médico, el nombre y el teléfono de una cuenta existente.
      *
      * <p>La organización, la identidad de autenticación, el estado lógico y la fecha de alta nunca
      * cambian. Cambiar de {@code MEDICO} a otro rol libera el médico, y retirarle el rol a la última
      * administradora activa responde 409. El actor de la sesión viaja al servicio para que nadie se
      * cambie el rol a sí mismo (R11), que responde 403.</p>
+     *
+     * <p>El nombre es obligatorio también aquí: guardar una cuenta anterior a la V10 obliga a
+     * completárselo, y es intencional. El teléfono puede quedar nulo, que lo borra.</p>
      *
      * @param id      identificador de la cuenta
      * @param request datos de entrada validados
@@ -183,11 +193,11 @@ public class UsuarioController {
      */
     @PutMapping("/usuarios/{id}")
     @Operation(summary = "Actualizar cuenta de usuario",
-            description = "Reemplaza correo, rol y médico de una cuenta existente. Ni la organización dueña, ni el estado lógico, ni la fecha de alta, ni la identidad de autenticación se modifican. Una cuenta no puede cambiarse el rol a sí misma.")
+            description = "Reemplaza correo, rol, médico, nombre y teléfono de una cuenta existente. Ni la organización dueña, ni el estado lógico, ni la fecha de alta, ni la identidad de autenticación se modifican. El nombre es obligatorio también en la edición; el teléfono es opcional. Una cuenta no puede cambiarse el rol a sí misma.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Cuenta actualizada",
                     content = @Content(schema = @Schema(implementation = UsuarioResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos, rol fuera del conjunto admitido, JSON mal formado o falta el médico de una cuenta MEDICO",
+            @ApiResponse(responseCode = "400", description = "Datos inválidos, falta el nombre, teléfono sin forma de teléfono, rol fuera del conjunto admitido, JSON mal formado o falta el médico de una cuenta MEDICO",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "La cuenta intenta cambiarse el rol a sí misma",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),

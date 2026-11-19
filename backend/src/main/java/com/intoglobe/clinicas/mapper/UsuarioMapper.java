@@ -33,35 +33,21 @@ public final class UsuarioMapper {
      * de negocio (UUID generado en local, {@code sub} del token contra la plataforma) que vive
      * en el service.</p>
      *
+     * <p><strong>El nombre y el teléfono salen del request, y solo de ahí.</strong> Es el único
+     * camino de alta que existe: no hay una sobrecarga que los omita, de modo que ninguna cuenta
+     * nueva puede nacer sin nombre por olvido. El teléfono sí puede ser {@code null} porque es
+     * opcional.</p>
+     *
      * @param organizacion organización dueña, ya resuelta y validada por el service
      * @param medico       médico asociado ya validado, o {@code null} si la cuenta no atiende
-     * @param request      datos de entrada validados
+     * @param request      datos de entrada validados, incluidos el nombre y el teléfono
      * @param authUserId   identidad de la cuenta en el servicio de autenticación
      * @return entidad transitoria activa con los campos editables asignados
      */
     public static Usuario aEntidad(Organizacion organizacion, Medico medico, UsuarioRequest request,
             UUID authUserId) {
-        return aEntidad(organizacion, medico, null, request, authUserId);
-    }
-
-    /**
-     * Construye una entidad nueva con el nombre de la persona.
-     *
-     * <p>Es la variante del registro público, el único camino que hoy recibe un nombre. El nombre no
-     * forma parte de {@link UsuarioRequest} porque el alta de cuentas desde la administración no lo
-     * pide; por eso viaja como parámetro explícito y la otra sobrecarga delega aquí con
-     * {@code null}.</p>
-     *
-     * @param organizacion organización dueña, ya resuelta y validada por el service
-     * @param medico       médico asociado ya validado, o {@code null} si la cuenta no atiende
-     * @param nombre       nombre de la persona, o {@code null} si no se registró
-     * @param request      datos de entrada validados
-     * @param authUserId   identidad de la cuenta en el servicio de autenticación
-     * @return entidad transitoria activa con los campos editables asignados
-     */
-    public static Usuario aEntidad(Organizacion organizacion, Medico medico, String nombre,
-            UsuarioRequest request, UUID authUserId) {
-        return new Usuario(organizacion, medico, nombre, request.email(), request.rol(), authUserId);
+        return new Usuario(organizacion, medico, request.nombre(), request.telefono(), request.email(),
+                request.rol(), authUserId);
     }
 
     /**
@@ -73,13 +59,15 @@ public final class UsuarioMapper {
      * {@code medicoId} se traduce a {@code null} cuando la cuenta no tiene médico.</p>
      *
      * @param usuario entidad de origen
-     * @return DTO de respuesta con los siete campos públicos del registro
+     * @return DTO de respuesta con los nueve campos públicos del registro
      */
     public static UsuarioResponse aResponse(Usuario usuario) {
         return new UsuarioResponse(
                 usuario.getId(),
                 usuario.getOrganizacion().getId(),
                 usuario.getMedico() == null ? null : usuario.getMedico().getId(),
+                usuario.getNombre(),
+                usuario.getTelefono(),
                 usuario.getEmail(),
                 usuario.getRol(),
                 usuario.isActivo(),
@@ -89,17 +77,22 @@ public final class UsuarioMapper {
     /**
      * Aplica los campos editables del request sobre una cuenta existente.
      *
-     * <p>Delega en {@code actualizarDatos} del modelo, que solo modifica correo, rol y médico.
-     * Nunca toca {@code id}, {@code organizacion}, {@code authUserId}, {@code activo} ni
+     * <p>Delega en {@code actualizarDatos} del modelo, que solo modifica correo, rol, médico, nombre y
+     * teléfono. Nunca toca {@code id}, {@code organizacion}, {@code authUserId}, {@code activo} ni
      * {@code createdAt}: una cuenta dada de baja no se reactiva por actualizarla, la identidad
      * de autenticación no cambia y la fecha de alta no se reescribe. Un {@code medico} nulo
      * libera la asociación, que es lo que ocurre al cambiar de {@code MEDICO} a otro rol.</p>
+     *
+     * <p>El nombre llega siempre con valor por el DTO —es obligatorio también en la edición—, así que
+     * guardar una cuenta anterior a la V10 completa su nombre; el teléfono nulo lo borra, porque el
+     * {@code PUT} es un reemplazo.</p>
      *
      * @param usuario entidad a modificar
      * @param medico  médico asociado ya validado, o {@code null} para liberar la asociación
      * @param request datos de entrada validados
      */
     public static void actualizarEntidad(Usuario usuario, Medico medico, UsuarioRequest request) {
-        usuario.actualizarDatos(medico, request.email(), request.rol());
+        usuario.actualizarDatos(medico, request.nombre(), request.telefono(), request.email(),
+                request.rol());
     }
 }

@@ -88,11 +88,13 @@ public class UsuarioService {
      *
      * <p>La identidad de autenticación se genera aquí (R6) y no se recibe del cliente. El médico
      * se resuelve y se valida contra la organización antes de mapear (R4), y el correo se busca ya
-     * normalizado antes de guardar (R2).</p>
+     * normalizado antes de guardar (R2). El nombre y el teléfono vienen en el request: el nombre es
+     * obligatorio —lo impone el DTO— y el teléfono opcional, y los dos se persisten en las columnas
+     * que la V10 ya creó. No hay una variante de este método que cree la cuenta sin nombre.</p>
      *
      * @param organizacionId organización dueña: debe ser el tenant del token
      * @param tenantId       organización del token de la petición
-     * @param request        datos de entrada validados
+     * @param request        datos de entrada validados, incluidos el nombre y el teléfono
      * @return representación de la cuenta persistida, sin {@code authUserId}
      * @throws AccessDeniedException      si la organización del path no es la del token; el handler
      *                                    lo traduce a 403 sin consultar la base
@@ -125,8 +127,9 @@ public class UsuarioService {
      *
      * <p>Se diferencia de {@link #crear(UUID, UUID, UsuarioRequest)} en dos cosas, y solo en dos: no
      * recibe el {@code tenantId} del token —la organización acaba de nacer y todavía no hay sesión que
-     * la reclame— y recibe el nombre de la persona, que la tabla guarda desde la V10 y que el alta de
-     * cuentas desde la administración todavía no pide.</p>
+     * la reclame— y el teléfono de la persona no se pide, porque el formulario público no tiene ese
+     * campo. El <strong>nombre sí se guarda</strong>, como en el alta administrativa, y viaja dentro
+     * del mismo {@code UsuarioRequest} para que las dos rutas escriban la fila por el mismo mapeo.</p>
      *
      * <p>La organización tiene que estar ya persistida: el correo se comprueba contra su
      * identificador y la fila del usuario apunta a ella. Lo garantiza quien llama, que crea la
@@ -144,8 +147,8 @@ public class UsuarioService {
     public UsuarioResponse crearAdministrador(Organizacion organizacion, String nombre, String email) {
         exigirCorreoDisponible(organizacion.getId(), email, null);
         var authUserId = UUID.randomUUID();
-        var guardado = usuarioRepository.save(UsuarioMapper.aEntidad(organizacion, null, nombre,
-                new UsuarioRequest(email, RolUsuario.ADMIN, null), authUserId));
+        var guardado = usuarioRepository.save(UsuarioMapper.aEntidad(organizacion, null,
+                new UsuarioRequest(email, RolUsuario.ADMIN, null, nombre, null), authUserId));
         return UsuarioMapper.aResponse(guardado);
     }
 
@@ -192,7 +195,7 @@ public class UsuarioService {
     }
 
     /**
-     * Reemplaza los campos editables de una cuenta existente: correo, rol y médico.
+     * Reemplaza los campos editables de una cuenta existente: correo, rol, médico, nombre y teléfono.
      *
      * <p>La organización, la identidad de autenticación, {@code activo} y {@code createdAt} nunca
      * cambian: actualizar una cuenta dada de baja no la reactiva y la fecha de alta no se reescribe.
@@ -201,10 +204,14 @@ public class UsuarioService {
      * anterior hasta que la persona vuelva a iniciar sesión, que es el comportamiento normal de un
      * token ya emitido.</p>
      *
+     * <p>El nombre es obligatorio en la edición, así que guardar una cuenta anterior a la V10 obliga a
+     * completárselo: es la consecuencia asumida de que la lista muestre personas y no correos. El
+     * teléfono nulo lo borra, porque el {@code PUT} es un reemplazo.</p>
+     *
      * @param actor    usuario autenticado de la sesión: aporta el tenant y permite rechazar la
      *                 operación sobre la propia cuenta (R11)
      * @param id       identificador de la cuenta a actualizar
-     * @param request  datos de entrada validados
+     * @param request  datos de entrada validados, incluidos el nombre y el teléfono
      * @return representación de la cuenta actualizada
      * @throws OperacionSobreLaPropiaCuentaException si el actor se cambia el rol a sí mismo (403)
      * @throws ResourceNotFoundException  si la cuenta no existe en ese tenant, o si el médico

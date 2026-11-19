@@ -37,12 +37,13 @@ import jakarta.persistence.Table;
  *       pertenece a la otra asociación.</li>
  *   <li>{@link #nombre} es el nombre de la persona, <strong>nulable</strong> desde la migración V10:
  *       las cuentas que ya existían no lo tienen y no hay de dónde derivarlo. El registro público lo
- *       exige —el alta de una clínica lo pide y lo valida—, así que la obligación vive en el DTO del
- *       registro y no en la tabla. Una fila sin nombre sigue siendo válida.</li>
+ *       exige y el alta administrativa de cuentas también; la obligación vive en el DTO del alta y
+ *       no en la tabla. Una fila sin nombre sigue siendo válida, y es lo que la lista muestra por
+ *       correo sin inventar un nombre a partir de la dirección.</li>
  *   <li>{@link #telefono} es el teléfono de contacto del trabajador, <strong>nulable</strong> desde la
- *       V10 y con el mismo tipo que el de médico y el de paciente. El registro público
- *       <strong>no lo pide</strong> —su formulario no tiene ese campo—, así que las cuentas que crea
- *       el onboarding nacen sin teléfono; la columna queda lista para el alta administrativa.</li>
+ *       V10 y con el mismo tipo que el de médico y el de paciente. El alta administrativa lo pide
+ *       como <em>opcional</em>; el registro público no lo pide —su formulario no tiene ese campo—,
+ *       así que las cuentas que crea el onboarding nacen sin teléfono.</li>
  *   <li>{@link #email} es la identidad de negocio y se guarda <strong>recortado y normalizado a
  *       minúsculas</strong> por {@link #normalizarEmail(String)}. Esa normalización ocurre
  *       en el constructor y en {@link #actualizarDatos}, es decir en la única vía de
@@ -92,7 +93,8 @@ public class Usuario {
     /**
      * Nombre de la persona. Nulable: las cuentas anteriores a la migración V10 no lo tienen. No es
      * el identificador de la cuenta —ése es {@link #email}— y por eso no participa en ninguna
-     * unicidad.
+     * unicidad. El alta lo exige en el DTO; esta columna no puede exigirlo porque las filas
+     * anteriores seguirían siendo válidas.
      */
     @Column(name = "nombre", length = 120)
     private String nombre;
@@ -137,6 +139,13 @@ public class Usuario {
     /**
      * Crea una cuenta nueva con {@code activo = true} y el correo ya normalizado.
      *
+     * <p>Es el <strong>único</strong> constructor de negocio: el nombre y el teléfono viajan siempre,
+     * aunque el teléfono sea {@code null} porque es opcional. No existe una sobrecarga que los omita
+     * a propósito: una cuenta sin nombre solo puede nacer declarando los dos {@code null}, que es el
+     * estado de las filas anteriores a la V10, y nunca por olvido en un camino nuevo. La
+     * obligatoriedad del nombre en el alta la impone el DTO, que es donde puede exigirse sin romper
+     * esas filas.</p>
+     *
      * <p>{@code authUserId} sí es un parámetro —a diferencia de {@code id} o
      * {@code createdAt}— porque no lo inventa la base: lo aporta el servicio, que en local
      * genera un UUID v4 y contra la plataforma real recibe el {@code sub} del token.</p>
@@ -144,46 +153,8 @@ public class Usuario {
      * @param organizacion organización dueña de la cuenta (obligatoria)
      * @param medico       médico asociado, o {@code null} si la cuenta no atiende
      *                     (obligatorio cuando {@code rol} es {@link RolUsuario#MEDICO})
-     * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda
-     *                     recortado y en minúsculas
-     * @param rol          rol de la cuenta (obligatorio, uno de {@link RolUsuario})
-     * @param authUserId   identidad de la cuenta en el servicio de autenticación (obligatoria)
-     */
-    public Usuario(Organizacion organizacion, Medico medico, String email, RolUsuario rol,
-            UUID authUserId) {
-        this(organizacion, medico, null, email, rol, authUserId);
-    }
-
-    /**
-     * Crea una cuenta nueva con el nombre de la persona.
-     *
-     * <p>Es el constructor del registro público, que sí recibe el nombre; el de las cuentas de la
-     * administración delega aquí con {@code null} porque esa pantalla todavía no lo pide.</p>
-     *
-     * @param organizacion organización dueña de la cuenta (obligatoria)
-     * @param medico       médico asociado, o {@code null} si la cuenta no atiende
-     * @param nombre       nombre de la persona, o {@code null} si no se registró
-     * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda
-     *                     recortado y en minúsculas
-     * @param rol          rol de la cuenta (obligatorio, uno de {@link RolUsuario})
-     * @param authUserId   identidad de la cuenta en el servicio de autenticación (obligatoria)
-     */
-    public Usuario(Organizacion organizacion, Medico medico, String nombre, String email,
-            RolUsuario rol, UUID authUserId) {
-        this(organizacion, medico, nombre, null, email, rol, authUserId);
-    }
-
-    /**
-     * Crea una cuenta nueva con el nombre y el teléfono de la persona.
-     *
-     * <p>El registro público usa la sobrecarga anterior: su formulario no pide teléfono, así que la
-     * cuenta nace sin él. Esta variante existe para el alta administrativa de cuentas, que todavía no
-     * lo captura.</p>
-     *
-     * @param organizacion organización dueña de la cuenta (obligatoria)
-     * @param medico       médico asociado, o {@code null} si la cuenta no atiende
-     * @param nombre       nombre de la persona, o {@code null} si no se registró
-     * @param telefono     teléfono de contacto, o {@code null} si no se registró
+     * @param nombre       nombre de la persona, o {@code null} solo en las filas anteriores a la V10
+     * @param telefono     teléfono de contacto, o {@code null} si no se registró (es opcional)
      * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda
      *                     recortado y en minúsculas
      * @param rol          rol de la cuenta (obligatorio, uno de {@link RolUsuario})
@@ -269,22 +240,29 @@ public class Usuario {
     }
 
     /**
-     * Actualiza exclusivamente los tres campos editables de la cuenta: correo, rol y médico.
+     * Actualiza exclusivamente los cinco campos editables de la cuenta: correo, rol, médico, nombre y
+     * teléfono.
      *
-     * <p>Un valor {@code null} en {@code medico} borra la asociación, y eso es exactamente lo
-     * que ocurre al cambiar de {@code MEDICO} a otro rol: la cuenta deja de ser dueña de una
-     * agenda. Nunca modifica {@code id}, {@code organizacion}, {@code authUserId},
+     * <p>Un valor {@code null} en {@code medico} o en {@code telefono} borra el valor anterior (la
+     * actualización PUT es un reemplazo). El nombre es obligatorio en la edición, así que aquí llega
+     * siempre con valor por el DTO: editar una cuenta anterior a la V10 obliga a completárselo, y es
+     * intencional. Nunca modifica {@code id}, {@code organizacion}, {@code authUserId},
      * {@code activo} ni {@code createdAt}: actualizar una cuenta dada de baja no la reactiva
      * —para eso está la reactivación—, la identidad de autenticación no cambia y mover la
      * cuenta de organización dejaría su historial en otra clínica.</p>
      *
-     * @param medico nuevo médico asociado, o {@code null} para liberar la asociación
-     * @param email  nuevo correo (obligatorio, 1..180 caracteres); se guarda recortado y en
-     *               minúsculas
-     * @param rol    nuevo rol (obligatorio, uno de {@link RolUsuario})
+     * @param medico   nuevo médico asociado, o {@code null} para liberar la asociación
+     * @param nombre   nuevo nombre (obligatorio, 1..120 caracteres)
+     * @param telefono nuevo teléfono o {@code null} para borrarlo
+     * @param email    nuevo correo (obligatorio, 1..180 caracteres); se guarda recortado y en
+     *                 minúsculas
+     * @param rol      nuevo rol (obligatorio, uno de {@link RolUsuario})
      */
-    public void actualizarDatos(Medico medico, String email, RolUsuario rol) {
+    public void actualizarDatos(Medico medico, String nombre, String telefono, String email,
+            RolUsuario rol) {
         this.medico = medico;
+        this.nombre = nombre;
+        this.telefono = telefono;
         this.email = normalizarEmail(email);
         this.rol = rol;
     }

@@ -153,10 +153,10 @@ class AislamientoYMatrizRbacTest {
             {"nombre":"Paciente Nuevo Renombrado","telefono":"+52 55 3333 5555","fechaNacimiento":"1990-06-21","sexo":"F","email":"paciente.nuevo@example.com","notas":null}
             """;
     private static final String CUERPO_USUARIO_NUEVO = """
-            {"email":"cuenta.nueva@example.com","rol":"RECEPCIONISTA","medicoId":null}
+            {"email":"cuenta.nueva@example.com","rol":"RECEPCIONISTA","medicoId":null,"nombre":"Administración","telefono":"+52 55 3333 4444"}
             """;
     private static final String CUERPO_USUARIO_ACTUALIZADO = """
-            {"email":"cuenta.actualizada@example.com","rol":"PACIENTE","medicoId":null}
+            {"email":"cuenta.actualizada@example.com","rol":"PACIENTE","medicoId":null,"nombre":"Recepción Matutina","telefono":null}
             """;
 
     @Autowired
@@ -555,7 +555,7 @@ class AislamientoYMatrizRbacTest {
     @DisplayName("ADMIN administra las cuentas de su propio tenant: las seis rutas de usuario")
     void adminAdministraLasCuentasDeSuPropioTenant() throws Exception {
         String rutaUsuariosA = "/api/v1/organizaciones/" + organizacionA.getId() + "/usuarios";
-        Usuario cuentaAjena = usuarioRepository.save(new Usuario(organizacionB, null,
+        Usuario cuentaAjena = usuarioRepository.save(new Usuario(organizacionB, null, null, null,
                 "cuenta.beta@example.com", RolUsuario.ADMIN, UUID.randomUUID()));
 
         // 1. POST /organizaciones/{organizacionId}/usuarios — 201 y Location de la ruta plana.
@@ -566,12 +566,17 @@ class AislamientoYMatrizRbacTest {
                 .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()))
                 .andExpect(jsonPath("$.rol").value("RECEPCIONISTA"))
                 .andExpect(jsonPath("$.activo").value(true))
+                .andExpect(jsonPath("$.nombre").value("Administración"))
+                .andExpect(jsonPath("$.telefono").value("+52 55 3333 4444"))
                 .andExpect(jsonPath("$.authUserId").doesNotExist())
                 .andReturn();
         String cuentaCreadaId = idDe(creada);
         assertThat(creada.getResponse().getHeader(HttpHeaders.LOCATION))
                 .as("el alta publica el Location de la ruta plana del recurso creado")
                 .isEqualTo("/api/v1/usuarios/" + cuentaCreadaId);
+        assertThat(usuarioRepository.findById(UUID.fromString(cuentaCreadaId)).orElseThrow().getNombre())
+                .as("el nombre del alta llega a la columna que existe desde la V10")
+                .isEqualTo("Administración");
 
         // 2. GET anidado — la cuenta creada sí, la del tenant ajeno no.
         ejecutar(get(rutaUsuariosA), tokenAdminA)
@@ -584,15 +589,20 @@ class AislamientoYMatrizRbacTest {
         ejecutar(get("/api/v1/usuarios/" + cuentaCreadaId), tokenAdminA)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(cuentaCreadaId))
+                .andExpect(jsonPath("$.nombre").value("Administración"))
+                .andExpect(jsonPath("$.telefono").value("+52 55 3333 4444"))
                 .andExpect(jsonPath("$.email").value("cuenta.nueva@example.com"));
 
-        // 4. PUT /usuarios/{id} — cambia correo y rol, no la organización ni el estado lógico.
+        // 4. PUT /usuarios/{id} — cambia correo, rol, nombre y teléfono; no la organización ni el
+        // estado lógico.
         ejecutar(put("/api/v1/usuarios/" + cuentaCreadaId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(CUERPO_USUARIO_ACTUALIZADO), tokenAdminA)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("cuenta.actualizada@example.com"))
                 .andExpect(jsonPath("$.rol").value("PACIENTE"))
+                .andExpect(jsonPath("$.nombre").value("Recepción Matutina"))
+                .andExpect(jsonPath("$.telefono").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.activo").value(true))
                 .andExpect(jsonPath("$.organizacionId").value(organizacionA.getId().toString()));
 
@@ -643,10 +653,10 @@ class AislamientoYMatrizRbacTest {
     @DisplayName("R11: la propia administradora no puede darse de baja ni cambiarse el rol, contra la base real")
     void laPropiaAdministradoraNoPuedeOperarSobreSuCuenta() throws Exception {
         var identidadDelToken = UUID.fromString(ClaveRsaDePrueba.ID_USUARIO);
-        Usuario propia = usuarioRepository.save(new Usuario(organizacionA, null,
+        Usuario propia = usuarioRepository.save(new Usuario(organizacionA, null, null, null,
                 "administradora.propia@example.com", RolUsuario.ADMIN, identidadDelToken));
-        usuarioRepository.save(new Usuario(organizacionA, null, "otra.administradora@example.com",
-                RolUsuario.ADMIN, UUID.randomUUID()));
+        usuarioRepository.save(new Usuario(organizacionA, null, null, null,
+                "otra.administradora@example.com", RolUsuario.ADMIN, UUID.randomUUID()));
         String ruta = "/api/v1/usuarios/" + propia.getId();
 
         // Baja de la propia cuenta: 403 con el motivo de R11, no el 403 genérico de la cadena ni un
@@ -1492,7 +1502,7 @@ class AislamientoYMatrizRbacTest {
     void recursoDeOtroTenantResponde404SinRevelarlo() throws Exception {
         String consultorioAjeno = "/api/v1/consultorios/" + consultorioB.getId();
         String medicoAjeno = "/api/v1/medicos/" + medicoB.getId();
-        Usuario cuentaAjena = usuarioRepository.save(new Usuario(organizacionB, null,
+        Usuario cuentaAjena = usuarioRepository.save(new Usuario(organizacionB, null, null, null,
                 "cuenta.secreta.beta@example.com", RolUsuario.PACIENTE, UUID.randomUUID()));
         String usuarioAjeno = "/api/v1/usuarios/" + cuentaAjena.getId();
 
@@ -1852,7 +1862,7 @@ class AislamientoYMatrizRbacTest {
      */
     private static String usuarioMedicoConMedicoDe(UUID medicoId) {
         return """
-                {"email":"cuenta.medico@example.com","rol":"MEDICO","medicoId":"%s"}
+                {"email":"cuenta.medico@example.com","rol":"MEDICO","medicoId":"%s","nombre":"Administración"}
                 """.formatted(medicoId);
     }
 
