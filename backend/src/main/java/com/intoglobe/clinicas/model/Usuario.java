@@ -35,6 +35,14 @@ import jakarta.persistence.Table;
  *       modo que apuntar a un médico de otra organización es imposible incluso por SQL
  *       directo; Hibernate solo mapea {@code medico_id} porque {@code organizacion_id} ya
  *       pertenece a la otra asociación.</li>
+ *   <li>{@link #nombre} es el nombre de la persona, <strong>nulable</strong> desde la migración V10:
+ *       las cuentas que ya existían no lo tienen y no hay de dónde derivarlo. El registro público lo
+ *       exige —el alta de una clínica lo pide y lo valida—, así que la obligación vive en el DTO del
+ *       registro y no en la tabla. Una fila sin nombre sigue siendo válida.</li>
+ *   <li>{@link #telefono} es el teléfono de contacto del trabajador, <strong>nulable</strong> desde la
+ *       V10 y con el mismo tipo que el de médico y el de paciente. El registro público
+ *       <strong>no lo pide</strong> —su formulario no tiene ese campo—, así que las cuentas que crea
+ *       el onboarding nacen sin teléfono; la columna queda lista para el alta administrativa.</li>
  *   <li>{@link #email} es la identidad de negocio y se guarda <strong>recortado y normalizado a
  *       minúsculas</strong> por {@link #normalizarEmail(String)}. Esa normalización ocurre
  *       en el constructor y en {@link #actualizarDatos}, es decir en la única vía de
@@ -80,6 +88,22 @@ public class Usuario {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "medico_id")
     private Medico medico;
+
+    /**
+     * Nombre de la persona. Nulable: las cuentas anteriores a la migración V10 no lo tienen. No es
+     * el identificador de la cuenta —ése es {@link #email}— y por eso no participa en ninguna
+     * unicidad.
+     */
+    @Column(name = "nombre", length = 120)
+    private String nombre;
+
+    /**
+     * Teléfono de contacto del trabajador. Nulable: las cuentas anteriores a la migración V10 no lo
+     * tienen y el registro público no lo pide. No identifica a la cuenta ni participa en ninguna
+     * unicidad.
+     */
+    @Column(name = "telefono", length = 20)
+    private String telefono;
 
     @Column(name = "email", length = 180, nullable = false)
     private String email;
@@ -127,8 +151,50 @@ public class Usuario {
      */
     public Usuario(Organizacion organizacion, Medico medico, String email, RolUsuario rol,
             UUID authUserId) {
+        this(organizacion, medico, null, email, rol, authUserId);
+    }
+
+    /**
+     * Crea una cuenta nueva con el nombre de la persona.
+     *
+     * <p>Es el constructor del registro público, que sí recibe el nombre; el de las cuentas de la
+     * administración delega aquí con {@code null} porque esa pantalla todavía no lo pide.</p>
+     *
+     * @param organizacion organización dueña de la cuenta (obligatoria)
+     * @param medico       médico asociado, o {@code null} si la cuenta no atiende
+     * @param nombre       nombre de la persona, o {@code null} si no se registró
+     * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda
+     *                     recortado y en minúsculas
+     * @param rol          rol de la cuenta (obligatorio, uno de {@link RolUsuario})
+     * @param authUserId   identidad de la cuenta en el servicio de autenticación (obligatoria)
+     */
+    public Usuario(Organizacion organizacion, Medico medico, String nombre, String email,
+            RolUsuario rol, UUID authUserId) {
+        this(organizacion, medico, nombre, null, email, rol, authUserId);
+    }
+
+    /**
+     * Crea una cuenta nueva con el nombre y el teléfono de la persona.
+     *
+     * <p>El registro público usa la sobrecarga anterior: su formulario no pide teléfono, así que la
+     * cuenta nace sin él. Esta variante existe para el alta administrativa de cuentas, que todavía no
+     * lo captura.</p>
+     *
+     * @param organizacion organización dueña de la cuenta (obligatoria)
+     * @param medico       médico asociado, o {@code null} si la cuenta no atiende
+     * @param nombre       nombre de la persona, o {@code null} si no se registró
+     * @param telefono     teléfono de contacto, o {@code null} si no se registró
+     * @param email        correo de la cuenta (obligatorio, 1..180 caracteres); se guarda
+     *                     recortado y en minúsculas
+     * @param rol          rol de la cuenta (obligatorio, uno de {@link RolUsuario})
+     * @param authUserId   identidad de la cuenta en el servicio de autenticación (obligatoria)
+     */
+    public Usuario(Organizacion organizacion, Medico medico, String nombre, String telefono, String email,
+            RolUsuario rol, UUID authUserId) {
         this.organizacion = organizacion;
         this.medico = medico;
+        this.nombre = nombre;
+        this.telefono = telefono;
         this.email = normalizarEmail(email);
         this.rol = rol;
         this.authUserId = authUserId;
@@ -256,6 +322,24 @@ public class Usuario {
         return medico;
     }
 
+    /**
+     * Nombre de la persona.
+     *
+     * @return el nombre, o {@code null} si la cuenta no lo tiene registrado
+     */
+    public String getNombre() {
+        return nombre;
+    }
+
+    /**
+     * Teléfono de contacto del trabajador.
+     *
+     * @return el teléfono, o {@code null} si la cuenta no lo tiene registrado
+     */
+    public String getTelefono() {
+        return telefono;
+    }
+
     public String getEmail() {
         return email;
     }
@@ -306,11 +390,11 @@ public class Usuario {
     }
 
     /**
-     * Representación legible que omite deliberadamente la organización, el médico y el correo:
-     * leer las asociaciones forzaría su inicialización perezosa —y podría lanzar
-     * {@code LazyInitializationException} al registrar la entidad fuera de una transacción—, y
-     * el correo es el identificador de acceso de una persona, que no debe acabar en un log. El
-     * {@code authUserId} tampoco se expone.
+     * Representación legible que omite deliberadamente la organización, el médico, el nombre, el
+     * teléfono y el correo: leer las asociaciones forzaría su inicialización perezosa —y podría
+     * lanzar {@code LazyInitializationException} al registrar la entidad fuera de una
+     * transacción—, y el nombre, el teléfono y el correo son datos de una persona que no deben
+     * acabar en un log. El {@code authUserId} tampoco se expone.
      */
     @Override
     public String toString() {

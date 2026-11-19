@@ -37,12 +37,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ({@code ErrorResponse}) y sin reto {@code WWW-Authenticate: Basic}, porque el mecanismo
  * de esta API es Bearer y ofrecer Basic invita a un cliente a probar otro esquema.</p>
  *
- * <p>Las únicas rutas públicas son las de documentación, y desde T5 esas rutas solo existen
- * con un perfil de desarrollo activo: aquí se comprueba que, sin él, responden {@code 404} y
- * <em>no</em> {@code 401} ni {@code 403} —es decir, que siguen fuera de la autenticación y
- * que lo que las cierra es su ausencia—. El estado habilitado se prueba en
- * {@link DocumentacionHabilitadaEnDesarrolloTest}. Con un token válido la cadena deja pasar
- * la petición, que es lo que demuestran aquí y en las pruebas MVC de cada módulo.</p>
+ * <p>Las únicas rutas públicas aparte del onboarding son las de documentación, y desde T5 esas
+ * rutas solo existen con un perfil de desarrollo activo: aquí se comprueba que, sin él, responden
+ * {@code 404} y <em>no</em> {@code 401} ni {@code 403} —es decir, que siguen fuera de la
+ * autenticación y que lo que las cierra es su ausencia—. El estado habilitado se prueba en
+ * {@link DocumentacionHabilitadaEnDesarrolloTest}. Con un token válido la cadena deja pasar la
+ * petición, que es lo que demuestran aquí y en las pruebas MVC de cada módulo.</p>
+ *
+ * <p><strong>Las dos celdas públicas del onboarding no están en esta lista</strong> y no deben
+ * estarlo: {@code POST /api/v1/onboarding/registro-clinica} y {@code GET /api/v1/onboarding/planes}
+ * responden sin token por diseño. Su alcance —y que no arrastren ninguna otra escritura— lo fija
+ * {@link OnboardingRutasPublicasTest}.</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc

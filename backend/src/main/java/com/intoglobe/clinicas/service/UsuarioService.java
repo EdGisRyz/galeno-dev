@@ -17,6 +17,7 @@ import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.exception.UltimaAdministradoraException;
 import com.intoglobe.clinicas.mapper.UsuarioMapper;
 import com.intoglobe.clinicas.model.Medico;
+import com.intoglobe.clinicas.model.Organizacion;
 import com.intoglobe.clinicas.model.RolUsuario;
 import com.intoglobe.clinicas.model.Usuario;
 import com.intoglobe.clinicas.repository.MedicoRepository;
@@ -111,6 +112,40 @@ public class UsuarioService {
         var authUserId = UUID.randomUUID();
         var guardado = usuarioRepository.save(
                 UsuarioMapper.aEntidad(organizacion, medico, request, authUserId));
+        return UsuarioMapper.aResponse(guardado);
+    }
+
+    /**
+     * Crea la cuenta administradora de una organización recién creada (S5).
+     *
+     * <p>Es la <strong>misma</strong> creación de cuentas que {@link #crear(UUID, UUID, UsuarioRequest)}:
+     * el rol {@code ADMIN}, la identidad de autenticación nueva, el médico nulo y el correo
+     * comprobado dentro de la organización salen de este mismo camino. No existe una segunda forma de
+     * crear un administrador, y por eso el registro público no arma una entidad por su cuenta.</p>
+     *
+     * <p>Se diferencia de {@link #crear(UUID, UUID, UsuarioRequest)} en dos cosas, y solo en dos: no
+     * recibe el {@code tenantId} del token —la organización acaba de nacer y todavía no hay sesión que
+     * la reclame— y recibe el nombre de la persona, que la tabla guarda desde la V10 y que el alta de
+     * cuentas desde la administración todavía no pide.</p>
+     *
+     * <p>La organización tiene que estar ya persistida: el correo se comprueba contra su
+     * identificador y la fila del usuario apunta a ella. Lo garantiza quien llama, que crea la
+     * organización en la misma transacción.</p>
+     *
+     * @param organizacion organización recién creada y persistida, dueña de la cuenta
+     * @param nombre       nombre de la persona que administrará la organización
+     * @param email        correo de la cuenta; se normaliza al guardar
+     * @return representación de la cuenta persistida, sin {@code authUserId}
+     * @throws CorreoDuplicadoEnOrganizacionException si el correo ya está ocupado en la organización
+     *                                                (no ocurre en un alta recién creada, y se
+     *                                                conserva para que la regla sea la misma)
+     */
+    @Transactional
+    public UsuarioResponse crearAdministrador(Organizacion organizacion, String nombre, String email) {
+        exigirCorreoDisponible(organizacion.getId(), email, null);
+        var authUserId = UUID.randomUUID();
+        var guardado = usuarioRepository.save(UsuarioMapper.aEntidad(organizacion, null, nombre,
+                new UsuarioRequest(email, RolUsuario.ADMIN, null), authUserId));
         return UsuarioMapper.aResponse(guardado);
     }
 

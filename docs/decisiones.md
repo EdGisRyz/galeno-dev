@@ -154,6 +154,28 @@ nunca genera tokens ni almacena contraseñas.
   solo lectura. Motivo: el rol y el tenant son hechos de autorización; duplicarlos en dos
   lugares produce el fallo silencioso de que un médico trasladado de clínica siga con un token
   válido para la clínica anterior.
+- **Compuerta de apertura (R-SEG-11).** `scripts/verificar-seguridad.sh` corre en CI y recorre
+  `backend/src/main/java`; no confía en que nadie recuerde revisar la cadena de filtros. Falla si
+  aparece `anyRequest().permitAll()` (**Regla A**) o un `permitAll()` cuya línea no declare un
+  motivo con nombre propio (**Regla B**). Abrir una ruta nueva no es un descuido posible: es un
+  cambio en la lista de motivos, con una línea revisada por una persona.
+- **Los motivos se comparan por nombre completo de constante, no por subcadena.** La lista es
+  `DispatcherType.ERROR`, `RUTA_ERROR`, `RUTAS_PUBLICAS` y `RUTAS_PUBLICAS_DE_ONBOARDING`. La
+  comparación exacta no es un detalle de estilo: los nombres se contienen unos a otros
+  —`RUTAS_PUBLICAS_DE_ONBOARDING` contiene `RUTAS_PUBLICAS`— así que una búsqueda por subcadena
+  aceptaría la constante del onboarding **y también** cualquier invento con ese prefijo
+  (`RUTAS_PUBLICAS_DE_MAS`, `MI_RUTA_ERROR`) sin que nadie hubiera decidido nada. El fallo sería
+  peor que el rechazo: quedaría una ruta pública abierta cuya autorización depende de un nombre
+  compartido. `scripts/verificar-seguridad.test.sh` fija los dos lados: el nombre exacto pasa y
+  los nombres que solo contienen un motivo fallan.
+- **Dos constantes públicas, y por qué.** `RUTAS_PUBLICAS` agrupa la documentación de la API y se
+  aplica con un matcher único, sin verbo. El onboarding necesita **verbo exacto** —`POST
+  /api/v1/onboarding/registro-clinica` para el alta y `GET /api/v1/onboarding/planes` para el
+  catálogo—, así que tiene su propia constante `RUTAS_PUBLICAS_DE_ONBOARDING` y dos celdas
+  separadas que la usan elemento por elemento. Sumar esas rutas a `RUTAS_PUBLICAS` las habría
+  abierto con el matcher sin verbo: un `GET` sobre la ruta de alta o un `POST` sobre el catálogo
+  quedarían públicos sin declararlo. La constante nueva tiene nombre propio porque el motivo que
+  la compuerta acepta es un nombre, no una herencia de otra constante.
 
 **Consecuencias:**
 - (+) Un token válido no puede falsificarse sin la clave privada del emisor.
@@ -161,6 +183,10 @@ nunca genera tokens ni almacena contraseñas.
   contraseñas de nadie.
 - (-) La columna `usuario.password_hash` queda **sin escritor**. Es deuda declarada: cualquier
   alta de usuario futura necesita decidir qué se guarda ahí.
+- (+) Cada ruta pública tiene un motivo con nombre propio en el código, y la compuerta lo exige:
+  no hay `permitAll()` que pase por parecerse a otro.
+- (-) La lista de motivos se mantiene a mano en dos lugares —`SecurityConfig` y la compuerta—; una
+  ruta pública nueva exige tocar los dos, y ese es justamente el punto de revisión.
 - (-) El backend no puede autenticar por sí mismo: si el emisor no está disponible, no hay login.
 - (-) Si la validación externa responde que las credenciales viven en nuestra base, este ADR se
   revisa y el backend sí necesitará hashear.

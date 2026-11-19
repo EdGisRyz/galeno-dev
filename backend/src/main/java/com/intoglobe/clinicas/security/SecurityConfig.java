@@ -29,10 +29,23 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <h2>Rutas públicas</h2>
  *
- * <p>Las únicas rutas abiertas son las de documentación de la API
- * ({@code /v3/api-docs/**}, {@code /swagger-ui/**} y {@code /swagger-ui.html}) y el endpoint
+ * <p>Las rutas abiertas son las de documentación de la API
+ * ({@code /v3/api-docs/**}, {@code /swagger-ui/**} y {@code /swagger-ui.html}), el endpoint
  * de error {@code /error}, que responde con el contrato {@code ErrorResponse} del proyecto y
- * nunca con el cuerpo por defecto del framework.</p>
+ * nunca con el cuerpo por defecto del framework, y las <strong>dos celdas del onboarding</strong>:
+ * {@code POST /api/v1/onboarding/registro-clinica} y {@code GET /api/v1/onboarding/planes}, las dos
+ * de {@code RUTAS_PUBLICAS_DE_ONBOARDING}.</p>
+ *
+ * <p><strong>El onboarding es la única escritura pública de la API.</strong> Registrar una clínica
+ * desde la landing no puede exigir un token: quien se registra todavía no tiene cuenta. El alta crea
+ * <em>su</em> organización y <em>su</em> primer administrador en una sola transacción, así que no es
+ * una ruta de administración: {@code POST /organizaciones} sigue en {@code denyAll()} y no se
+ * reutiliza. Las dos celdas se declaran con el verbo y la ruta <strong>exactos</strong> —sin
+ * comodines y sin cubrir la ruta padre— porque el riesgo real de un {@code permitAll} es abrir de
+ * más: {@code OnboardingRutasPublicasTest} comprueba que ningún otro verbo de esas rutas, ningún
+ * segmento de más y ninguna otra escritura de la API quedan alcanzables sin token. El catálogo de
+ * planes acompaña al alta porque la pantalla necesita las etiquetas y los límites antes de enviar el
+ * formulario.</p>
  *
  * <p><strong>La documentación se apaga por configuración, no aquí.</strong> Desde T5
  * springdoc está deshabilitado en la línea base versionada
@@ -268,6 +281,38 @@ public class SecurityConfig {
     /** Ruta base de las cuentas de usuario pedidas por id y de su reactivación. */
     private static final String RUTA_USUARIOS = "/api/v1/usuarios";
 
+    /**
+     * Ruta base del onboarding público. Sus dos celdas —el alta de una clínica y el catálogo de
+     * planes— son las únicas rutas públicas que no son documentación.
+     */
+    private static final String RUTA_ONBOARDING = "/api/v1/onboarding";
+
+    /**
+     * Las dos rutas públicas del onboarding, agrupadas con un nombre propio que la compuerta de
+     * seguridad reconoce.
+     *
+     * <p><strong>No se suman a {@link #RUTAS_PUBLICAS} a propósito.</strong> Esa constante se aplica
+     * con un matcher único sin verbo, y el onboarding necesita verbs distintos: el alta solo
+     * {@code POST} y el catálogo solo {@code GET}. Sumarlas allí obligaría a abrirlas con
+     * {@code permitAll()} sobre el arreglo, sin verbo, y se perdería esa distinción —que es lo que S8
+     * protege—: un {@code GET} sobre la ruta de alta o un {@code POST} sobre el catálogo quedarían
+     * abiertos sin que nadie lo hubiera decidido.</p>
+     *
+     * <p>El orden es parte del contrato de esta constante: {@code [0]} es el alta y {@code [1]} el
+     * catálogo, y las dos celdas de la cadena los usan con su verbo exacto.
+     * {@code OnboardingRutasPublicasTest} fija ambas rutas y ambos verbos, así que invertirlas rompe
+     * una prueba antes que producción.</p>
+     *
+     * <p>Su <strong>nombre completo</strong> es el motivo que acepta
+     * {@code scripts/verificar-seguridad.sh}: la compuerta compara nombres de constante y no
+     * subcadenas, porque este nombre contiene {@code RUTAS_PUBLICAS} y una búsqueda por subcadena
+     * aceptaría cualquier invento con ese prefijo.</p>
+     */
+    private static final String[] RUTAS_PUBLICAS_DE_ONBOARDING = {
+            RUTA_ONBOARDING + "/registro-clinica",
+            RUTA_ONBOARDING + "/planes"
+    };
+
     /** Endpoint de error del contenedor, servido por {@code RestErrorController}. */
     private static final String RUTA_ERROR = "/error";
 
@@ -325,6 +370,15 @@ public class SecurityConfig {
                         // ErrorResponse del proyecto (404 si no hay error que representar).
                         .requestMatchers(RUTA_ERROR).permitAll()
                         .requestMatchers(RUTAS_PUBLICAS).permitAll()
+                        // Onboarding: las dos únicas celdas públicas que escriben y que leen datos
+                        // de producto. Verbo y ruta exactos, con nombre propio en la matriz: un
+                        // comodín o la ruta padre abrirían rutas que nadie pidió. El alta crea la
+                        // organización Y su administrador en una transacción, así que no es la
+                        // colección de organizaciones —que sigue en denyAll() más abajo—.
+                        // Se usan los dos elementos de RUTAS_PUBLICAS_DE_ONBOARDING por separado, y
+                        // no un matcher sobre el arreglo: cada celda tiene su verbo.
+                        .requestMatchers(HttpMethod.POST, RUTAS_PUBLICAS_DE_ONBOARDING[0]).permitAll()
+                        .requestMatchers(HttpMethod.GET, RUTAS_PUBLICAS_DE_ONBOARDING[1]).permitAll()
                         // Lecturas compartidas por ADMIN, MEDICO y RECEPCIONISTA de su propio
                         // tenant. Recepción las necesita para responder dónde y cuándo atiende
                         // cada médico y para atender el mostrador.

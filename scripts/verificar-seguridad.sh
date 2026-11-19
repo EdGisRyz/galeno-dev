@@ -5,12 +5,20 @@
 # una ruta sin que nadie lo haya decidido:
 #
 #   Regla A  cualquier anyRequest().permitAll().
-#   Regla B  cualquier permitAll() en una línea que no declare además
-#            DispatcherType.ERROR, RUTA_ERROR o RUTAS_PUBLICAS.
+#   Regla B  cualquier permitAll() en una línea que no declare además uno de los
+#            motivos permitidos: DispatcherType.ERROR, RUTA_ERROR,
+#            RUTAS_PUBLICAS o RUTAS_PUBLICAS_DE_ONBOARDING.
 #
 # La Regla B es la estricta a propósito: abrir una ruta nueva obliga a escribir
 # un motivo con nombre propio, que es un punto de revisión humano y no un
 # descuido que pasa desapercibido.
+#
+# Los motivos se comparan por NOMBRE COMPLETO de constante y nunca por
+# subcadena. Los nombres se contienen unos a otros —RUTAS_PUBLICAS_DE_ONBOARDING
+# contiene RUTAS_PUBLICAS— así que una búsqueda por subcadena aceptaría la
+# constante del onboarding y también cualquier invento con ese prefijo, sin que
+# nadie hubiera decidido abrirlo. Comparar identificadores completos cierra esa
+# puerta: el motivo tiene que ser exactamente uno de los cuatro.
 #
 # Los comentarios se ignoran antes de buscar: líneas que empiezan por *, /* o
 # //, bloques /* ... */ repartidos en varias líneas y colas // dentro de una
@@ -33,10 +41,15 @@ Compuerta de seguridad de CI (R-SEG-03, R-SEG-11). Recorre todos los .java de
 backend/src/main/java y falla si:
 
   Regla A  aparece anyRequest().permitAll().
-  Regla B  aparece permitAll() en una línea que no declare además
-           DispatcherType.ERROR, RUTA_ERROR o RUTAS_PUBLICAS. Abrir una ruta
-           nueva exige declararla en una de esas constantes: es un punto de
-           revisión humano deliberado.
+  Regla B  aparece permitAll() en una línea que no declare además uno de los
+           motivos permitidos: DispatcherType.ERROR, RUTA_ERROR,
+           RUTAS_PUBLICAS o RUTAS_PUBLICAS_DE_ONBOARDING. Abrir una ruta nueva
+           exige declararla en una de esas constantes: es un punto de revisión
+           humano deliberado.
+
+Los motivos se comparan por nombre completo de constante, no por subcadena:
+RUTAS_PUBLICAS_DE_ONBOARDING contiene RUTAS_PUBLICAS y una subcadena aceptaría
+cualquier invento con ese prefijo.
 
 Los comentarios se ignoran: líneas que empiezan por *, /* o //, bloques
 /* ... */ de varias líneas y colas // tras el código. El Javadoc de
@@ -137,11 +150,26 @@ function abre_todo(codigo,   compacto) {
     return index(compacto, "anyRequest().permitAll") > 0
 }
 
-# Regla B: ¿la propia línea declara uno de los tres motivos permitidos?
-function motivo_permitido(codigo) {
-    return index(codigo, "DispatcherType.ERROR") > 0 ||
-           index(codigo, "RUTA_ERROR") > 0 ||
-           index(codigo, "RUTAS_PUBLICAS") > 0
+# Regla B: ¿la propia línea declara uno de los motivos permitidos?
+#
+# La comparación es por identificador completo, nunca por subcadena. Partir la
+# línea en palabras separadas por todo lo que no sea letra, dígito o guion bajo
+# deja cada identificador entero ("RUTAS_PUBLICAS_DE_ONBOARDING" no se parte) y
+# permite comparar con ==. Se rechazan a propósito los nombres que solo
+# contienen un motivo: MI_RUTA_ERROR, RUTAS_PUBLICAS_DE_MAS o
+# RUTAS_PUBLICAS_DE_ONBOARDING_AMPLIADA no son decisiones de nadie.
+#
+# DispatcherType.ERROR es un acceso a miembro, así que sus dos identificadores
+# tienen que aparecer seguidos: el punto es separador y no queda en los trozos.
+function motivo_permitido(codigo,   trozos, cuantos, i) {
+    cuantos = split(codigo, trozos, /[^A-Za-z0-9_]+/)
+    for (i = 1; i <= cuantos; i++) {
+        if (trozos[i] == "RUTA_ERROR") { return 1 }
+        if (trozos[i] == "RUTAS_PUBLICAS") { return 1 }
+        if (trozos[i] == "RUTAS_PUBLICAS_DE_ONBOARDING") { return 1 }
+        if (trozos[i] == "ERROR" && i > 1 && trozos[i - 1] == "DispatcherType") { return 1 }
+    }
+    return 0
 }
 
 BEGIN { estado = "codigo"; total = 0; infracciones = 0 }
@@ -175,7 +203,7 @@ END {
                 printf "  Regla A: anyRequest().permitAll() abre toda la API. Prohibido (R-SEG-03, R-SEG-11; ver docs/decisiones.md ADR-008).\n"
             }
             if (es_b[i]) {
-                printf "  Regla B: un permitAll() solo vale si la linea declara DispatcherType.ERROR, RUTA_ERROR o RUTAS_PUBLICAS; abrir una ruta nueva exige revision humana (R-SEG-11; ver docs/decisiones.md ADR-008).\n"
+                printf "  Regla B: un permitAll() solo vale si la linea declara, por nombre completo, DispatcherType.ERROR, RUTA_ERROR, RUTAS_PUBLICAS o RUTAS_PUBLICAS_DE_ONBOARDING; abrir una ruta nueva exige revision humana (R-SEG-11; ver docs/decisiones.md ADR-008).\n"
             }
         }
         printf "  Referencia: docs/decisiones.md ADR-008.\n"

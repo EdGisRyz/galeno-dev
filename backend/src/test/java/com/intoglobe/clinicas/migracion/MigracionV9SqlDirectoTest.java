@@ -50,7 +50,13 @@ class MigracionV9SqlDirectoTest {
     private static final String RESTRICCION_CURP_MAYUSCULAS = "paciente_curp_mayusculas_check";
 
     /** La V9 es la novena migración de la serie: V1 a V9. */
-    private static final int VERSIONES_ESPERADAS = 9;
+    /**
+     * Migraciones que existían cuando se escribió esta prueba. La serie puede crecer —desde entonces
+     * entró la V10—, así que la prueba exige que estén aplicadas al menos estas y no un número
+     * exacto: el esquema de la V9 tiene que seguir construyéndose igual, y la llegada de una
+     * migración nueva no puede romper esta verificación por aritmética.
+     */
+    private static final int VERSIONES_HASTA_LA_V9 = 9;
 
     /** Las seis columnas de la ficha, con su tipo declarado en la V8. */
     private static final List<String> COLUMNAS_DE_LA_FICHA = List.of(
@@ -89,7 +95,7 @@ class MigracionV9SqlDirectoTest {
         assertThat(resultado.migrationsExecuted)
                 .as("la V9 se suma a la serie: modificar la V8 habría roto su suma de verificación "
                         + "en cualquier base donde ya corrió")
-                .isEqualTo(VERSIONES_ESPERADAS);
+                .isGreaterThanOrEqualTo(VERSIONES_HASTA_LA_V9);
         assertThat(columnasDeLaFicha())
                 .as("la ficha se guarda en la tabla del paciente, no en una tabla aparte")
                 .containsExactlyInAnyOrderElementsOf(COLUMNAS_DE_LA_FICHA);

@@ -203,7 +203,7 @@ cp "$RAIZ/backend/src/main/java/com/intoglobe/clinicas/security/AuthKeyStartupCo
    "$REPO/backend/src/main/java/com/intoglobe/clinicas/security/AuthKeyStartupConfig.java"
 ejecutar "$TMP"
 esperar_exito 'SecurityConfig + AuthKeyStartupConfig reales (Javadoc con permitAll() en prosa) pasan'
-esperar_contiene 'archivos reales: cuenta las 3 ocurrencias reales' 'validadas 3 ocurrencias'
+esperar_contiene 'archivos reales: cuenta las 5 ocurrencias reales (documentación, error y las dos del onboarding)' 'validadas 5 ocurrencias'
 
 # ---------------------------------------------------------------------------
 # 6. --help no ejecuta la revisión y sale 0.
@@ -235,6 +235,57 @@ cp "$COMPUERTA" "$REPO/scripts/verificar-seguridad.sh"
 ejecutar "$TMP"
 esperar_fallo 'sin backend/src/main/java la compuerta falla (no pasa en silencio)'
 esperar_contiene 'sin fuentes: explica qué falta' 'backend/src/main/java'
+
+# ---------------------------------------------------------------------------
+# 8. La constante del onboarding se acepta por su nombre completo.
+# ---------------------------------------------------------------------------
+preparar motivo-onboarding
+fixture <<'JAVA'
+package com.intoglobe.clinicas.demo;
+
+class CadenaDeFiltros {
+    void cadena(HttpSecurity http, Object manager) {
+        http.authorizeHttpRequests(autorizacion -> autorizacion
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                .requestMatchers(RUTA_ERROR).permitAll()
+                .requestMatchers(RUTAS_PUBLICAS).permitAll()
+                .requestMatchers(HttpMethod.POST, RUTAS_PUBLICAS_DE_ONBOARDING[0]).permitAll()
+                .requestMatchers(HttpMethod.GET, RUTAS_PUBLICAS_DE_ONBOARDING[1]).permitAll()
+                .anyRequest().access(manager));
+    }
+}
+JAVA
+ejecutar /
+esperar_exito 'RUTAS_PUBLICAS_DE_ONBOARDING con verbo exacto pasa la compuerta'
+esperar_contiene 'motivo del onboarding: cuenta las 5 ocurrencias' 'validadas 5 ocurrencias'
+
+# ---------------------------------------------------------------------------
+# 9. Un nombre que solo CONTIENE un motivo no es una decisión y falla.
+#
+# Es el caso que la compuerta tenía que cerrar: RUTAS_PUBLICAS_DE_MAS contiene
+# RUTAS_PUBLICAS y MI_RUTA_ERROR contiene RUTA_ERROR. Con una búsqueda por
+# subcadena las dos habrían pasado sin que nadie hubiera decidido abrir nada.
+# ---------------------------------------------------------------------------
+preparar nombres-que-contienen
+fixture <<'JAVA'
+package com.intoglobe.clinicas.demo;
+
+class CadenaDeFiltros {
+    void cadena(HttpSecurity http, Object manager) {
+        http.authorizeHttpRequests(autorizacion -> autorizacion
+                .requestMatchers(RUTAS_PUBLICAS_DE_MAS).permitAll()
+                .requestMatchers(MI_RUTA_ERROR).permitAll()
+                .anyRequest().access(manager));
+    }
+}
+JAVA
+ejecutar "$TMP"
+esperar_fallo 'un nombre que solo contiene un motivo falla la compuerta'
+esperar_contiene 'nombres que contienen: informa las dos infracciones' '2 infraccion(es)'
+esperar_contiene 'nombres que contienen: nombra la Regla B' 'Regla B'
+esperar_contiene 'nombres que contienen: marca RUTAS_PUBLICAS_DE_MAS' 'CadenaDeFiltros.java:6'
+esperar_contiene 'nombres que contienen: marca MI_RUTA_ERROR' 'CadenaDeFiltros.java:7'
+esperar_contiene 'nombres que contienen: cita el ADR' 'ADR-008'
 
 printf '\n# Resultado: %s casos, %s fallos\n' "$casos" "$fallos"
 if [ "$fallos" -ne 0 ]; then
