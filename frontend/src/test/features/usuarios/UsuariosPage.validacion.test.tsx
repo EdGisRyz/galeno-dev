@@ -115,6 +115,11 @@ async function abrirAlta() {
   render(<UsuariosPage />);
   await screen.findByText(CUENTA_PROPIA.email);
   fireEvent.click(screen.getByRole('button', { name: /nueva cuenta/i }));
+  // El nombre es obligatorio desde S1: estos casos son de la forma del correo, así que se escribe
+  // uno válido y la única regla que puede rechazar el formulario es la del correo.
+  fireEvent.change(screen.getByLabelText(/^nombre/i), {
+    target: { value: 'Recepción Matutina' },
+  });
 }
 
 /** Escribe el correo en el campo del formulario, localizado por su etiqueta visible. */

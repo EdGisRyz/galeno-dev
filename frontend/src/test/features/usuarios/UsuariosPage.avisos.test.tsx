@@ -102,6 +102,10 @@ describe('UsuariosPage · aviso de guardado dentro del modal', () => {
     fireEvent.change(screen.getByLabelText(/^correo/i), {
       target: { value: 'recepcion@correo.mx' },
     });
+    // El nombre es obligatorio desde S1; el aviso que se prueba aquí es el del 409 del correo.
+    fireEvent.change(screen.getByLabelText(/^nombre/i), {
+      target: { value: 'Recepción Matutina' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /registrar cuenta/i }));
 
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
