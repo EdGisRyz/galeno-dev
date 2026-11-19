@@ -13,6 +13,7 @@ import com.intoglobe.clinicas.dto.response.OrganizacionResponse;
 import com.intoglobe.clinicas.exception.ResourceNotFoundException;
 import com.intoglobe.clinicas.mapper.OrganizacionMapper;
 import com.intoglobe.clinicas.model.Organizacion;
+import com.intoglobe.clinicas.model.PlanTipo;
 import com.intoglobe.clinicas.repository.OrganizacionRepository;
 
 /**
@@ -53,6 +54,34 @@ public class OrganizacionService {
         var organizacion = OrganizacionMapper.aEntidad(request);
         var guardada = organizacionRepository.save(organizacion);
         return OrganizacionMapper.aResponse(guardada);
+    }
+
+    /**
+     * Crea la organización del registro público: activa, con el plan elegido y con un slug derivado
+     * del nombre y único en toda la plataforma (S4).
+     *
+     * <p>Devuelve la <strong>entidad</strong> y no la representación de salida porque el alta de la
+     * clínica no termina aquí: el mismo caso de uso tiene que crear su primer administrador dentro de
+     * la misma transacción (S1), y para eso necesita la fila ya persistida con su identificador.</p>
+     *
+     * <p><strong>El slug.</strong> Se compone con {@link GeneradorDeSlug} a partir del nombre y, si
+     * ya está tomado, se le agrega un sufijo: dos clínicas pueden llamarse igual y el registro no
+     * debe fallar por eso. La comprobación consulta la tabla ya con el slug normalizado, así que
+     * {@code Clínica San Rafael} y {@code clinica san rafael} compiten por el mismo hueco. La
+     * restricción única {@code organizacion_slug_key} —que ya existía desde la V2— sigue siendo la
+     * última palabra frente a dos registros simultáneos: en esa carrera el segundo recibe un error
+     * de integridad, no un slug duplicado.</p>
+     *
+     * @param nombre nombre de la organización, ya validado por el DTO
+     * @param plan   plan elegido, ya validado contra el enum
+     * @return la organización persistida, activa y con slug
+     */
+    @Transactional
+    public Organizacion crearParaRegistro(String nombre, PlanTipo plan) {
+        var organizacion = OrganizacionMapper.aEntidad(
+                new OrganizacionRequest(nombre, plan, null, null));
+        organizacion.asignarSlug(slugDisponible(GeneradorDeSlug.aPartirDe(nombre)));
+        return organizacionRepository.save(organizacion);
     }
 
     /**
@@ -147,6 +176,30 @@ public class OrganizacionService {
         if (!Objects.equals(organizacionId, tenantId)) {
             throw new AccessDeniedException(
                     "El organizacionId de la ruta no corresponde al tenant del token");
+        }
+    }
+
+    /**
+     * Devuelve un slug libre a partir de un slug base.
+     *
+     * <p>Si el base está ocupado se prueban {@code base-2}, {@code base-3}… hasta encontrar uno
+     * libre. El bucle termina porque cada candidato es distinto del anterior y el espacio de
+     * {@code base-N} no tiene tope; el caso realista es que el primer sufijo baste. La consulta no
+     * filtra por {@code activo}: un slug sigue ocupado aunque su organización esté dada de baja,
+     * porque el servicio de identidad podría seguir emitiendo tokens para ella.</p>
+     *
+     * @param base slug base, ya normalizado y con la longitud de la columna
+     * @return el base si está libre, o su primera variante con sufijo libre
+     */
+    private String slugDisponible(String base) {
+        if (organizacionRepository.buscarPorSlug(base).isEmpty()) {
+            return base;
+        }
+        for (int numero = 2; ; numero++) {
+            var candidato = GeneradorDeSlug.conSufijo(base, numero);
+            if (organizacionRepository.buscarPorSlug(candidato).isEmpty()) {
+                return candidato;
+            }
         }
     }
 

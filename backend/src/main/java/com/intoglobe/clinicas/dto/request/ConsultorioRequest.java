@@ -50,7 +50,7 @@ public record ConsultorioRequest(
         @Size(min = 1, max = 120)
         // Admite dígitos si hay al menos una letra: `Consultorio 2` es un nombre real, `454545` no.
         // El blanco lo rechaza @NotBlank, que es quien tiene el mensaje propio.
-        @Pattern(regexp = PatronesDeFormato.NOMBRE_DE_CONSULTORIO)
+        @Pattern(regexp = PatronesDeFormato.NOMBRE_DE_LOCAL)
         String nombre,
 
         @Schema(description = "Dirección física del consultorio; null o vacía si no se registró. "

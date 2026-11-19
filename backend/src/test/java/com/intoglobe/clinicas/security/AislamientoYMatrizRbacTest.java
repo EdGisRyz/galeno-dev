@@ -99,6 +99,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       del token ({@link #listarOrganizacionesDevuelveSoloLaDelToken()}).</li>
  * </ul>
  *
+ * <p><strong>Las dos rutas públicas del onboarding no son celdas de esta matriz.</strong>
+ * {@code POST /api/v1/onboarding/registro-clinica} y {@code GET /api/v1/onboarding/planes} no llevan
+ * token ni rol: por eso no aparecen en la tabla de treinta y siete operaciones. Que sean las únicas
+ * rutas abiertas y que no arrastren ninguna escritura lo prueba
+ * {@link OnboardingRutasPublicasTest}; aquí se conserva la celda que la spec nombra,
+ * {@code POST /organizaciones} en {@code 403}, sin cambios.</p>
+ *
  * <p><strong>Base de datos propia.</strong> El contexto arranca contra una base H2 exclusiva de
  * esta clase, igual que la sonda de arranque de T3: así el sembrado de organizaciones no
  * altera lo que otras pruebas de la suite esperan ver y esta clase no depende del orden de

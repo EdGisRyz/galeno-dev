@@ -41,7 +41,27 @@ public final class UsuarioMapper {
      */
     public static Usuario aEntidad(Organizacion organizacion, Medico medico, UsuarioRequest request,
             UUID authUserId) {
-        return new Usuario(organizacion, medico, request.email(), request.rol(), authUserId);
+        return aEntidad(organizacion, medico, null, request, authUserId);
+    }
+
+    /**
+     * Construye una entidad nueva con el nombre de la persona.
+     *
+     * <p>Es la variante del registro público, el único camino que hoy recibe un nombre. El nombre no
+     * forma parte de {@link UsuarioRequest} porque el alta de cuentas desde la administración no lo
+     * pide; por eso viaja como parámetro explícito y la otra sobrecarga delega aquí con
+     * {@code null}.</p>
+     *
+     * @param organizacion organización dueña, ya resuelta y validada por el service
+     * @param medico       médico asociado ya validado, o {@code null} si la cuenta no atiende
+     * @param nombre       nombre de la persona, o {@code null} si no se registró
+     * @param request      datos de entrada validados
+     * @param authUserId   identidad de la cuenta en el servicio de autenticación
+     * @return entidad transitoria activa con los campos editables asignados
+     */
+    public static Usuario aEntidad(Organizacion organizacion, Medico medico, String nombre,
+            UsuarioRequest request, UUID authUserId) {
+        return new Usuario(organizacion, medico, nombre, request.email(), request.rol(), authUserId);
     }
 
     /**

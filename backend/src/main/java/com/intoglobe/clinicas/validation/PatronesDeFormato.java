@@ -45,19 +45,21 @@ public final class PatronesDeFormato {
     public static final String TEXTO_SIN_DIGITOS_OPCIONAL = "^$|" + TEXTO_SIN_DIGITOS;
 
     /**
-     * Nombre de un local —hoy solo el consultorio—: admite dígitos, pero exige al menos una letra.
+     * Nombre de un local —un consultorio o una clínica—: admite dígitos, pero exige al menos una
+     * letra.
      *
      * <p>{@code Consultorio 2} y {@code Sala 3} son nombres reales de una clínica y el patrón de las
      * personas los rechazaba; {@code 454545}, {@code 123} y {@code ---} no son nombres y siguen sin
-     * entrar. Se aplica <strong>solo</strong> al nombre del consultorio: en el nombre de un médico o
-     * de un paciente un número no es parte del nombre.</p>
+     * entrar. Se aplica al nombre de un <strong>local</strong> —el consultorio y la organización— y
+     * nunca al de una persona: en el nombre de un médico, de un paciente o de una administradora un
+     * número no es parte del nombre, y allí vale {@link #TEXTO_SIN_DIGITOS}.</p>
      *
      * <p>La anticipación {@code (?=.*[\p{L}])} es la que exige la letra; el blanco tiene su propia
      * alternativa ({@code ^ *$}) para que un valor en blanco lo rechace {@code @NotBlank} con su
      * mensaje y no este patrón. Sin ella, {@code "   "} violaría las dos reglas y la respuesta
      * llevaría dos motivos para el mismo campo, en un orden que no se controla.</p>
      */
-    public static final String NOMBRE_DE_CONSULTORIO = "^$|^ *$|^(?=.*[\\p{L}])[\\p{L}\\p{M} .,'\\-0-9]*$";
+    public static final String NOMBRE_DE_LOCAL = "^$|^ *$|^(?=.*[\\p{L}])[\\p{L}\\p{M} .,'\\-0-9]*$";
 
     /**
      * Teléfono: dígitos, con un {@code +} inicial opcional, espacios, guiones y paréntesis; de 7 a 20

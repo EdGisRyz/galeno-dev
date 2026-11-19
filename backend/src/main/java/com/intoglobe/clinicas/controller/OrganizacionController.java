@@ -67,17 +67,23 @@ public class OrganizacionController {
     }
 
     /**
-     * Registra una organización nueva. Método conservado para el flujo de onboarding: hoy
-     * <strong>no es alcanzable por HTTP</strong>.
+     * Registra una organización nueva. Método conservado para una futura administración de
+     * plataforma: hoy <strong>no es alcanzable por HTTP</strong>.
      *
      * <p><strong>El alta está bloqueada a propósito.</strong> {@code POST /api/v1/organizaciones}
-     * responde {@code 403} para {@code ADMIN}, {@code MEDICO} y {@code PACIENTE} porque, con el
-     * aislamiento por tenant aplicado, la organización recién creada quedaría inalcanzable para
-     * quien la crea —el {@code Location} del {@code 201} respondería {@code 403} a la lectura, al
-     * alta de hijos y a la baja— y dejaría una fila activa huérfana. Es una decisión de producto
-     * del 2026-10-29 y la regla vive en {@code SecurityConfig}, que documenta el bloqueo y pide no
-     * reabrirlo sin el onboarding. El método, su firma y su lógica se conservan intactos para ese
-     * flujo (Sprint 2), que es cuando este contrato vuelve a publicar el {@code 201}.</p>
+     * responde {@code 403} para todos los roles porque, con el aislamiento por tenant aplicado, la
+     * organización recién creada quedaría inalcanzable para quien la crea —el {@code Location} del
+     * {@code 201} respondería {@code 403} a la lectura, al alta de hijos y a la baja— y dejaría una
+     * fila activa huérfana. Es una decisión de producto del 2026-10-29 y la regla vive en
+     * {@code SecurityConfig}, que documenta el bloqueo.</p>
+     *
+     * <p><strong>El onboarding ya existe, y no reabre esta celda.</strong> El alta de una clínica
+     * desde la landing se resolvió con una ruta pública propia,
+     * {@code POST /api/v1/onboarding/registro-clinica}, que crea la organización <em>y</em> su primer
+     * administrador en una sola transacción (ver {@code OnboardingController}). Este método se
+     * conserva intacto para el día que exista una administración de plataforma capaz de hacer
+     * alcanzable una organización suelta; hasta entonces su celda sigue en {@code denyAll()} y
+     * reabrirla —aunque sea «solo para ADMIN»— vuelve a crear filas que nadie puede usar.</p>
      *
      * <p><strong>El {@code 400} ya no se documenta porque no es alcanzable:</strong> la cadena de
      * filtros deniega antes de deserializar y validar, así que ni un JSON mal formado ni un campo
@@ -90,10 +96,10 @@ public class OrganizacionController {
      * @return 201 con la organización creada y la cabecera {@code Location} hacia su recurso
      */
     @PostMapping
-    @Operation(summary = "Crear organización (bloqueada temporalmente)",
-            description = "El alta de organizaciones está bloqueada a propósito: responde 403 para todos los roles hasta que exista el flujo de onboarding dedicado (Sprint 2). La regla y su justificación están en SecurityConfig.")
+    @Operation(summary = "Crear organización (bloqueada)",
+            description = "El alta de organizaciones sueltas está bloqueada a propósito: responde 403 para todos los roles. El onboarding de una clínica usa POST /api/v1/onboarding/registro-clinica, que crea la organización y su administrador en una transacción. La regla y su justificación están en SecurityConfig.")
     @ApiResponses({
-            @ApiResponse(responseCode = "403", description = "El alta de organizaciones está bloqueada para todos los roles hasta que exista el flujo de onboarding dedicado",
+            @ApiResponse(responseCode = "403", description = "El alta de organizaciones sueltas está bloqueada para todos los roles; el onboarding usa /api/v1/onboarding/registro-clinica",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<OrganizacionResponse> crear(@Valid @RequestBody OrganizacionRequest request) {
