@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/lib/axios';
-import { resumenDeErrorHttp } from '@/lib/apiError';
+import { mensajeDelBackend, resumenDeErrorHttp } from '@/lib/apiError';
+import { errorDeCorreoDeCuenta } from '@/lib/patronesDeFormato';
 import {
   Button,
   Input,
@@ -61,6 +62,9 @@ const EMPTY_FORM = {
   medicoId: '',
 };
 
+/** Mensaje de forma del correo; la ausencia de la clave significa que el campo cumple. */
+type ErroresDelFormulario = { email?: string };
+
 export function UsuariosPage() {
   /**
    * Organización dueña del directorio: sale del claim `tenantId` de la sesión, que es la
@@ -88,8 +92,14 @@ export function UsuariosPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [erroresForm, setErroresForm] = useState<ErroresDelFormulario>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // S1: el aviso del alta o de la edición vive dentro del diálogo, junto a los botones de acción.
+  // La baja y la reactivación ocurren con el diálogo cerrado y tienen su propio aviso de página:
+  // un único estado para los tres casos volvería invisibles dos de ellos.
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [bajaError, setBajaError] = useState<string | null>(null);
+  const [reactivarError, setReactivarError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
@@ -131,6 +141,7 @@ export function UsuariosPage() {
   const openCreateModal = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setErroresForm({});
     setSaveError(null);
     setIsModalOpen(true);
   };
@@ -142,6 +153,7 @@ export function UsuariosPage() {
       rol: usuario.rol,
       medicoId: usuario.medicoId || '',
     });
+    setErroresForm({});
     setSaveError(null);
     setIsModalOpen(true);
   };
@@ -153,11 +165,22 @@ export function UsuariosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.email.trim()) return;
+    // S6: los espacios de los extremos no forman parte del correo. Se recorta antes de validar y
+    // se envía recortado, porque un espacio invisible al pegar rechazaba un correo válido con un
+    // mensaje sobre su forma —el mismo recorte que hace el backend antes de su patrón—.
+    const email = form.email.trim();
+    if (!email) return;
     if (form.rol === 'MEDICO' && !form.medicoId) return;
 
+    // S4: la misma regla estructural del backend, aplicada antes de enviar. El correo de una cuenta
+    // es el identificador de inicio de sesión, así que un valor sin forma de correo dejaría una
+    // cuenta con la que nadie puede entrar; el mensaje queda junto al campo.
+    const errorEmail = errorDeCorreoDeCuenta(email);
+    setErroresForm(errorEmail ? { email: errorEmail } : {});
+    if (errorEmail) return;
+
     const payload = {
-      email: form.email,
+      email,
       rol: form.rol,
       medicoId: form.rol === 'MEDICO' ? form.medicoId : null,
     };
@@ -179,7 +202,9 @@ export function UsuariosPage() {
       setTimeout(() => setAlertNotice(null), 3500);
     } catch (err) {
       console.error('Error al guardar la cuenta:', resumenDeErrorHttp(err));
-      setSaveError(MENSAJE_ERROR_GUARDADO);
+      // El rechazo del servicio explica el motivo —el correo ya está en uso, o su forma no es
+      // válida— y se muestra tal cual; sin mensaje se cae al texto de la pantalla.
+      setSaveError(mensajeDelBackend(err, MENSAJE_ERROR_GUARDADO));
     } finally {
       setIsSubmitting(false);
     }
@@ -189,6 +214,7 @@ export function UsuariosPage() {
   // regla y la UI solo puede mostrar el 409 que ya responde.
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
+    setBajaError(null);
     try {
       setIsDeactivating(true);
       await api.delete(`/usuarios/${deactivatingId}`);
@@ -200,7 +226,7 @@ export function UsuariosPage() {
     } catch (err) {
       console.error('Error al dar de baja la cuenta:', resumenDeErrorHttp(err));
       setAlertNotice(null);
-      setSaveError(MENSAJE_ERROR_BAJA);
+      setBajaError(MENSAJE_ERROR_BAJA);
     } finally {
       setIsDeactivating(false);
       setDeactivatingId(null);
@@ -208,6 +234,7 @@ export function UsuariosPage() {
   };
 
   const handleActivate = async (id: string) => {
+    setReactivarError(null);
     try {
       setActivatingId(id);
       await api.post(`/usuarios/${id}/activar`);
@@ -216,7 +243,7 @@ export function UsuariosPage() {
       setTimeout(() => setAlertNotice(null), 3500);
     } catch (err) {
       console.error('Error al reactivar la cuenta:', resumenDeErrorHttp(err));
-      setSaveError(MENSAJE_ERROR_ACTIVAR);
+      setReactivarError(MENSAJE_ERROR_ACTIVAR);
     } finally {
       setActivatingId(null);
     }
@@ -266,9 +293,16 @@ export function UsuariosPage() {
           {alertNotice}
         </Alert>
       )}
-      {saveError && (
-        <Alert variant="error" title="Error">
-          {saveError}
+      {/* S1: la baja y la reactivación ocurren con el diálogo cerrado, así que sus avisos se leen
+          en la página. El del alta y la edición se pinta dentro del modal (ver abajo). */}
+      {bajaError && (
+        <Alert variant="error" title="No se pudo dar de baja la cuenta">
+          {bajaError}
+        </Alert>
+      )}
+      {reactivarError && (
+        <Alert variant="error" title="No se pudo reactivar la cuenta">
+          {reactivarError}
         </Alert>
       )}
 
@@ -488,11 +522,24 @@ export function UsuariosPage() {
         maxWidth="md"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/*
+            `type="text"` con `inputMode="email"` en lugar de `type="email"`: el navegador
+            rechazaría por su cuenta parte de los correos sin forma de correo (`juan@`, `juan@.com`)
+            con un aviso en su propio idioma y sin llegar a este formulario, y la regla —con su
+            mensaje en español, junto al campo— vive aquí y en el backend. El teclado del móvil y
+            el autocompletado se conservan con `inputMode` y `autoComplete`.
+          */}
           <Input
             label="Correo"
-            type="email"
+            type="text"
+            inputMode="email"
+            autoComplete="email"
             value={form.email}
-            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+            onChange={(e) => {
+              setForm((f) => ({ ...f, email: e.target.value }));
+              setErroresForm((prev) => (prev.email ? {} : prev));
+            }}
+            error={erroresForm.email}
             required
             maxLength={180}
           />
@@ -517,6 +564,12 @@ export function UsuariosPage() {
               placeholder="Selecciona..."
               required
             />
+          )}
+
+          {saveError && (
+            <Alert variant="error" title="No se pudo guardar la cuenta">
+              {saveError}
+            </Alert>
           )}
 
           <div className="flex justify-end gap-2 pt-4 border-t border-[#F1F5F9]">

@@ -1,4 +1,5 @@
-// Patrones y mensajes de formato compartidos por los formularios de médico, paciente y consultorio.
+// Patrones y mensajes de formato compartidos por los formularios de médico, paciente, consultorio
+// y cuentas de usuario.
 //
 // **Espejo del backend:** `backend/src/main/java/com/intoglobe/clinicas/validation/PatronesDeFormato.java`.
 // Son dos definiciones —una por lenguaje— y no una copia por módulo: `validacionMedico`,
@@ -32,12 +33,36 @@ export const PATRON_TELEFONO = /^(?:|(?=.{7,20}$)(?=.*[0-9])\+?[0-9(][0-9() -]*)
 /** Cédula profesional: solo dígitos, entre 5 y 10. Vacía se acepta (es opcional). */
 export const PATRON_CEDULA_PROFESIONAL = /^(?:|\d{5,10})$/;
 
+/**
+ * Correo de una **cuenta de usuario** (identificador de inicio de sesión): una parte local, una `@`,
+ * un dominio y un punto con al menos dos letras después (`algo@dominio.mx`).
+ *
+ * Es **estructural, no la RFC completa**: la regla impide cuentas inutilizables —una cuenta con
+ * `juan@` nace sin que nadie pueda iniciar sesión con ella— y la existencia de la dirección es del
+ * servicio de identidad. No se aplica al correo del paciente, que es un dato de contacto opcional y
+ * sigue sin regla de formato (decisión de producto, 2026-11-05). Acepta mayúsculas a propósito: el
+ * backend normaliza a minúsculas **después** de validar. La cadena vacía se acepta porque el correo
+ * es obligatorio y quien lo rechaza es la comprobación de obligatoriedad de la pantalla.
+ */
+export const PATRON_CORREO_CUENTA =
+  /^(?:|[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,})$/;
+
 /** Etiqueta del campo vacío que es obligatorio: el mismo texto en los tres módulos. */
 export const MENSAJE_NOMBRE_OBLIGATORIO = 'El nombre es obligatorio.';
 
 /** La cédula no tiene equivalente en los otros formularios, pero vive aquí con las demás reglas. */
 export const MENSAJE_CEDULA_PROFESIONAL =
   'La cédula profesional debe tener entre 5 y 10 dígitos, sin letras ni símbolos.';
+
+/**
+ * Mensaje de la forma del correo de una cuenta.
+ *
+ * Describe la regla que aplica `PATRON_CORREO_CUENTA` y no añade ninguna que el patrón no exija:
+ * una parte local, la arroba, un dominio y un punto con al menos dos letras después. Un mensaje que
+ * enumera menos de lo aceptado hace reescribir un dato que ya era válido.
+ */
+export const MENSAJE_CORREO_DE_CUENTA =
+  'El correo debe tener forma de correo: algo@dominio.mx, con un punto y al menos dos letras después.';
 
 /** Mensaje del campo de texto libre de dígitos, con la etiqueta del campo al frente. */
 export function mensajeDeTextoSinDigitos(etiqueta: string): string {
@@ -105,4 +130,14 @@ export function errorDeNombreDeLocal(
 /** Error de una cédula profesional, o `undefined` si cumple. La cadena vacía se acepta. */
 export function errorDeCedulaProfesional(valor: string): string | undefined {
   return PATRON_CEDULA_PROFESIONAL.test(valor) ? undefined : MENSAJE_CEDULA_PROFESIONAL;
+}
+
+/**
+ * Error de la forma del correo de una cuenta, o `undefined` si cumple.
+ *
+ * La cadena vacía no produce error aquí: el correo es obligatorio y quien lo rechaza es la
+ * comprobación de obligatoriedad de la pantalla, que tiene su propio mensaje.
+ */
+export function errorDeCorreoDeCuenta(valor: string): string | undefined {
+  return PATRON_CORREO_CUENTA.test(valor) ? undefined : MENSAJE_CORREO_DE_CUENTA;
 }
