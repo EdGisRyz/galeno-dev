@@ -31,6 +31,7 @@ import {
   MapPin,
   Pencil,
   Trash2,
+  UserCheck,
   Loader2,
   RefreshCw,
 } from 'lucide-react';
@@ -42,6 +43,8 @@ const MENSAJE_ERROR_GUARDADO =
   'No fue posible guardar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_BAJA =
   'No fue posible desactivar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
+const MENSAJE_ERROR_REACTIVAR =
+  'No fue posible reactivar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -83,16 +86,19 @@ export function ConsultoriosPage() {
   // los dos casos dejaría el de la baja dentro de un modal que ya no está en pantalla.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [bajaError, setBajaError] = useState<string | null>(null);
+  const [reactivarError, setReactivarError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [isDeactivating, setIsDeactivating] = useState(false);
 
   // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
-  // render, el efecto se dispararía en bucle.
+  // render, el efecto se dispararía en bucle. El listado se pide con `incluirInactivos=true`
+  // (S8): sin los consultorios dados de baja, el recién desactivado desaparece de la tabla y el
+  // botón «Reactivar» queda inalcanzable.
   const loadData = useCallback((ruta: string) => {
     return api
-      .get<Consultorio[]>(ruta)
+      .get<Consultorio[]>(`${ruta}?incluirInactivos=true`)
       .then((res) => {
         setConsultorios(res.data);
         setLoadError(null);
@@ -215,11 +221,32 @@ export function ConsultoriosPage() {
     }
   };
 
-  // No hay botón "Activar": el backend no expone reactivación (ConsultorioController solo tiene
-  // crear/listar/buscar/actualizar/desactivar, y Consultorio.actualizarDatos() documenta
-  // explícitamente que el PUT nunca toca `activo`). Una vez desactivado, un consultorio queda
-  // inactivo hasta que el backend agregue ese endpoint — no es algo que el frontend pueda resolver
-  // por su cuenta. Brecha señalada en la HU3-5, pendiente de decisión del equipo de backend.
+  /**
+   * Reactivación de una baja lógica (S4): `POST /consultorios/{id}/activar` responde 204 sin
+   * cuerpo, así que la fila se marca activa en el estado local. Es el consultorio que se dio de
+   * baja por una refacción y vuelve. Un rechazo del backend se muestra con su mensaje.
+   */
+  const handleReactivar = async (consultorio: Consultorio) => {
+    setReactivarError(null);
+    try {
+      await api.post(`/consultorios/${consultorio.id}/activar`);
+      setConsultorios((prev) =>
+        prev.map((c) => (c.id === consultorio.id ? { ...c, activo: true } : c)),
+      );
+      setAlertNotice('Consultorio reactivado correctamente.');
+      programarOcultarAviso();
+    } catch (err) {
+      console.error('Error al reactivar consultorio:', resumenDeErrorHttp(err));
+      setReactivarError(mensajeDelBackend(err, MENSAJE_ERROR_REACTIVAR));
+    }
+  };
+
+  /**
+   * Baja lógica del consultorio: `DELETE /consultorios/{id}` responde 204 sin cuerpo. El backend
+   * rechaza con 409 la baja del consultorio principal de un médico activo (S6) y su mensaje dice
+   * el camino —dar de baja primero al médico—; se muestra tal cual, porque es lo único que explica
+   * qué cambiar antes de reintentar.
+   */
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
     setBajaError(null);
@@ -235,7 +262,7 @@ export function ConsultoriosPage() {
     } catch (err) {
       console.error('Error al desactivar consultorio:', resumenDeErrorHttp(err));
       setAlertNotice(null);
-      setBajaError(MENSAJE_ERROR_BAJA);
+      setBajaError(mensajeDelBackend(err, MENSAJE_ERROR_BAJA));
     } finally {
       setIsDeactivating(false);
       setDeactivatingId(null);
@@ -306,6 +333,11 @@ export function ConsultoriosPage() {
       {bajaError && (
         <Alert variant="error" title="No se pudo desactivar el consultorio">
           {bajaError}
+        </Alert>
+      )}
+      {reactivarError && (
+        <Alert variant="error" title="No se pudo reactivar el consultorio">
+          {reactivarError}
         </Alert>
       )}
 
@@ -475,6 +507,17 @@ export function ConsultoriosPage() {
                           <Pencil className="w-3.5 h-3.5 text-[#88BDDC]" />
                           <span className="hidden sm:inline">Editar</span>
                         </button>
+                        {!c.activo && (
+                          <button
+                            type="button"
+                            onClick={() => handleReactivar(c)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#059669] text-white hover:bg-[#047857] text-xs font-medium transition-all shadow-2xs"
+                            title="Reactivar consultorio"
+                          >
+                            <UserCheck className="w-3.5 h-3.5 text-[#D1FAE5]" />
+                            <span className="hidden sm:inline">Reactivar</span>
+                          </button>
+                        )}
                         {c.activo && (
                           <button
                             type="button"
@@ -586,8 +629,8 @@ export function ConsultoriosPage() {
         maxWidth="sm"
       >
         <p className="text-sm text-[#41484D]">
-          ¿Desactivar <strong>{consultorioADesactivar?.nombre}</strong>? El sistema todavía no
-          ofrece una forma de reactivarlo: confírmalo solo si estás seguro.
+          ¿Desactivar <strong>{consultorioADesactivar?.nombre}</strong>? Dejará de estar disponible
+          para nuevas citas y podrás reactivarlo desde esta misma pantalla cuando vuelva.
         </p>
         <div className="flex justify-end gap-2 pt-5">
           <Button type="button" variant="outline" onClick={() => setDeactivatingId(null)}>
