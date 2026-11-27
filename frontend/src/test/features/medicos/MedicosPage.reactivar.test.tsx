@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { MedicosPage } from '@/features/medicos/MedicosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Medico } from '@/features/medicos/medicos.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -105,7 +106,7 @@ describe('MedicosPage · reactivación de un médico inactivo (S4)', () => {
   it('una fila inactiva ofrece Reactivar y no Desactivar', async () => {
     cargarCon([MEDICO_INACTIVO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_INACTIVO.nombre);
     const fila = filaDe(MEDICO_INACTIVO);
@@ -118,7 +119,7 @@ describe('MedicosPage · reactivación de un médico inactivo (S4)', () => {
     cargarCon([MEDICO_INACTIVO]);
     postMock.mockResolvedValue(respuestaCon<void>(undefined));
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_INACTIVO.nombre);
     fireEvent.click(screen.getByRole('button', { name: /reactivar/i }));
@@ -138,7 +139,7 @@ describe('MedicosPage · reactivación de un médico inactivo (S4)', () => {
     cargarCon([MEDICO_INACTIVO]);
     postMock.mockRejectedValue(new Error('sin conexión'));
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_INACTIVO.nombre);
     fireEvent.click(screen.getByRole('button', { name: /reactivar/i }));
@@ -154,7 +155,7 @@ describe('MedicosPage · reactivación de un médico inactivo (S4)', () => {
     cargarCon([MEDICO_INACTIVO]);
     postMock.mockRejectedValue({ response: { data: { mensaje: MENSAJE_PRINCIPAL_INACTIVO } } });
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_INACTIVO.nombre);
     fireEvent.click(screen.getByRole('button', { name: /reactivar/i }));
@@ -167,7 +168,7 @@ describe('MedicosPage · reactivación de un médico inactivo (S4)', () => {
   it('una fila activa sigue ofreciendo Desactivar y no Reactivar', async () => {
     cargarCon([MEDICO_ACTIVO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_ACTIVO.nombre);
     const fila = filaDe(MEDICO_ACTIVO);

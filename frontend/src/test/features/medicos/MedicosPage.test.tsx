@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { MedicosPage } from '@/features/medicos/MedicosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { HorarioMedico, Medico } from '@/features/medicos/medicos.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -143,7 +144,7 @@ describe('MedicosPage · listado', () => {
   it('muestra los médicos y el nombre de su consultorio', async () => {
     cargarCon();
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     expect(await screen.findByText('Médico de prueba')).toBeInTheDocument();
     expect(screen.getByText('Consultorio de prueba')).toBeInTheDocument();
@@ -156,7 +157,7 @@ describe('MedicosPage · alta', () => {
     cargarCon();
     postMock.mockResolvedValue(respuestaCon({ ...MEDICO, id: 'med-0002', nombre: 'Médico nuevo' }));
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
@@ -186,7 +187,7 @@ describe('MedicosPage · estados de carga', () => {
         return Promise.resolve(respuestaCon([]));
       });
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     expect(await screen.findByText(/no se pudieron cargar los médicos/i)).toBeInTheDocument();
 
@@ -200,7 +201,7 @@ describe('MedicosPage · reglas de formato del médico', () => {
   it('no envía el alta cuando el nombre trae dígitos', async () => {
     cargarCon();
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
@@ -215,7 +216,7 @@ describe('MedicosPage · reglas de formato del médico', () => {
   it('no envía la edición de un médico con cédula con letras hasta corregirla', async () => {
     cargarCon([], [MEDICO_CON_DATOS_NO_CONFORMES]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     expect(await screen.findByText('52454255')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle('Editar médico'));
@@ -228,7 +229,7 @@ describe('MedicosPage · reglas de formato del médico', () => {
   it('no envía el alta cuando el teléfono trae letras', async () => {
     cargarCon();
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
@@ -244,7 +245,7 @@ describe('MedicosPage · reglas de formato del médico', () => {
     cargarCon();
     postMock.mockResolvedValue(respuestaCon({ ...MEDICO, id: 'med-0002', nombre: 'Dra. Elena Ruiz' }));
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
@@ -273,7 +274,7 @@ describe('MedicosPage · reglas de formato del médico', () => {
     // sigue viendo, con su cédula tal cual, para que el administrador pueda corregirla.
     cargarCon([], [MEDICO_CON_DATOS_NO_CONFORMES]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     expect(await screen.findByText('52454255')).toBeInTheDocument();
     expect(screen.getByText('ccwcwcc')).toBeInTheDocument();
@@ -286,7 +287,7 @@ describe('MedicosPage · reglas de formato del médico', () => {
     cargarCon();
     postMock.mockRejectedValueOnce({ response: { data: { mensaje: 'El campo cedula es inválido' } } });
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
@@ -302,7 +303,7 @@ describe('MedicosPage · horarios según el rol', () => {
     abrirSesion('MEDICO', MEDICO.id);
     cargarCon();
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
@@ -317,7 +318,7 @@ describe('MedicosPage · horarios según el rol', () => {
     abrirSesion('MEDICO', 'med-ajeno');
     cargarCon();
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     expect(screen.queryByRole('button', { name: /horarios/i })).not.toBeInTheDocument();
@@ -333,7 +334,7 @@ describe('MedicosPage · horarios según el rol', () => {
     abrirSesion('MEDICO', MEDICO.id);
     cargarCon([], [MEDICO, OTRO_MEDICO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Colega de prueba');
 
     // Una sola fila ofrece la agenda: la del médico de la sesión.
@@ -351,7 +352,7 @@ describe('MedicosPage · horarios según el rol', () => {
     abrirSesion('ADMIN');
     cargarCon([], [MEDICO, OTRO_MEDICO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Colega de prueba');
 
     expect(screen.getAllByRole('button', { name: /horarios/i })).toHaveLength(2);
@@ -365,7 +366,7 @@ describe('MedicosPage · horarios según el rol', () => {
     abrirSesion('RECEPCIONISTA');
     cargarCon();
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
@@ -388,7 +389,7 @@ describe('MedicosPage · horarios según el rol', () => {
       return Promise.reject(new Error(`URL inesperada: ${url}`));
     });
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
@@ -408,7 +409,7 @@ describe('MedicosPage · borrado de un bloque', () => {
     // después en el documento— lo tapaba: se veía el fondo oscurecido pero no el aviso.
     cargarCon([HORARIO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
@@ -424,7 +425,7 @@ describe('MedicosPage · borrado de un bloque', () => {
   it('pide confirmación y no llama al servicio hasta aceptarla', async () => {
     cargarCon([HORARIO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
@@ -449,7 +450,7 @@ describe('MedicosPage · borrado de un bloque', () => {
       response: { data: { mensaje: 'El bloque se solapa con otro del mismo día' } },
     });
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
@@ -466,7 +467,7 @@ describe('MedicosPage · borrado de un bloque', () => {
       response: { data: { mensaje: 'El bloque no puede eliminarse porque tiene citas agendadas' } },
     });
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText('Médico de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /horarios/i }));

@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { MedicosPage } from '@/features/medicos/MedicosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { HorarioMedico, Medico } from '@/features/medicos/medicos.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -94,10 +95,14 @@ function cargarPanel(asignados: Consultorio[], horarios: HorarioMedico[]) {
 
 /** Abre el panel de horarios del médico desde su fila. */
 async function abrirPanelDeHorarios() {
-  render(<MedicosPage />);
+  renderConQueryClient(<MedicosPage />);
   await screen.findByText(MEDICO.nombre);
   fireEvent.click(screen.getByRole('button', { name: /horarios/i }));
   await screen.findByLabelText('Consultorio del bloque');
+  // El selector nace deshabilitado mientras la consulta de asignados está en vuelo (TanStack Query
+  // la dispara en un efecto, no de forma síncrona con el clic): hay que esperar a que resuelva
+  // antes de mirar sus opciones.
+  await waitFor(() => expect(screen.getByLabelText('Consultorio del bloque')).not.toBeDisabled());
 }
 
 beforeEach(() => {
@@ -147,7 +152,7 @@ describe('MedicosPage · consultorio del bloque (S13)', () => {
 
     await abrirPanelDeHorarios();
 
-    fireEvent.click(screen.getByTitle('Editar bloque'));
+    fireEvent.click(await screen.findByTitle('Editar bloque'));
 
     const seleccion = screen.getByLabelText('Consultorio del bloque');
     expect(
