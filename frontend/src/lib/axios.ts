@@ -11,7 +11,6 @@
 
 import axios from 'axios';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { setupMockAdapter } from './mock/mockAdapter';
 
 /** Segmento que ya llevan las rutas del servicio (`/auth/login`, `/auth/refresh`, `/auth/logout`). */
 const SEGMENTO_AUTH = '/auth';
@@ -113,10 +112,25 @@ export const authApi = axios.create({
   },
 });
 
-// Activar mocks si está en desarrollo o VITE_USE_MOCKS=true (fail-closed, ver mockAdapter.ts).
-// Se instalan en los dos clientes para que el flujo de login siga siendo navegable sin emisor.
-setupMockAdapter(api);
-setupMockAdapter(authApi);
+/**
+ * Activa los mocks solo en desarrollo (fail-closed real, ver `debenUsarseMocks` en
+ * mockAdapter.ts) y resuelve cuando los interceptores ya están registrados (o de inmediato
+ * fuera de `DEV`, donde nunca se registran).
+ *
+ * El import es dinámico y queda detrás de `import.meta.env.DEV`, que Vite reemplaza por una
+ * constante en build: en producción esta rama es código muerto y el bundler descarta la llamada
+ * y, con ella, el chunk de `mockAdapter.ts`/`mockData.ts` completo, así que los datos de prueba
+ * nunca viajan al bundle del cliente real (H6). No se usa un `await` de nivel superior para no
+ * bloquear el arranque de la app en desarrollo; la promesa se expone para que `test/setup.ts`
+ * pueda esperarla una vez por archivo y así ningún test dependa de una carrera entre el registro
+ * del interceptor y su primera petición.
+ */
+export const mockAdapterListo: Promise<void> = import.meta.env.DEV
+  ? import('./mock/mockAdapter').then(({ setupMockAdapter }) => {
+      setupMockAdapter(api);
+      setupMockAdapter(authApi);
+    })
+  : Promise.resolve();
 
 /**
  * Puente entre los clientes HTTP y la sesión en memoria.
