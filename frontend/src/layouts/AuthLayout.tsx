@@ -28,7 +28,7 @@ export function AuthLayout() {
           </span>
           <span className="flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-[#0A4D68]" />
-            Cifrado RS256 / HIPAA
+            Cifrado RS256 / NOM-024
           </span>
           <span>InToGlobe SaaS</span>
         </div>

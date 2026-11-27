@@ -12,7 +12,7 @@ export function InactivityWarningModal() {
       isOpen={showInactivityWarning}
       onClose={updateActivity}
       title="Advertencia de Inactividad"
-      description="Protocolo de seguridad clínica HIPAA / NOM-024"
+      description="Protocolo de seguridad clínica alineado con NOM-024 y LFPDPPP"
       maxWidth="md"
     >
       <div className="space-y-4">

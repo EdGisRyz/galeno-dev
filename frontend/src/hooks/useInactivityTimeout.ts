@@ -2,10 +2,11 @@ import { useEffect } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 
 const WARNING_MS = 28 * 60 * 1000; // 28 minutos: advertencia preventiva
-const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutos: cierre de sesión obligatorio HIPAA
+const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutos: cierre de sesión por inactividad
 
 /**
- * Hook global de cumplimiento HIPAA para el control de inactividad de sesión.
+ * Hook global de control de inactividad de sesión, alineado con las buenas prácticas de
+ * protección de datos personales en salud (LFPDPPP, NOM-024).
  * Si el usuario pasa 28 minutos sin interacción, activa un modal preventivo.
  * A los 30 minutos, invalida la sesión y redirige al login con motivo session_expired.
  */

@@ -29,7 +29,7 @@ export function MainLayout() {
   const { user, logout, tenantSlug, organizacionNombre } = useAuthStore();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Activación del temporizador HIPAA de 30 minutos
+  // Activación del temporizador de inactividad de 30 minutos
   useInactivityTimeout();
 
   const handleLogout = async () => {
@@ -114,7 +114,7 @@ export function MainLayout() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row text-[#0B1C30]">
-      {/* Modal preventivo de cierre de sesión HIPAA */}
+      {/* Modal preventivo de cierre de sesión por inactividad */}
       <InactivityWarningModal />
 
       {/* ─────────────────────────────────────────
@@ -281,7 +281,7 @@ export function MainLayout() {
             </div>
           </div>
 
-          {/* Indicador de Seguridad HIPAA y Estado */}
+          {/* Indicador de Seguridad y Estado */}
           <div className="flex items-center gap-2 sm:gap-4">
             <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-full text-xs text-[#41484D]">
               <Clock className="w-3.5 h-3.5 text-[#0A4D68]" />
@@ -296,8 +296,8 @@ export function MainLayout() {
 
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#ECFDF5] border border-[#A7F3D0] rounded-full text-[11px] font-semibold text-[#047857]">
               <ShieldCheck className="w-3.5 h-3.5 text-[#059669]" />
-              <span className="hidden sm:inline">HIPAA · Sesión Segura</span>
-              <span className="sm:hidden">HIPAA</span>
+              <span className="hidden sm:inline">NOM-024 · Sesión Segura</span>
+              <span className="sm:hidden">NOM-024</span>
             </div>
           </div>
         </header>

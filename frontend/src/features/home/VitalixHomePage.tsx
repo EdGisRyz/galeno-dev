@@ -82,7 +82,7 @@ export function VitalixHomePage() {
 
           <div className="flex items-center gap-2">
             {isAuthenticated ? (
-              <Button variant="primary" size="sm" onClick={() => navigate('/agenda')}>
+              <Button variant="primary" size="sm" onClick={() => navigate('/pacientes')}>
                 Ir a mi panel
               </Button>
             ) : (

@@ -33,8 +33,8 @@ export function LoginForm() {
       // El store autentica contra el emisor y deja la sesión **solo en memoria** (ADR-011).
       await login(values.email, values.password);
 
-      // Redirigir a la agenda principal
-      navigate('/agenda', { replace: true });
+      // Redirigir al módulo clínico real (agenda sigue en mock; ver H5 de la revisión técnica)
+      navigate('/pacientes', { replace: true });
     } catch (err: unknown) {
       // El `ErrorResponse` del backend y el emisor de desarrollo usan `mensaje`; leer `message`
       // dejaba siempre el texto genérico y ocultaba el motivo real al usuario.
@@ -59,9 +59,9 @@ export function LoginForm() {
         </p>
       </div>
 
-      {/* Notificación de cierre de sesión HIPAA */}
+      {/* Notificación de cierre de sesión por inactividad */}
       {reason === 'session_expired' && (
-        <Alert variant="warning" title="Sesión Expirada por Inactividad (HIPAA)">
+        <Alert variant="warning" title="Sesión Expirada por Inactividad (NOM-024)">
           Por protocolo de protección de datos de salud, tu sesión anterior se cerró automáticamente al superar 30 minutos sin actividad.
         </Alert>
       )}

@@ -65,8 +65,9 @@ function App() {
             <Route path="/administracion/usuarios" element={<UsuariosPage />} />
           </Route>
 
-          {/* Próximos módulos: /cobros */}
-          <Route path="*" element={<Navigate to="/agenda" replace />} />
+          {/* Próximos módulos: /cobros. Aterriza en pacientes, el único módulo clínico real hoy
+              (agenda sigue en mock: H5 de la revisión técnica de nov-2026). */}
+          <Route path="*" element={<Navigate to="/pacientes" replace />} />
         </Route>
       </Route>
     </Routes>
