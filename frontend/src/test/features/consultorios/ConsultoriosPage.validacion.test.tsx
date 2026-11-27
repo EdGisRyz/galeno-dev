@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { ConsultoriosPage } from '@/features/consultorios/ConsultoriosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -90,7 +91,7 @@ describe('ConsultoriosPage · reglas de formato (S1, S2, S5)', () => {
       respuestaCon<Consultorio>({ ...CONSULTORIO, id: 'con-0004', nombre: 'Consultorio 2' }),
     );
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO.nombre);
     await abrirAlta();
 
@@ -113,7 +114,7 @@ describe('ConsultoriosPage · reglas de formato (S1, S2, S5)', () => {
   it('no envía el alta cuando el nombre no tiene ninguna letra', async () => {
     getMock.mockResolvedValue(respuestaCon<Consultorio[]>([CONSULTORIO]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO.nombre);
     await abrirAlta();
 
@@ -132,7 +133,7 @@ describe('ConsultoriosPage · reglas de formato (S1, S2, S5)', () => {
   it('no envía el alta cuando el teléfono trae letras', async () => {
     getMock.mockResolvedValue(respuestaCon<Consultorio[]>([CONSULTORIO]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO.nombre);
     await abrirAlta();
 
@@ -150,7 +151,7 @@ describe('ConsultoriosPage · reglas de formato (S1, S2, S5)', () => {
       respuestaCon<Consultorio>({ ...CONSULTORIO, id: 'con-0003', nombre: 'Consultorio nuevo' }),
     );
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO.nombre);
     await abrirAlta();
 
@@ -174,7 +175,7 @@ describe('ConsultoriosPage · reglas de formato (S1, S2, S5)', () => {
       response: { data: { mensaje: 'El campo nombre es inválido' } },
     });
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO.nombre);
     await abrirAlta();
 
@@ -189,7 +190,7 @@ describe('ConsultoriosPage · lo ya guardado se sigue leyendo (S6)', () => {
   it('muestra el consultorio con datos no conformes en el directorio', async () => {
     getMock.mockResolvedValue(respuestaCon<Consultorio[]>([CONSULTORIO_NO_CONFORME]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     // El nombre no conforme está en la celda del nombre y en la de dirección: la fila se lee
     // completa, sin que la pantalla la esconda por no cumplir las reglas nuevas.
@@ -200,7 +201,7 @@ describe('ConsultoriosPage · lo ya guardado se sigue leyendo (S6)', () => {
   it('no deja guardar la edición de ese consultorio sin corregir los datos', async () => {
     getMock.mockResolvedValue(respuestaCon<Consultorio[]>([CONSULTORIO_NO_CONFORME]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findAllByText('454545');
 
     fireEvent.click(screen.getByTitle('Editar consultorio'));
