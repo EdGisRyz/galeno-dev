@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { PacientesPage } from '@/features/pacientes/PacientesPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -104,7 +105,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
   it('no envía el alta cuando el nombre trae dígitos', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -118,7 +119,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
   it('no envía el alta cuando el teléfono trae letras', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -133,7 +134,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
   it('no envía el alta cuando la ocupación trae dígitos', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -148,7 +149,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
   it('no envía el alta cuando el nombre o el teléfono del responsable no cumplen', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -166,7 +167,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
   it('no envía el alta cuando el parentesco es numérico', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -182,7 +183,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
     postMock.mockResolvedValue(respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0009' }));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -209,7 +210,7 @@ describe('PacientesPage · reglas de formato (S1 a S7, S9)', () => {
       response: { data: { mensaje: 'El campo parentesco es inválido' } },
     });
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -224,7 +225,7 @@ describe('PacientesPage · parentesco con sugerencias (S6)', () => {
   it('ofrece las opciones comunes en un datalist y deja escribir cualquier otra cosa', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -252,7 +253,7 @@ describe('PacientesPage · un parentesco exige un responsable (S5)', () => {
     // campo individual lo detecta, porque cada valor por separado es válido.
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -269,7 +270,7 @@ describe('PacientesPage · un parentesco exige un responsable (S5)', () => {
   it('no envía la edición con parentesco y sin nombre del responsable', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(PACIENTE.nombre);
     fireEvent.click(screen.getByRole('button', { name: /ficha/i }));
 
@@ -287,7 +288,7 @@ describe('PacientesPage · un parentesco exige un responsable (S5)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
     postMock.mockResolvedValue(respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0009' }));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -306,7 +307,7 @@ describe('PacientesPage · un parentesco exige un responsable (S5)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
     postMock.mockResolvedValue(respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0009' }));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
 
@@ -327,7 +328,7 @@ describe('PacientesPage · lo ya guardado se sigue leyendo (S10)', () => {
   it('muestra el paciente con datos no conformes y no deja guardar la edición sin corregir', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE_NO_CONFORME]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     expect(await screen.findByText(PACIENTE_NO_CONFORME.nombre)).toBeInTheDocument();
 

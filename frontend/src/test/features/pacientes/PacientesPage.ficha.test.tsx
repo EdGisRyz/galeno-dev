@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { PacientesPage } from '@/features/pacientes/PacientesPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -159,7 +160,7 @@ describe('PacientesPage · el alta envía la ficha en campos planos (S8)', () =>
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
     postMock.mockResolvedValue(respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0009' }));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
@@ -206,7 +207,7 @@ describe('PacientesPage · el alta envía la ficha en campos planos (S8)', () =>
       respuestaCon<Paciente>({ ...PACIENTE, parentesco: 'Tutora legal' }),
     );
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await abrirFichaDe(PACIENTE.nombre);
 
@@ -249,7 +250,7 @@ describe('PacientesPage · la tabla muestra la ficha que devolvió el backend (S
   it('lista CURP, responsable y parentesco tomados de los campos planos', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE.nombre);
     expect(screen.getByText(CURP_CANONICA)).toBeInTheDocument();
@@ -273,7 +274,7 @@ describe('PacientesPage · la tabla muestra la ficha que devolvió el backend (S
     };
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE, PACIENTE_SIN_FICHA]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE_SIN_FICHA.nombre);
 
@@ -297,7 +298,7 @@ describe('PacientesPage · búsqueda por CURP sin distinguir mayúsculas (S7)', 
       respuestaCon<Paciente[]>([PACIENTE, PACIENTE_CON_CURP_EN_MINUSCULAS]),
     );
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE.nombre);
     await screen.findByText(PACIENTE_CON_CURP_EN_MINUSCULAS.nombre);
@@ -320,7 +321,7 @@ describe('PacientesPage · búsqueda por CURP sin distinguir mayúsculas (S7)', 
       respuestaCon<Paciente[]>([PACIENTE, PACIENTE_CON_CURP_EN_MINUSCULAS]),
     );
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE.nombre);
 
@@ -338,7 +339,7 @@ describe('PacientesPage · rechazo por CURP duplicada (S7)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
     postMock.mockRejectedValue(rechazoPorCurpDuplicada());
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(/aún no hay pacientes registrados/i);
     await abrirAlta();
@@ -362,7 +363,7 @@ describe('PacientesPage · rechazo por CURP duplicada (S7)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
     putMock.mockRejectedValue(rechazoPorCurpDuplicada());
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await abrirFichaDe(PACIENTE.nombre);
     llenarFicha({ curp: 'PEHJ751122HOCRN03' });
