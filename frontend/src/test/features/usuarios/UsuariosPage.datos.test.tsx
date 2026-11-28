@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { MENSAJE_NOMBRE_OBLIGATORIO } from '@/lib/patronesDeFormato';
 import { UsuariosPage } from '@/features/usuarios/UsuariosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Usuario } from '@/features/usuarios/usuarios.types';
 import type { Medico } from '@/features/medicos/medicos.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -115,7 +116,7 @@ function filaDe(cuenta: Usuario): HTMLElement {
 /** Abre el formulario de alta sobre un directorio ya cargado. */
 async function abrirAlta(cuentas: Usuario[] = [CUENTA_PROPIA]) {
   servirDirectorio(cuentas);
-  render(<UsuariosPage />);
+  renderConQueryClient(<UsuariosPage />);
   await screen.findByText(cuentas[0].email);
   fireEvent.click(screen.getByRole('button', { name: /nueva cuenta/i }));
 }
@@ -123,7 +124,7 @@ async function abrirAlta(cuentas: Usuario[] = [CUENTA_PROPIA]) {
 /** Abre el formulario de edición de la cuenta indicada. */
 async function abrirEdicion(cuenta: Usuario, cuentas: Usuario[]) {
   servirDirectorio(cuentas);
-  render(<UsuariosPage />);
+  renderConQueryClient(<UsuariosPage />);
   await screen.findByText(cuenta.email);
   fireEvent.click(within(filaDe(cuenta)).getByRole('button', { name: /editar/i }));
 }
@@ -239,7 +240,7 @@ describe('UsuariosPage · la lista muestra personas (S4)', () => {
   it('muestra el nombre como dato principal y el correo como secundario', async () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_CON_DATOS]);
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_CON_DATOS.email);
 
     const fila = filaDe(CUENTA_CON_DATOS);
@@ -250,7 +251,7 @@ describe('UsuariosPage · la lista muestra personas (S4)', () => {
   it('una cuenta anterior sin nombre sigue mostrando el correo, sin inventarlo desde la dirección', async () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_ANTERIOR]);
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_ANTERIOR.email);
 
     expect(filaDe(CUENTA_ANTERIOR)).toBeInTheDocument();
@@ -262,7 +263,7 @@ describe('UsuariosPage · la lista muestra personas (S4)', () => {
   it('la búsqueda sigue encontrando por correo y además por nombre', async () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_CON_DATOS]);
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_CON_DATOS.email);
 
     const buscador = screen.getByPlaceholderText(/buscar por/i);
