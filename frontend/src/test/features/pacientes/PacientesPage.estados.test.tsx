@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { PacientesPage } from '@/features/pacientes/PacientesPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -104,7 +105,7 @@ describe('PacientesPage · estado de error (F006)', () => {
   it('muestra un mensaje de error visible cuando la petición falla', async () => {
     getMock.mockRejectedValue(new Error('sin conexión'));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     expect(await screen.findByText(/no se pudieron cargar los pacientes/i)).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -117,7 +118,7 @@ describe('PacientesPage · estado de error (F006)', () => {
   it('no afirma métricas en cero cuando el directorio no se pudo leer', async () => {
     getMock.mockRejectedValue(new Error('sin conexión'));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByRole('alert');
 
@@ -133,7 +134,7 @@ describe('PacientesPage · estado de error (F006)', () => {
       .mockRejectedValueOnce(new Error('sin conexión'))
       .mockResolvedValueOnce(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     const reintentar = await screen.findByRole('button', { name: /reintentar/i });
     expect(getMock).toHaveBeenCalledTimes(1);
@@ -153,7 +154,7 @@ describe('PacientesPage · estado de error (F006)', () => {
   it('muestra el estado de carga mientras el reintento está en curso', async () => {
     getMock.mockRejectedValueOnce(new Error('sin conexión'));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     const reintentar = await screen.findByRole('button', { name: /reintentar/i });
 
@@ -183,7 +184,7 @@ describe('PacientesPage · estado de carga (F006)', () => {
     });
     getMock.mockReturnValueOnce(pendiente as unknown as ReturnType<typeof api.get>);
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     const carga = screen.getByRole('status');
     expect(carga).toHaveTextContent(/cargando pacientes/i);
@@ -200,7 +201,7 @@ describe('PacientesPage · estado vacío (F006)', () => {
   it('distingue «sin pacientes registrados» de un fallo de carga', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     expect(await screen.findByText(/aún no hay pacientes registrados/i)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -212,7 +213,7 @@ describe('PacientesPage · rutas del contrato del backend (colección anidada, �
   it('lista los pacientes en la colección de la organización de la sesión', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE.nombre);
 
@@ -227,7 +228,7 @@ describe('PacientesPage · rutas del contrato del backend (colección anidada, �
       respuestaCon<Paciente>({ ...PACIENTE, id: 'pac-0002', nombre: 'Ana Ruiz' }),
     );
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(/aún no hay pacientes registrados/i);
 
@@ -248,7 +249,7 @@ describe('PacientesPage · rutas del contrato del backend (colección anidada, �
       respuestaCon<Paciente>({ ...PACIENTE, nombre: 'María F. López' }),
     );
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE.nombre);
 
@@ -273,7 +274,7 @@ describe('PacientesPage · rutas del contrato del backend (colección anidada, �
       inicializando: false,
     });
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     // Fail-closed: sin claim de tenant no hay organización y no se inventa una por defecto.
     expect(await screen.findByText(/no se pudieron cargar los pacientes/i)).toBeInTheDocument();
@@ -285,7 +286,7 @@ describe('PacientesPage · comportamiento previo que se conserva', () => {
   it('renderiza la fila del paciente cuando la carga tiene éxito', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     expect(await screen.findByText(PACIENTE.nombre)).toBeInTheDocument();
     expect(screen.getByText('5551234567')).toBeInTheDocument();
@@ -295,7 +296,7 @@ describe('PacientesPage · comportamiento previo que se conserva', () => {
   it('mantiene el mensaje de búsqueda sin resultados', async () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE]));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE.nombre);
 

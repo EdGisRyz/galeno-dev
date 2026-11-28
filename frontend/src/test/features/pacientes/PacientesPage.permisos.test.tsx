@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { PacientesPage } from '@/features/pacientes/PacientesPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import { useAuthStore } from '@/store/auth.store';
 import { USUARIO } from '../../helpers/jwt';
@@ -65,7 +66,7 @@ function montarConRol(role: 'ADMIN' | 'MEDICO' | 'RECEPCIONISTA' | 'PACIENTE') {
     lastActivity: Date.now(),
   });
 
-  render(<PacientesPage />);
+  renderConQueryClient(<PacientesPage />);
 }
 
 beforeEach(() => {

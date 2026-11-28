@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { PacientesPage } from '@/features/pacientes/PacientesPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Paciente } from '@/features/pacientes/pacientes.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -83,7 +84,7 @@ describe('PacientesPage · reactivación de un paciente inactivo (S5)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE_INACTIVO]));
     vi.mocked(api.post).mockResolvedValue(respuestaCon<void>(undefined));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE_INACTIVO.nombre);
     expect(screen.getByText('Inactivo')).toBeInTheDocument();
@@ -109,7 +110,7 @@ describe('PacientesPage · reactivación de un paciente inactivo (S5)', () => {
     getMock.mockResolvedValue(respuestaCon<Paciente[]>([PACIENTE_INACTIVO]));
     vi.mocked(api.post).mockRejectedValue(new Error('sin conexión'));
 
-    render(<PacientesPage />);
+    renderConQueryClient(<PacientesPage />);
 
     await screen.findByText(PACIENTE_INACTIVO.nombre);
 
