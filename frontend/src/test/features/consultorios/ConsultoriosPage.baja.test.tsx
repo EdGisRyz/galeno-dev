@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { ConsultoriosPage } from '@/features/consultorios/ConsultoriosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -86,7 +87,7 @@ describe('ConsultoriosPage · baja de un consultorio', () => {
       response: { status: 409, data: { mensaje: MENSAJE_PRINCIPAL_DE_MEDICO_ACTIVO } },
     });
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO_ACTIVO.nombre);
 
     await confirmarBaja(CONSULTORIO_ACTIVO);
@@ -105,7 +106,7 @@ describe('ConsultoriosPage · baja de un consultorio', () => {
     getMock.mockResolvedValue(respuestaCon([CONSULTORIO_ACTIVO]));
     deleteMock.mockResolvedValue(respuestaCon<void>(undefined));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText(CONSULTORIO_ACTIVO.nombre);
 
     await confirmarBaja(CONSULTORIO_ACTIVO);

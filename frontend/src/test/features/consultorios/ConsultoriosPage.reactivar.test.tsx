@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { ConsultoriosPage } from '@/features/consultorios/ConsultoriosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -83,7 +84,7 @@ describe('ConsultoriosPage · reactivación de un consultorio inactivo (S4)', ()
   it('una fila inactiva ofrece Reactivar y no Desactivar', async () => {
     getMock.mockResolvedValue(respuestaCon([CONSULTORIO_INACTIVO]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     await screen.findByText(CONSULTORIO_INACTIVO.nombre);
     const fila = filaDe(CONSULTORIO_INACTIVO);
@@ -96,7 +97,7 @@ describe('ConsultoriosPage · reactivación de un consultorio inactivo (S4)', ()
     getMock.mockResolvedValue(respuestaCon([CONSULTORIO_INACTIVO]));
     postMock.mockResolvedValue(respuestaCon<void>(undefined));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     await screen.findByText(CONSULTORIO_INACTIVO.nombre);
     fireEvent.click(screen.getByRole('button', { name: /reactivar/i }));
@@ -118,7 +119,7 @@ describe('ConsultoriosPage · reactivación de un consultorio inactivo (S4)', ()
     getMock.mockResolvedValue(respuestaCon([CONSULTORIO_INACTIVO]));
     postMock.mockRejectedValue(new Error('sin conexión'));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     await screen.findByText(CONSULTORIO_INACTIVO.nombre);
     fireEvent.click(screen.getByRole('button', { name: /reactivar/i }));
@@ -137,7 +138,7 @@ describe('ConsultoriosPage · reactivación de un consultorio inactivo (S4)', ()
   it('una fila activa sigue ofreciendo Desactivar y no Reactivar', async () => {
     getMock.mockResolvedValue(respuestaCon([CONSULTORIO_ACTIVO]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     await screen.findByText(CONSULTORIO_ACTIVO.nombre);
     const fila = filaDe(CONSULTORIO_ACTIVO);
