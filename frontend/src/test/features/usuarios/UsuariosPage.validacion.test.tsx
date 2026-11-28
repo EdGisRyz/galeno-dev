@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { UsuariosPage } from '@/features/usuarios/UsuariosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Usuario } from '@/features/usuarios/usuarios.types';
 import type { Medico } from '@/features/medicos/medicos.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -112,7 +113,7 @@ function servirDirectorio(cuentas: Usuario[]) {
 
 /** Abre el formulario de alta de una cuenta sobre un directorio ya cargado. */
 async function abrirAlta() {
-  render(<UsuariosPage />);
+  renderConQueryClient(<UsuariosPage />);
   await screen.findByText(CUENTA_PROPIA.email);
   fireEvent.click(screen.getByRole('button', { name: /nueva cuenta/i }));
   // El nombre es obligatorio desde S1: estos casos son de la forma del correo, así que se escribe
