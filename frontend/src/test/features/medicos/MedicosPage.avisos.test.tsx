@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { MedicosPage } from '@/features/medicos/MedicosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { HorarioMedico, Medico } from '@/features/medicos/medicos.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -117,7 +118,7 @@ describe('MedicosPage · aviso de guardado dentro del modal', () => {
   it('un 409 muestra el mensaje del backend dentro del diálogo y conserva lo escrito', async () => {
     postMock.mockRejectedValue(rechazoHttp(409, MENSAJE_DUPLICADO));
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText(MEDICO.nombre);
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));
 

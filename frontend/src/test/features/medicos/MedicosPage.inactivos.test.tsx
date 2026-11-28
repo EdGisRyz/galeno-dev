@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { MedicosPage } from '@/features/medicos/MedicosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Medico } from '@/features/medicos/medicos.types';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -119,7 +120,7 @@ describe('MedicosPage · estados inactivos del directorio', () => {
   it('muestra el nombre del consultorio del médico aunque esté dado de baja (S12)', async () => {
     cargarCon([MEDICO_ACTIVO], [CONSULTORIO_NORTE, CONSULTORIO_CENTRO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_ACTIVO.nombre);
     expect(celdaDeConsultorio(MEDICO_ACTIVO)).toHaveTextContent(CONSULTORIO_NORTE.nombre);
@@ -130,7 +131,7 @@ describe('MedicosPage · estados inactivos del directorio', () => {
   it('no ofrece «Horarios» para un médico inactivo y sí para uno activo (S10)', async () => {
     cargarCon([MEDICO_ACTIVO, MEDICO_INACTIVO], [CONSULTORIO_NORTE, CONSULTORIO_CENTRO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
 
     await screen.findByText(MEDICO_INACTIVO.nombre);
     expect(
@@ -144,7 +145,7 @@ describe('MedicosPage · estados inactivos del directorio', () => {
   it('el alta no ofrece un consultorio dado de baja, aunque la tabla muestre su nombre', async () => {
     cargarCon([MEDICO_ACTIVO], [CONSULTORIO_NORTE, CONSULTORIO_CENTRO]);
 
-    render(<MedicosPage />);
+    renderConQueryClient(<MedicosPage />);
     await screen.findByText(MEDICO_ACTIVO.nombre);
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo médico/i }));

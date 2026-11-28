@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { UsuariosPage } from '@/features/usuarios/UsuariosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Usuario } from '@/features/usuarios/usuarios.types';
 import type { Medico } from '@/features/medicos/medicos.types';
 import { useAuthStore } from '@/store/auth.store';
@@ -137,7 +138,7 @@ describe('UsuariosPage · selector de rol (S6)', () => {
   it('ofrece exactamente tres roles —administrador, médico y recepción— y no ofrece PACIENTE', async () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_ADMINISTRADORA]);
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_ADMINISTRADORA.email);
 
     // El directorio se pide a la organización de la sesión, no a una ruta adivinada.
@@ -171,7 +172,7 @@ describe('UsuariosPage · bajas rechazadas por el backend', () => {
   it('la propia cuenta no ofrece la baja: la pantalla no se da de baja a sí misma', async () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_ADMINISTRADORA]);
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_ADMINISTRADORA.email);
 
     const filaPropia = filaDe(CUENTA_PROPIA);
@@ -188,7 +189,7 @@ describe('UsuariosPage · bajas rechazadas por el backend', () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_DE_RECEPCION]);
     deleteMock.mockRejectedValue(rechazoHttp(403, RUTA_BAJA(CUENTA_DE_RECEPCION.id)));
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_DE_RECEPCION.email);
 
     fireEvent.click(
@@ -213,7 +214,7 @@ describe('UsuariosPage · bajas rechazadas por el backend', () => {
     servirDirectorio([CUENTA_PROPIA, CUENTA_ADMINISTRADORA]);
     deleteMock.mockRejectedValue(rechazoHttp(409, RUTA_BAJA(CUENTA_ADMINISTRADORA.id)));
 
-    render(<UsuariosPage />);
+    renderConQueryClient(<UsuariosPage />);
     await screen.findByText(CUENTA_ADMINISTRADORA.email);
 
     fireEvent.click(

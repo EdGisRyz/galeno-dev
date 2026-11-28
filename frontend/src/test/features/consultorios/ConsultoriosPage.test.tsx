@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosResponse } from 'axios';
 import { api } from '@/lib/axios';
 import { ConsultoriosPage } from '@/features/consultorios/ConsultoriosPage';
+import { renderConQueryClient } from '@/test/testUtils';
 import type { Consultorio } from '@/features/consultorios/consultorios.types';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -80,7 +81,7 @@ describe('ConsultoriosPage · listado', () => {
   it('muestra los consultorios de la colección de la organización', async () => {
     getMock.mockResolvedValue(respuestaCon([CONSULTORIO]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     expect(await screen.findByText('Consultorio de prueba')).toBeInTheDocument();
     expect(getMock).toHaveBeenCalledWith(RUTA_LISTADO_CONSULTORIOS);
@@ -94,7 +95,7 @@ describe('ConsultoriosPage · alta', () => {
       respuestaCon({ ...CONSULTORIO, id: 'con-0002', nombre: 'Consultorio nuevo' }),
     );
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
     await screen.findByText('Consultorio de prueba');
 
     fireEvent.click(screen.getByRole('button', { name: /nuevo consultorio/i }));
@@ -119,7 +120,7 @@ describe('ConsultoriosPage · estados de carga', () => {
       .mockRejectedValueOnce(new Error('sin conexión'))
       .mockResolvedValueOnce(respuestaCon([CONSULTORIO]));
 
-    render(<ConsultoriosPage />);
+    renderConQueryClient(<ConsultoriosPage />);
 
     expect(
       await screen.findByText(/no se pudieron cargar los consultorios/i),

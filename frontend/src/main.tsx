@@ -5,7 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import App from './App';
 
-const queryClient = new QueryClient();
+// Sin reintentos automáticos (H11): un fallo se explica con un mensaje y, donde la pantalla lo
+// ofrece, un botón "Reintentar" explícito. Tres reintentos silenciosos con backoff exponencial
+// convertirían un error de negocio (403, 409) en una espera de varios segundos sin explicación.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

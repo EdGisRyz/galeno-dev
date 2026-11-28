@@ -1,65 +1,41 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { api } from '@/lib/axios';
-import { resumenDeErrorHttp, mensajeDelBackend } from '@/lib/apiError';
-import {
-  Button,
-  Input,
-  Badge,
-  Modal,
-  Card,
-  CardContent,
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-  Alert,
-} from '@/components/ui';
-import type { Consultorio } from '@/features/consultorios/consultorios.types';
-import {
-  erroresDeConsultorio,
-  type CampoDeConsultorio,
-  type ErroresDeConsultorio,
-} from '@/features/consultorios/validacionConsultorio';
+import { useRef, useState } from 'react';
+import { Button, Modal, Alert } from '@/components/ui';
+import { Plus, Trash2 } from 'lucide-react';
+import { mensajeDelBackend } from '@/lib/apiError';
 import { useAuthStore } from '@/store/auth.store';
+import type { Consultorio } from './consultorios.types';
+import type { ConsultorioPayload } from './consultorios.service';
 import {
-  Building2,
-  Plus,
-  Search,
-  Phone,
-  MapPin,
-  Pencil,
-  Trash2,
-  UserCheck,
-  Loader2,
-  RefreshCw,
-} from 'lucide-react';
+  useConsultoriosDirectorio,
+  useCrearConsultorio,
+  useActualizarConsultorio,
+  useActivarConsultorio,
+  useDesactivarConsultorio,
+} from './consultorios.queries';
+import { ConsultorioTable } from './ConsultorioTable';
+import { ConsultorioForm } from './ConsultorioForm';
 
-/** Mensaje único del estado de error de carga: el detalle técnico solo va a la consola. */
 const MENSAJE_ERROR_CARGA =
   'No fue posible obtener el directorio de consultorios. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_GUARDADO =
-  'No fue posible guardar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_BAJA =
   'No fue posible desactivar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_REACTIVAR =
   'No fue posible reactivar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
-const EMPTY_FORM = {
-  nombre: '',
-  direccion: '',
-  telefono: '',
-};
-
+/**
+ * Pantalla de Consultorios: directorio, alta/edición, baja y reactivación.
+ *
+ * Es el orquestador (H11): la lectura y las mutaciones viven en `consultorios.queries.ts`, las
+ * llamadas HTTP en `consultorios.service.ts`, y la interfaz se reparte en `ConsultorioTable`
+ * (directorio) y `ConsultorioForm` (alta/edición).
+ */
 export function ConsultoriosPage() {
   /**
    * Organización dueña del directorio: sale del claim `tenantId` de la sesión, que es la autoridad
    * del tenant, y **nunca** se rellena con un valor por defecto (plan sección 2, guardarraíl 4).
    */
   const organizacionId = useAuthStore((state) => state.user?.tenantId ?? '');
-  // Alta, edición y baja son de ADMIN en el backend (ConsultorioController); MEDICO solo lee. La
-  // UI oculta las acciones de escritura para no ofrecer un botón que el backend va a rechazar.
+  // Alta, edición y baja son de ADMIN en el backend (ConsultorioController); MEDICO solo lee.
   const puedeEditar = useAuthStore((state) => state.user?.role === 'ADMIN');
 
   /**
@@ -69,54 +45,25 @@ export function ConsultoriosPage() {
    */
   const rutaColeccion = organizacionId ? `/organizaciones/${organizacionId}/consultorios` : null;
 
-  const [consultorios, setConsultorios] = useState<Consultorio[]>([]);
-  const [isLoading, setIsLoading] = useState(() => rutaColeccion !== null);
-  const [loadError, setLoadError] = useState<string | null>(() =>
-    rutaColeccion ? null : MENSAJE_ERROR_CARGA,
-  );
-  const [search, setSearch] = useState('');
+  const directorio = useConsultoriosDirectorio(rutaColeccion);
+  const consultorios = directorio.data ?? [];
+  const loadError = directorio.isError ? MENSAJE_ERROR_CARGA : null;
+
+  const crearConsultorio = useCrearConsultorio(rutaColeccion);
+  const actualizarConsultorio = useActualizarConsultorio(rutaColeccion);
+  const activarConsultorio = useActivarConsultorio(rutaColeccion);
+  const desactivarConsultorio = useDesactivarConsultorio(rutaColeccion);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [erroresForm, setErroresForm] = useState<ErroresDeConsultorio>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  // S1: el aviso del alta o de la edición vive dentro del diálogo, junto a los botones de acción.
-  // La baja ocurre con el diálogo cerrado y tiene su propio aviso de página: un único estado para
-  // los dos casos dejaría el de la baja dentro de un modal que ya no está en pantalla.
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [editingConsultorio, setEditingConsultorio] = useState<Consultorio | null>(null);
+  // Cambia en cada apertura para que `ConsultorioForm` monte una instancia nueva (ver su
+  // comentario): así arranca limpio sin necesitar un efecto que lo reinicie.
+  const [formKey, setFormKey] = useState(0);
   const [bajaError, setBajaError] = useState<string | null>(null);
   const [reactivarError, setReactivarError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
-
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [isDeactivating, setIsDeactivating] = useState(false);
-
-  // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
-  // render, el efecto se dispararía en bucle. El listado se pide con `incluirInactivos=true`
-  // (S8): sin los consultorios dados de baja, el recién desactivado desaparece de la tabla y el
-  // botón «Reactivar» queda inalcanzable.
-  const loadData = useCallback((ruta: string) => {
-    return api
-      .get<Consultorio[]>(`${ruta}?incluirInactivos=true`)
-      .then((res) => {
-        setConsultorios(res.data);
-        setLoadError(null);
-      })
-      .catch((err) => {
-        // Se registra un resumen sin secretos (API_ADR-011) y además se hace visible el fallo:
-        // un directorio vacío por error no puede confundirse con «no hay consultorios».
-        console.error('Error al cargar consultorios:', resumenDeErrorHttp(err));
-        setConsultorios([]);
-        setLoadError(MENSAJE_ERROR_CARGA);
-      })
-      .finally(() => setIsLoading(false));
-  }, []);
-
-  useEffect(() => {
-    // Solo se pide lo que existe: sin organización no hay colección y el estado inicial ya lo dice.
-    if (rutaColeccion) loadData(rutaColeccion);
-  }, [rutaColeccion, loadData]);
 
   /**
    * Los avisos de éxito se ocultan solos. El temporizador se guarda en una referencia para poder
@@ -127,116 +74,43 @@ export function ConsultoriosPage() {
     if (avisoRef.current) clearTimeout(avisoRef.current);
     avisoRef.current = setTimeout(() => setAlertNotice(null), 3500);
   };
-  useEffect(
-    () => () => {
-      if (avisoRef.current) clearTimeout(avisoRef.current);
-    },
-    [],
-  );
-
-  // Refresco manual: el loader y la limpieza del error se marcan aquí y no dentro de `loadData`,
-  // para que el efecto inicial no encienda estados antes de que responda la petición.
-  const handleRetry = () => {
-    if (!rutaColeccion) return;
-    setIsLoading(true);
-    setLoadError(null);
-    loadData(rutaColeccion);
-  };
 
   const openCreateModal = () => {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setErroresForm({});
-    setSaveError(null);
+    setEditingConsultorio(null);
+    setFormKey((k) => k + 1);
     setIsModalOpen(true);
   };
 
   const openEditModal = (consultorio: Consultorio) => {
-    setEditingId(consultorio.id);
-    setForm({
-      nombre: consultorio.nombre,
-      direccion: consultorio.direccion || '',
-      telefono: consultorio.telefono || '',
-    });
-    setErroresForm({});
-    setSaveError(null);
+    setEditingConsultorio(consultorio);
+    setFormKey((k) => k + 1);
     setIsModalOpen(true);
   };
 
-  /**
-   * Escribe un campo con regla de formato y retira su error: el mensaje describía el valor anterior
-   * y dejarlo visible mientras se corrige el dato es una advertencia falsa.
-   */
-  const actualizarCampo = (campo: CampoDeConsultorio, valor: string) => {
-    setForm((f) => ({ ...f, [campo]: valor }));
-    setErroresForm((prev) => {
-      if (!prev[campo]) return prev;
-      const siguiente = { ...prev };
-      delete siguiente[campo];
-      return siguiente;
-    });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // S5: las mismas reglas del backend, aplicadas antes de enviar. Un dato mal formado no sale de
-    // la pantalla y el mensaje queda junto al campo, sin esperar la respuesta del servicio.
-    const errores = erroresDeConsultorio(form);
-    setErroresForm(errores);
-    if (Object.keys(errores).length > 0) return;
-
-    const payload = {
-      nombre: form.nombre,
-      direccion: form.direccion || null,
-      telefono: form.telefono || null,
-    };
-
-    try {
-      setIsSubmitting(true);
-      setSaveError(null);
-      if (editingId) {
-        // El ítem es plano: la organización dueña no se envía ni se puede cambiar.
-        const res = await api.put<Consultorio>(`/consultorios/${editingId}`, payload);
-        setConsultorios((prev) => prev.map((c) => (c.id === editingId ? res.data : c)));
-        setAlertNotice('Consultorio actualizado correctamente.');
-      } else {
-        if (!rutaColeccion) {
-          // Sin organización de la sesión no hay colección donde registrar y no se inventa una.
-          return;
-        }
-        const res = await api.post<Consultorio>(rutaColeccion, payload);
-        setConsultorios((prev) => [res.data, ...prev]);
-        setAlertNotice('Consultorio registrado correctamente.');
-      }
-      setIsModalOpen(false);
-      programarOcultarAviso();
-    } catch (err) {
-      console.error('Error al guardar consultorio:', resumenDeErrorHttp(err));
-      // Si el backend rechaza por una regla que la pantalla no conoce, su mensaje es el que permite
-      // corregir el dato; el genérico solo habla de la conexión.
-      setSaveError(mensajeDelBackend(err, MENSAJE_ERROR_GUARDADO));
-    } finally {
-      setIsSubmitting(false);
+  const handleFormSubmit = async (payload: ConsultorioPayload) => {
+    if (editingConsultorio) {
+      await actualizarConsultorio.mutateAsync({ id: editingConsultorio.id, payload });
+      setAlertNotice('Consultorio actualizado correctamente.');
+    } else {
+      await crearConsultorio.mutateAsync(payload);
+      setAlertNotice('Consultorio registrado correctamente.');
     }
+    setIsModalOpen(false);
+    programarOcultarAviso();
   };
 
   /**
    * Reactivación de una baja lógica (S4): `POST /consultorios/{id}/activar` responde 204 sin
-   * cuerpo, así que la fila se marca activa en el estado local. Es el consultorio que se dio de
-   * baja por una refacción y vuelve. Un rechazo del backend se muestra con su mensaje.
+   * cuerpo, así que la fila se marca activa en la caché. Es el consultorio que se dio de baja por
+   * una refacción y vuelve. Un rechazo del backend se muestra con su mensaje.
    */
   const handleReactivar = async (consultorio: Consultorio) => {
     setReactivarError(null);
     try {
-      await api.post(`/consultorios/${consultorio.id}/activar`);
-      setConsultorios((prev) =>
-        prev.map((c) => (c.id === consultorio.id ? { ...c, activo: true } : c)),
-      );
+      await activarConsultorio.mutateAsync(consultorio.id);
       setAlertNotice('Consultorio reactivado correctamente.');
       programarOcultarAviso();
     } catch (err) {
-      console.error('Error al reactivar consultorio:', resumenDeErrorHttp(err));
       setReactivarError(mensajeDelBackend(err, MENSAJE_ERROR_REACTIVAR));
     }
   };
@@ -244,23 +118,17 @@ export function ConsultoriosPage() {
   /**
    * Baja lógica del consultorio: `DELETE /consultorios/{id}` responde 204 sin cuerpo. El backend
    * rechaza con 409 la baja del consultorio principal de un médico activo (S6) y su mensaje dice
-   * el camino —dar de baja primero al médico—; se muestra tal cual, porque es lo único que explica
-   * qué cambiar antes de reintentar.
+   * el camino —dar de baja primero al médico—; se muestra tal cual.
    */
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
     setBajaError(null);
     try {
       setIsDeactivating(true);
-      await api.delete(`/consultorios/${deactivatingId}`);
-      // Baja lógica: el backend no borra la fila (hay citas con llave foránea), solo apaga `activo`.
-      setConsultorios((prev) =>
-        prev.map((c) => (c.id === deactivatingId ? { ...c, activo: false } : c)),
-      );
+      await desactivarConsultorio.mutateAsync(deactivatingId);
       setAlertNotice('Consultorio desactivado correctamente.');
       programarOcultarAviso();
     } catch (err) {
-      console.error('Error al desactivar consultorio:', resumenDeErrorHttp(err));
       setAlertNotice(null);
       setBajaError(mensajeDelBackend(err, MENSAJE_ERROR_BAJA));
     } finally {
@@ -269,38 +137,10 @@ export function ConsultoriosPage() {
     }
   };
 
-  const filteredConsultorios = useMemo(() => {
-    const term = search.toLowerCase();
-    return consultorios.filter(
-      (c) =>
-        !term ||
-        c.nombre.toLowerCase().includes(term) ||
-        (c.direccion || '').toLowerCase().includes(term),
-    );
-  }, [consultorios, search]);
-
-  // El servicio solo devuelve consultorios activos, así que no existe un conteo de inactivos que
-  // mostrar: las métricas se derivan de lo que sí llegó.
-  const stats = useMemo(() => {
-    const total = consultorios.length;
-    const conDireccion = consultorios.filter((c) => (c.direccion || '').trim() !== '').length;
-    const conTelefono = consultorios.filter((c) => (c.telefono || '').trim() !== '').length;
-    return { total, conDireccion, conTelefono };
-  }, [consultorios]);
-
-  /**
-   * Un dato que no se pudo leer no es cero: mientras carga o si la carga falló, la métrica se
-   * muestra como desconocida. Escribir 0 afirmaría que el directorio está vacío.
-   */
-  const metrica = (valor: number): string | number => (isLoading || loadError ? '—' : valor);
-
   const consultorioADesactivar = consultorios.find((c) => c.id === deactivatingId);
 
   return (
     <div className="space-y-6">
-      {/* ─────────────────────────────────────────
-          CABECERA DE PÁGINA
-          ───────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold font-heading text-[#0B1C30] tracking-tight">
@@ -329,7 +169,7 @@ export function ConsultoriosPage() {
         </Alert>
       )}
       {/* S1: la baja ocurre con el diálogo cerrado, así que su aviso se lee en la página. El del
-          alta y la edición se pinta dentro del modal (ver abajo). */}
+          alta y la edición se pinta dentro del modal (`ConsultorioForm`). */}
       {bajaError && (
         <Alert variant="error" title="No se pudo desactivar el consultorio">
           {bajaError}
@@ -341,282 +181,25 @@ export function ConsultoriosPage() {
         </Alert>
       )}
 
-      {/* ─────────────────────────────────────────
-          MÉTRICAS DEL DIRECTORIO
-          ───────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
-                Total Consultorios
-              </p>
-              <h3 className="text-2xl font-bold font-heading text-[#0B1C30] mt-1 tnum">
-                {metrica(stats.total)}
-              </h3>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-[#EFF4FF] text-[#0A4D68] flex items-center justify-center">
-              <Building2 className="w-5 h-5" />
-            </div>
-          </CardContent>
-        </Card>
+      <ConsultorioTable
+        consultorios={consultorios}
+        isLoading={directorio.isLoading}
+        loadError={loadError}
+        onRetry={() => directorio.refetch()}
+        puedeEditar={puedeEditar}
+        onEdit={openEditModal}
+        onReactivate={handleReactivar}
+        onDeactivateRequest={setDeactivatingId}
+      />
 
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#047857]">
-                Con dirección
-              </p>
-              <h3 className="text-2xl font-bold font-heading text-[#047857] mt-1 tnum">
-                {metrica(stats.conDireccion)}
-              </h3>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center">
-              <MapPin className="w-5 h-5" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
-                Con teléfono
-              </p>
-              <h3 className="text-2xl font-bold font-heading text-[#41484D] mt-1 tnum">
-                {metrica(stats.conTelefono)}
-              </h3>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-[#F1F5F9] text-[#64748B] flex items-center justify-center">
-              <Phone className="w-5 h-5" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ─────────────────────────────────────────
-          BÚSQUEDA
-          ───────────────────────────────────────── */}
-      <Card>
-        <CardContent className="p-4">
-          <Input
-            placeholder="Buscar por nombre o dirección..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            leftIcon={<Search className="w-4 h-4" />}
-          />
-        </CardContent>
-      </Card>
-
-      {/* ─────────────────────────────────────────
-          TABLA DE CONSULTORIOS
-          ───────────────────────────────────────── */}
-      <div className="space-y-3">
-        {!isLoading && !loadError && (
-          <div className="flex items-center justify-between text-xs text-[#64748B] px-1">
-            <span>
-              Mostrando <strong>{filteredConsultorios.length}</strong> consultorios registrados
-            </span>
-          </div>
-        )}
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Consultorio</TableHead>
-              <TableHead>Dirección</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>Estado</TableHead>
-              {puedeEditar && <TableHead className="text-right">Acciones</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-12">
-                  <span
-                    role="status"
-                    aria-live="polite"
-                    className="inline-flex items-center gap-2 text-[#64748B]"
-                  >
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Cargando consultorios...
-                  </span>
-                </TableCell>
-              </TableRow>
-            ) : loadError ? (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8">
-                  <Alert variant="error" title="No se pudieron cargar los consultorios">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <span>{loadError}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRetry}
-                        leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                      >
-                        Reintentar
-                      </Button>
-                    </div>
-                  </Alert>
-                </TableCell>
-              </TableRow>
-            ) : filteredConsultorios.length > 0 ? (
-              filteredConsultorios.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>
-                    <span className="font-semibold text-sm text-[#0B1C30] block">{c.nombre}</span>
-                  </TableCell>
-
-                  <TableCell>
-                    {c.direccion ? (
-                      <span className="text-xs text-[#41484D] flex items-center gap-1.5">
-                        <MapPin className="w-3 h-3 text-[#64748B]" /> {c.direccion}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-[#94A3B8]">—</span>
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    {c.telefono ? (
-                      <span className="text-xs text-[#41484D] flex items-center gap-1.5">
-                        <Phone className="w-3 h-3 text-[#64748B]" /> {c.telefono}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-[#94A3B8]">—</span>
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    <Badge variant={c.activo ? 'success' : 'default'} showDot>
-                      {c.activo ? 'Activo' : 'Inactivo'}
-                    </Badge>
-                  </TableCell>
-
-                  {puedeEditar && (
-                    <TableCell className="text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(c)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0A4D68] text-white hover:bg-[#00354a] text-xs font-medium transition-all shadow-2xs"
-                          title="Editar consultorio"
-                        >
-                          <Pencil className="w-3.5 h-3.5 text-[#88BDDC]" />
-                          <span className="hidden sm:inline">Editar</span>
-                        </button>
-                        {!c.activo && (
-                          <button
-                            type="button"
-                            onClick={() => handleReactivar(c)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#059669] text-white hover:bg-[#047857] text-xs font-medium transition-all shadow-2xs"
-                            title="Reactivar consultorio"
-                          >
-                            <UserCheck className="w-3.5 h-3.5 text-[#D1FAE5]" />
-                            <span className="hidden sm:inline">Reactivar</span>
-                          </button>
-                        )}
-                        {c.activo && (
-                          <button
-                            type="button"
-                            onClick={() => setDeactivatingId(c.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#FCA5A5] text-[#E11D48] hover:bg-[#FEF2F2] text-xs font-medium transition-all"
-                            title="Desactivar consultorio"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Desactivar</span>
-                          </button>
-                        )}
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-12">
-                  {search ? (
-                    <span className="text-[#94A3B8]">
-                      No se encontraron consultorios con ese criterio.
-                    </span>
-                  ) : (
-                    <div className="space-y-1">
-                      <p className="flex items-center justify-center gap-2 text-[#41484D] font-semibold">
-                        <Building2 className="w-4 h-4 text-[#64748B]" />
-                        Aún no hay consultorios registrados
-                      </p>
-                      {puedeEditar && (
-                        <p className="text-[#94A3B8]">
-                          Da de alta el primer consultorio con el botón «Nuevo Consultorio».
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* ─────────────────────────────────────────
-          MODAL DE CONSULTORIO (CREAR / EDITAR)
-          ───────────────────────────────────────── */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={editingId ? 'Editar Consultorio' : 'Registrar Nuevo Consultorio'}
-        description="Datos del espacio físico de la clínica."
-        maxWidth="md"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Nombre"
-            value={form.nombre}
-            onChange={(e) => actualizarCampo('nombre', e.target.value)}
-            error={erroresForm.nombre}
-            required
-            maxLength={120}
-          />
-          <Input
-            label="Dirección"
-            value={form.direccion}
-            onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
-            leftIcon={<MapPin className="w-4 h-4" />}
-            helperText="Campo libre: incluye calle, número exterior e interior"
-          />
-          <Input
-            label="Teléfono"
-            value={form.telefono}
-            onChange={(e) => actualizarCampo('telefono', e.target.value)}
-            error={erroresForm.telefono}
-            leftIcon={<Phone className="w-4 h-4" />}
-            maxLength={20}
-          />
-
-          {saveError && (
-            <Alert variant="error" title="No se pudo guardar el consultorio">
-              {saveError}
-            </Alert>
-          )}
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-[#F1F5F9]">
-            <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              isLoading={isSubmitting}
-              leftIcon={<Plus className="w-4 h-4 text-[#88BDDC]" />}
-            >
-              {editingId ? 'Guardar Cambios' : 'Registrar Consultorio'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {isModalOpen && (
+        <ConsultorioForm
+          key={formKey}
+          onClose={() => setIsModalOpen(false)}
+          editingConsultorio={editingConsultorio}
+          onSubmit={handleFormSubmit}
+        />
+      )}
 
       {/* ─────────────────────────────────────────
           MODAL DE CONFIRMACIÓN DE BAJA

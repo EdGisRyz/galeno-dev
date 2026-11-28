@@ -223,6 +223,14 @@ export function AgendaPage() {
         </div>
       </div>
 
+      {/* H5 de la revisión técnica: esta ruta sigue siendo accesible por URL directa aunque el
+          nav la marque "Próximamente" y no enlace a ella. El aviso va dentro de la pantalla para
+          que quien llegue así no la lea como el módulo de citas terminado. */}
+      <Alert variant="info" title="Vista de demostración">
+        Esta pantalla todavía trabaja con datos de prueba: no está conectada a la agenda real del
+        backend. No la uses como fuente de información clínica.
+      </Alert>
+
       {alertNotice && (
         <Alert variant="success" title="Notificación">
           {alertNotice}

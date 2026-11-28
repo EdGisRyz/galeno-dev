@@ -434,6 +434,14 @@ export function ExpedientePage() {
         </p>
       </div>
 
+      {/* H5 de la revisión técnica: esta ruta sigue siendo accesible por URL directa aunque el
+          nav la marque "Próximamente" y no enlace a ella. El aviso va dentro de la pantalla para
+          que quien llegue así no la lea como el módulo de expediente terminado. */}
+      <Alert variant="info" title="Vista de demostración">
+        Esta pantalla todavía trabaja con datos de prueba: no está conectada al expediente clínico
+        real del backend. No la uses como fuente de información clínica.
+      </Alert>
+
       {alertNotice && (
         <Alert variant="success" title="Notificación">
           {alertNotice}

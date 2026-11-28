@@ -1,96 +1,36 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { api } from '@/lib/axios';
-import { resumenDeErrorHttp, mensajeDelBackend } from '@/lib/apiError';
-import {
-  Button,
-  Input,
-  Select,
-  Badge,
-  Modal,
-  Card,
-  CardContent,
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-  Alert,
-} from '@/components/ui';
-import type { Medico, HorarioMedico } from '@/features/medicos/medicos.types';
-import {
-  erroresDeMedico,
-  type CampoDeMedico,
-  type ErroresDeMedico,
-} from '@/features/medicos/validacionMedico';
-import type { Consultorio } from '@/features/consultorios/consultorios.types';
+import { useRef, useState } from 'react';
+import { Button, Modal, Alert } from '@/components/ui';
+import { Plus, Trash2 } from 'lucide-react';
+import { mensajeDelBackend } from '@/lib/apiError';
 import { useAuthStore } from '@/store/auth.store';
+import type { Medico } from './medicos.types';
+import type { MedicoPayload } from './medicos.service';
 import {
-  Stethoscope,
-  Plus,
-  Search,
-  Phone,
-  IdCard,
-  Pencil,
-  Trash2,
-  UserCheck,
-  Loader2,
-  RefreshCw,
-  Clock,
-  CalendarClock,
-  MapPin,
-} from 'lucide-react';
+  useMedicosDirectorio,
+  useCrearMedico,
+  useActualizarMedico,
+  useActivarMedico,
+  useDesactivarMedico,
+} from './medicos.queries';
+import { MedicoTable } from './MedicoTable';
+import { MedicoForm } from './MedicoForm';
+import { HorarioEditor } from './HorarioEditor';
 
 const MENSAJE_ERROR_CARGA =
   'No fue posible obtener el directorio de médicos. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_GUARDADO =
-  'No fue posible guardar el médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_BAJA =
   'No fue posible desactivar el médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
 const MENSAJE_ERROR_REACTIVAR =
   'No fue posible reactivar al médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_HORARIOS =
-  'No fue posible obtener los horarios de este médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_HORARIO_BAJA =
-  'No fue posible eliminar el bloque de disponibilidad. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_HORARIO_GUARDADO =
-  'No fue posible guardar el bloque de disponibilidad. Revisa que la hora de inicio sea anterior a la de fin y que la duración sea válida.';
-const MENSAJE_ERROR_CONSULTORIOS_ASIGNADOS =
-  'No fue posible obtener los consultorios asignados a este médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_ASIGNAR_CONSULTORIO =
-  'No fue posible asignar el consultorio al médico. Revisa la conexión con el servicio e inténtalo de nuevo.';
-const MENSAJE_ERROR_QUITAR_CONSULTORIO =
-  'No fue posible quitar el consultorio. Revisa la conexión con el servicio e inténtalo de nuevo.';
 
-const DIAS_SEMANA = [
-  { value: 0, label: 'Domingo' },
-  { value: 1, label: 'Lunes' },
-  { value: 2, label: 'Martes' },
-  { value: 3, label: 'Miércoles' },
-  { value: 4, label: 'Jueves' },
-  { value: 5, label: 'Viernes' },
-  { value: 6, label: 'Sábado' },
-];
-
-const DURACIONES = [20, 30, 45, 60];
-
-const EMPTY_FORM = {
-  nombre: '',
-  especialidad: '',
-  cedula: '',
-  telefono: '',
-  tarifaBase: '',
-  consultorioId: '',
-};
-
-const EMPTY_HORARIO_FORM = {
-  diaSemana: '1',
-  horaInicio: '09:00',
-  horaFin: '14:00',
-  duracionConsulta: '30',
-  consultorioId: '',
-};
-
+/**
+ * Pantalla de Médicos: directorio, alta/edición, baja y reactivación, y el panel de horarios de
+ * disponibilidad con sus consultorios asignados.
+ *
+ * Es el orquestador (H11): la lectura y las mutaciones viven en `medicos.queries.ts`, las llamadas
+ * HTTP en `medicos.service.ts`, y la interfaz se reparte en `MedicoTable` (directorio),
+ * `MedicoForm` (alta/edición) y `HorarioEditor` (agenda y consultorios asignados).
+ */
 export function MedicosPage() {
   /**
    * Organización dueña del directorio: sale del claim `tenantId` de la sesión, que es la
@@ -101,122 +41,32 @@ export function MedicosPage() {
   const rolDeSesion = useAuthStore((state) => state.user?.role);
   const medicoIdDeSesion = useAuthStore((state) => state.user?.medicoId ?? null);
   // Alta, edición y baja de médico son de ADMIN en el backend (MedicoController); MEDICO solo lee.
-  // La UI oculta las acciones de escritura para no ofrecer un botón que el backend va a rechazar.
   const puedeEditarMedicos = rolDeSesion === 'ADMIN';
 
   const rutaColeccion = organizacionId ? `/organizaciones/${organizacionId}/medicos` : null;
   const rutaConsultorios = organizacionId ? `/organizaciones/${organizacionId}/consultorios` : null;
 
-  const [medicos, setMedicos] = useState<Medico[]>([]);
-  const [consultorios, setConsultorios] = useState<Consultorio[]>([]);
-  const [isLoading, setIsLoading] = useState(() => rutaColeccion !== null);
-  const [loadError, setLoadError] = useState<string | null>(() =>
-    rutaColeccion ? null : MENSAJE_ERROR_CARGA,
-  );
-  const [search, setSearch] = useState('');
+  const directorio = useMedicosDirectorio(rutaColeccion, rutaConsultorios);
+  const medicos = directorio.data?.medicos ?? [];
+  const consultorios = directorio.data?.consultorios ?? [];
+  const loadError = directorio.isError ? MENSAJE_ERROR_CARGA : null;
+
+  const crearMedico = useCrearMedico(rutaColeccion, rutaConsultorios);
+  const actualizarMedico = useActualizarMedico(rutaColeccion, rutaConsultorios);
+  const activarMedico = useActivarMedico(rutaColeccion, rutaConsultorios);
+  const desactivarMedico = useDesactivarMedico(rutaColeccion, rutaConsultorios);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [erroresForm, setErroresForm] = useState<ErroresDeMedico>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  // S1: el aviso del alta o de la edición vive dentro del diálogo, junto a los botones de acción.
-  // La baja ocurre con el diálogo cerrado y tiene su propio aviso de página: un único estado para
-  // los dos casos dejaría el de la baja dentro de un modal que ya no está en pantalla.
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [editingMedico, setEditingMedico] = useState<Medico | null>(null);
+  // Cambia en cada apertura para que `MedicoForm` monte una instancia nueva (ver su comentario):
+  // así arranca limpio sin necesitar un efecto que lo reinicie.
+  const [formKey, setFormKey] = useState(0);
   const [bajaError, setBajaError] = useState<string | null>(null);
   const [reactivarError, setReactivarError] = useState<string | null>(null);
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
-
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [isDeactivating, setIsDeactivating] = useState(false);
-
-  // Panel de horarios: por médico, abierto bajo demanda (no se precargan todas las agendas).
   const [horariosDeId, setHorariosDeId] = useState<string | null>(null);
-  const [horarios, setHorarios] = useState<HorarioMedico[]>([]);
-  const [isLoadingHorarios, setIsLoadingHorarios] = useState(false);
-  const [horariosError, setHorariosError] = useState<string | null>(null);
-  const [horarioForm, setHorarioForm] = useState(EMPTY_HORARIO_FORM);
-  const [editingHorarioId, setEditingHorarioId] = useState<string | null>(null);
-  const [isSavingHorario, setIsSavingHorario] = useState(false);
-  const [horarioFormError, setHorarioFormError] = useState<string | null>(null);
-  const [horarioAEliminar, setHorarioAEliminar] = useState<string | null>(null);
-
-  // Consultorios asignados al médico del panel: es el conjunto del que cada bloque elige uno y la
-  // lista que el administrador amplía o reduce.
-  const [consultoriosAsignados, setConsultoriosAsignados] = useState<Consultorio[]>([]);
-  const [isLoadingAsignados, setIsLoadingAsignados] = useState(false);
-  const [asignadosError, setAsignadosError] = useState<string | null>(null);
-  const [consultorioAAgregar, setConsultorioAAgregar] = useState('');
-  const [isAsignandoConsultorio, setIsAsignandoConsultorio] = useState(false);
-  const [quitandoConsultorioId, setQuitandoConsultorioId] = useState<string | null>(null);
-  const [asignacionError, setAsignacionError] = useState<string | null>(null);
-
-  // Los horarios sí son del médico: el backend permite a MEDICO crear, editar y borrar bloques de
-  // **su propia** agenda, y responde 403 con la de otro. La UI replica esa regla con el claim
-  // `medicoId` de la sesión en lugar de esconder el panel entero.
-  const puedeGestionarHorarios =
-    rolDeSesion === 'ADMIN' || (rolDeSesion === 'MEDICO' && medicoIdDeSesion === horariosDeId);
-
-  // La lectura de los consultorios asignados admite al ADMIN y al propio MEDICO; asignar y quitar
-  // son solo de ADMIN. Con la agenda de otro médico no se pide la lista: el backend respondería 403
-  // y la pantalla mostraría un error por un dato que no se va a ofrecer.
-  const puedeConsultarAsignadosDe = (medicoId: string) =>
-    rolDeSesion === 'ADMIN' || (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medicoId);
-  const puedeAsignarConsultorios = puedeEditarMedicos;
-
-  /**
-   * Agendas que la sesión puede **leer**: las de toda la organización para administración y
-   * recepción, y la propia para un médico. Es la mitad de lectura de la matriz del backend
-   * (`GET /medicos/{id}/horarios`, ADMIN, MEDICO y RECEPCIONISTA, con la agenda del médico acotada
-   * a la suya), y la condición que decide si el botón «Horarios» aparece en la fila.
-   *
-   * Ofrecerlo en una fila ajena a un médico abría un panel que el servicio rechaza con 403 y la
-   * pantalla contaba ese rechazo como un problema de conexión (S4). Tampoco se ofrece para un
-   * médico dado de baja: su agenda no es editable (S10), así que el botón llevaría a un 409
-   * predecible.
-   */
-  const puedeConsultarAgendaDe = (medicoId: string) =>
-    rolDeSesion === 'ADMIN' ||
-    rolDeSesion === 'RECEPCIONISTA' ||
-    (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medicoId);
-
-  /**
-   * El botón «Horarios» necesita las dos mitades: poder leer la agenda y que el médico esté activo.
-   *
-   * @param medico médico de la fila
-   * @returns si la fila ofrece abrir su panel de horarios
-   */
-  const puedeAbrirAgendaDe = (medico: Medico) =>
-    medico.activo && puedeConsultarAgendaDe(medico.id);
-
-  // `useCallback` porque el efecto de carga depende de esta función: si se recreara en cada
-  // render, el efecto se dispararía en bucle. Los médicos se piden con `incluirInactivos=true`
-  // (S8): sin los dados de baja, el recién desactivado desaparece de la tabla y el botón
-  // «Reactivar» queda inalcanzable. Los consultorios también se piden con las bajas (S12): la
-  // columna de la fila muestra *su* consultorio aunque esté inactivo; vaciarla borraba el dato
-  // que la fila tiene que comunicar.
-  const loadData = useCallback((ruta: string, rutaConsultorios: string | null) => {
-    return Promise.all([
-      api.get<Medico[]>(`${ruta}?incluirInactivos=true`),
-      rutaConsultorios ? api.get<Consultorio[]>(`${rutaConsultorios}?incluirInactivos=true`) : null,
-    ])
-      .then(([medicosRes, consultoriosRes]) => {
-        setMedicos(medicosRes.data);
-        setConsultorios(consultoriosRes ? consultoriosRes.data : []);
-        setLoadError(null);
-      })
-      .catch((err) => {
-        console.error('Error al cargar médicos:', resumenDeErrorHttp(err));
-        setMedicos([]);
-        setLoadError(MENSAJE_ERROR_CARGA);
-      })
-      .finally(() => setIsLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (rutaColeccion) loadData(rutaColeccion, rutaConsultorios);
-  }, [rutaColeccion, rutaConsultorios, loadData]);
 
   /**
    * Los avisos de éxito se ocultan solos. El temporizador se guarda en una referencia para poder
@@ -227,144 +77,67 @@ export function MedicosPage() {
     if (avisoRef.current) clearTimeout(avisoRef.current);
     avisoRef.current = setTimeout(() => setAlertNotice(null), 3500);
   };
-  useEffect(
-    () => () => {
-      if (avisoRef.current) clearTimeout(avisoRef.current);
-    },
-    [],
-  );
 
-  const handleRetry = () => {
-    if (!rutaColeccion) return;
-    setIsLoading(true);
-    setLoadError(null);
-    loadData(rutaColeccion, rutaConsultorios);
-  };
-
-  const consultorioPorId = (id: string) => consultorios.find((c) => c.id === id);
+  // El directorio trae también los consultorios dados de baja para nombrarlos en la tabla (S12),
+  // pero el alta no debe ofrecer uno cerrado: los selectores usan solo los activos.
+  const consultoriosDisponibles = consultorios.filter((c) => c.activo);
 
   const openCreateModal = () => {
-    setEditingId(null);
-    setForm({ ...EMPTY_FORM, consultorioId: consultoriosDisponibles[0]?.id || '' });
-    setErroresForm({});
-    setSaveError(null);
+    setEditingMedico(null);
+    setFormKey((k) => k + 1);
     setIsModalOpen(true);
   };
 
   const openEditModal = (medico: Medico) => {
-    setEditingId(medico.id);
-    setForm({
-      nombre: medico.nombre,
-      especialidad: medico.especialidad || '',
-      cedula: medico.cedula || '',
-      telefono: medico.telefono || '',
-      tarifaBase: medico.tarifaBase != null ? String(medico.tarifaBase) : '',
-      consultorioId: medico.consultorioId,
-    });
-    setErroresForm({});
-    setSaveError(null);
+    setEditingMedico(medico);
+    setFormKey((k) => k + 1);
     setIsModalOpen(true);
   };
 
-  /**
-   * Escribe un campo del formulario y retira su error: el mensaje describía el valor anterior y
-   * dejarlo visible mientras se corrige el dato es una advertencia falsa.
-   */
-  const actualizarCampo = (campo: CampoDeMedico, valor: string) => {
-    setForm((f) => ({ ...f, [campo]: valor }));
-    setErroresForm((prev) => {
-      if (!prev[campo]) return prev;
-      const siguiente = { ...prev };
-      delete siguiente[campo];
-      return siguiente;
-    });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // S7: las mismas reglas del backend, aplicadas antes de enviar. Un dato mal formado no sale
-    // de la pantalla y el mensaje queda junto al campo, sin esperar la respuesta del servicio.
-    const errores = erroresDeMedico(form);
-    setErroresForm(errores);
-    if (Object.keys(errores).length > 0 || !form.consultorioId) return;
-
-    const payload = {
-      consultorioId: form.consultorioId,
-      nombre: form.nombre,
-      especialidad: form.especialidad || null,
-      cedula: form.cedula || null,
-      telefono: form.telefono || null,
-      tarifaBase: form.tarifaBase ? Number(form.tarifaBase) : null,
-    };
-
-    try {
-      setIsSubmitting(true);
-      setSaveError(null);
-      if (editingId) {
-        // El consultorio no se puede cambiar por esta vía: el backend responde 400 si difiere del
-        // actual (R13). El formulario lo mantiene bloqueado al editar para no ofrecer ese cambio.
-        const res = await api.put<Medico>(`/medicos/${editingId}`, payload);
-        setMedicos((prev) => prev.map((m) => (m.id === editingId ? res.data : m)));
-        setAlertNotice('Médico actualizado correctamente.');
-      } else {
-        if (!rutaColeccion) return;
-        const res = await api.post<Medico>(rutaColeccion, payload);
-        setMedicos((prev) => [res.data, ...prev]);
-        setAlertNotice('Médico registrado correctamente.');
-      }
-      setIsModalOpen(false);
-      programarOcultarAviso();
-    } catch (err) {
-      console.error('Error al guardar médico:', resumenDeErrorHttp(err));
-      // Si el backend rechaza por una regla que la pantalla no conoce, su mensaje es el que
-      // permite corregir el dato; el genérico solo habla de la conexión.
-      setSaveError(mensajeDelBackend(err, MENSAJE_ERROR_GUARDADO));
-    } finally {
-      setIsSubmitting(false);
+  const handleFormSubmit = async (payload: MedicoPayload) => {
+    if (editingMedico) {
+      // El consultorio no se puede cambiar por esta vía: el backend responde 400 si difiere del
+      // actual (R13). `MedicoForm` mantiene el campo bloqueado al editar para no ofrecer ese cambio.
+      await actualizarMedico.mutateAsync({ id: editingMedico.id, payload });
+      setAlertNotice('Médico actualizado correctamente.');
+    } else {
+      await crearMedico.mutateAsync(payload);
+      setAlertNotice('Médico registrado correctamente.');
     }
+    setIsModalOpen(false);
+    programarOcultarAviso();
   };
 
   /**
    * Reactivación de una baja lógica (S4): `POST /medicos/{id}/activar` responde 204 sin cuerpo, así
-   * que la fila se marca activa en el estado local. Un rechazo del backend —por ejemplo, el
-   * consultorio principal dado de baja (S7)— se muestra con su mensaje, porque es lo único que
-   * dice qué hacer antes de reintentar.
+   * que la fila se marca activa en la caché. Un rechazo del backend —por ejemplo, el consultorio
+   * principal dado de baja (S7)— se muestra con su mensaje, porque es lo único que dice qué hacer
+   * antes de reintentar.
    */
   const handleReactivar = async (medico: Medico) => {
     setReactivarError(null);
     try {
-      await api.post(`/medicos/${medico.id}/activar`);
-      setMedicos((prev) =>
-        prev.map((m) => (m.id === medico.id ? { ...m, activo: true } : m)),
-      );
+      await activarMedico.mutateAsync(medico.id);
       setAlertNotice('Médico reactivado correctamente.');
       programarOcultarAviso();
     } catch (err) {
-      console.error('Error al reactivar médico:', resumenDeErrorHttp(err));
       setReactivarError(mensajeDelBackend(err, MENSAJE_ERROR_REACTIVAR));
     }
   };
 
   /**
-   * Baja lógica del médico: `DELETE /medicos/{id}` responde 204 sin cuerpo y el servicio solo apaga
-   * el registro, así que la fila se marca inactiva y aparece la acción para reactivarlo. El mensaje
-   * del backend, si lo hay, se muestra tal cual: un rechazo de negocio explica mejor el motivo que
-   * el texto de conexión.
+   * Baja lógica del médico: `DELETE /medicos/{id}` responde 204 sin cuerpo, así que la fila se
+   * marca inactiva en la caché y aparece la acción para reactivarlo.
    */
   const handleDeactivate = async () => {
     if (!deactivatingId) return;
     setBajaError(null);
     try {
       setIsDeactivating(true);
-      await api.delete(`/medicos/${deactivatingId}`);
-      setMedicos((prev) =>
-        prev.map((m) => (m.id === deactivatingId ? { ...m, activo: false } : m)),
-      );
+      await desactivarMedico.mutateAsync(deactivatingId);
       setAlertNotice('Médico desactivado correctamente.');
       programarOcultarAviso();
     } catch (err) {
-      console.error('Error al desactivar médico:', resumenDeErrorHttp(err));
       setAlertNotice(null);
       setBajaError(mensajeDelBackend(err, MENSAJE_ERROR_BAJA));
     } finally {
@@ -373,243 +146,22 @@ export function MedicosPage() {
     }
   };
 
-  /** Consultorio principal del médico: es el valor por defecto de un bloque nuevo. */
-  const principalDeMedico = (medicoId: string | null) =>
-    medicos.find((m) => m.id === medicoId)?.consultorioId ?? '';
-
-  /** Formulario de bloque en blanco, con el principal del médico ya elegido. */
-  const formularioDeHorarioVacio = () => ({
-    ...EMPTY_HORARIO_FORM,
-    consultorioId: principalDeMedico(horariosDeId),
-  });
-
   /**
-   * Carga los consultorios asignados del médico del panel. Devuelve la promesa para poder releer la
-   * lista después de asignar o quitar: las dos escrituras responden 204 sin cuerpo, así que la
-   * forma canónica —ordenada por nombre por el backend— solo la da esta lectura.
+   * Agendas que la sesión puede **leer**: las de toda la organización para administración y
+   * recepción, y la propia para un médico (ADR-013, matriz del backend). Ofrecerlo en una fila
+   * ajena abría un panel que el servicio rechaza con 403 (S4), y en una fila inactiva llevaría a
+   * un 409 predecible: su agenda no es editable (S10).
    */
-  const cargarConsultoriosAsignados = (medicoId: string) => {
-    setIsLoadingAsignados(true);
-    setAsignadosError(null);
-    return api
-      .get<Consultorio[]>(`/medicos/${medicoId}/consultorios`)
-      .then((res) => {
-        setConsultoriosAsignados(res.data);
-        // Si el consultorio elegido en el formulario dejó de estar asignado —lo acaba de quitar el
-        // administrador—, el bloque no puede seguir apuntando a él: vuelve al principal.
-        setHorarioForm((f) => {
-          if (res.data.some((c) => c.id === f.consultorioId)) return f;
-          const principal = res.data.find((c) => c.id === principalDeMedico(medicoId))?.id;
-          return { ...f, consultorioId: principal ?? res.data[0]?.id ?? '' };
-        });
-      })
-      .catch((err) => {
-        console.error('Error al cargar consultorios asignados:', resumenDeErrorHttp(err));
-        setConsultoriosAsignados([]);
-        setAsignadosError(MENSAJE_ERROR_CONSULTORIOS_ASIGNADOS);
-      })
-      .finally(() => setIsLoadingAsignados(false));
+  const puedeAbrirAgendaDe = (medico: Medico) => {
+    const puedeConsultarLaAgenda =
+      rolDeSesion === 'ADMIN' ||
+      rolDeSesion === 'RECEPCIONISTA' ||
+      (rolDeSesion === 'MEDICO' && medicoIdDeSesion === medico.id);
+    return medico.activo && puedeConsultarLaAgenda;
   };
-
-  const openHorarios = (medicoId: string) => {
-    setHorariosDeId(medicoId);
-    setHorarios([]);
-    setHorariosError(null);
-    setHorarioForm({
-      ...EMPTY_HORARIO_FORM,
-      consultorioId: principalDeMedico(medicoId),
-    });
-    setEditingHorarioId(null);
-    setHorarioFormError(null);
-    setConsultoriosAsignados([]);
-    setAsignadosError(null);
-    setAsignacionError(null);
-    setConsultorioAAgregar('');
-    setIsLoadingHorarios(true);
-    if (puedeConsultarAsignadosDe(medicoId)) cargarConsultoriosAsignados(medicoId);
-    api
-      .get<HorarioMedico[]>(`/medicos/${medicoId}/horarios`)
-      .then((res) => setHorarios(res.data))
-      .catch((err) => {
-        console.error('Error al cargar horarios:', resumenDeErrorHttp(err));
-        // Un rechazo de permisos o de pertenencia no es un fallo de red: el mensaje del backend es
-        // el único que dice qué pasó. El texto de conexión queda solo para cuando no hay mensaje.
-        setHorariosError(mensajeDelBackend(err, MENSAJE_ERROR_HORARIOS));
-      })
-      .finally(() => setIsLoadingHorarios(false));
-  };
-
-  /** Asigna un consultorio de la organización al médico. La respuesta es 204 sin cuerpo. */
-  const handleAsignarConsultorio = async () => {
-    if (!horariosDeId || !consultorioAAgregar) return;
-    try {
-      setIsAsignandoConsultorio(true);
-      setAsignacionError(null);
-      await api.post(`/medicos/${horariosDeId}/consultorios`, {
-        consultorioId: consultorioAAgregar,
-      });
-      await cargarConsultoriosAsignados(horariosDeId);
-      setConsultorioAAgregar('');
-    } catch (err) {
-      console.error('Error al asignar consultorio:', resumenDeErrorHttp(err));
-      setAsignacionError(MENSAJE_ERROR_ASIGNAR_CONSULTORIO);
-    } finally {
-      setIsAsignandoConsultorio(false);
-    }
-  };
-
-  /**
-   * Retira un consultorio del médico. El backend responde 409 cuando es el principal o cuando
-   * todavía tiene bloques de horario, y su mensaje explica cuál de las dos reglas lo impide: es el
-   * texto que se muestra, porque un aviso genérico no diría qué hay que cambiar antes de
-   * reintentar.
-   */
-  const handleQuitarConsultorio = async (consultorioId: string) => {
-    if (!horariosDeId) return;
-    try {
-      setQuitandoConsultorioId(consultorioId);
-      setAsignacionError(null);
-      await api.delete(`/medicos/${horariosDeId}/consultorios/${consultorioId}`);
-      await cargarConsultoriosAsignados(horariosDeId);
-    } catch (err) {
-      console.error('Error al quitar consultorio:', resumenDeErrorHttp(err));
-      setAsignacionError(mensajeDelBackend(err, MENSAJE_ERROR_QUITAR_CONSULTORIO));
-    } finally {
-      setQuitandoConsultorioId(null);
-    }
-  };
-
-  const openEditHorario = (h: HorarioMedico) => {
-    setEditingHorarioId(h.id);
-    setHorarioForm({
-      diaSemana: String(h.diaSemana),
-      horaInicio: h.horaInicio.slice(0, 5),
-      horaFin: h.horaFin.slice(0, 5),
-      duracionConsulta: String(h.duracionConsulta),
-      consultorioId: h.consultorioId,
-    });
-    setHorarioFormError(null);
-  };
-
-  const handleHorarioSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!horariosDeId) return;
-
-    const bloqueOriginal = horarios.find((h) => h.id === editingHorarioId);
-    const conservaElConsultorioDelBloque =
-      bloqueOriginal !== undefined && bloqueOriginal.consultorioId === horarioForm.consultorioId;
-
-    const payload = {
-      diaSemana: Number(horarioForm.diaSemana),
-      horaInicio: `${horarioForm.horaInicio}:00`,
-      horaFin: `${horarioForm.horaFin}:00`,
-      duracionConsulta: Number(horarioForm.duracionConsulta),
-      // Opcional en el backend: sin él el alta usa el principal y la edición conserva el actual.
-      // Al editar se omite cuando no cambió: reenviar el mismo consultorio cuenta como mover el
-      // bloque y, si está dado de baja, el backend responde 409 (S11). Corregir la hora no es
-      // moverlo (S13).
-      ...(horarioForm.consultorioId && !conservaElConsultorioDelBloque
-        ? { consultorioId: horarioForm.consultorioId }
-        : {}),
-    };
-
-    try {
-      setIsSavingHorario(true);
-      setHorarioFormError(null);
-      if (editingHorarioId) {
-        const res = await api.put<HorarioMedico>(`/horarios/${editingHorarioId}`, payload);
-        setHorarios((prev) => prev.map((h) => (h.id === editingHorarioId ? res.data : h)));
-      } else {
-        const res = await api.post<HorarioMedico>(`/medicos/${horariosDeId}/horarios`, payload);
-        // El listado del backend viene ordenado por día y hora; agregar al final rompería ese
-        // orden hasta recargar, así que se reinserta respetando el contrato.
-        setHorarios((prev) =>
-          [...prev, res.data].sort(
-            (a, b) => a.diaSemana - b.diaSemana || a.horaInicio.localeCompare(b.horaInicio),
-          ),
-        );
-      }
-      setHorarioForm(formularioDeHorarioVacio());
-      setEditingHorarioId(null);
-    } catch (err) {
-      console.error('Error al guardar horario:', resumenDeErrorHttp(err));
-      // El rechazo de un bloque tiene causas propias —rango invertido, solapamiento con otro
-      // bloque del mismo día— y el backend las explica en su mensaje. Se muestra tal cual: es lo
-      // único que le dice a recepción qué corregir, y reemplazarlo por un texto genérico la deja
-      // adivinando entre varias causas posibles.
-      setHorarioFormError(mensajeDelBackend(err, MENSAJE_ERROR_HORARIO_GUARDADO));
-    } finally {
-      setIsSavingHorario(false);
-    }
-  };
-
-  const handleDeleteHorario = async () => {
-    if (!horarioAEliminar) return;
-    try {
-      await api.delete(`/horarios/${horarioAEliminar}`);
-      // Borrado físico (no baja lógica): `horario_medico` no tiene columna `activo`.
-      setHorarios((prev) => prev.filter((h) => h.id !== horarioAEliminar));
-    } catch (err) {
-      console.error('Error al eliminar horario:', resumenDeErrorHttp(err));
-      setHorariosError(mensajeDelBackend(err, MENSAJE_ERROR_HORARIO_BAJA));
-    } finally {
-      setHorarioAEliminar(null);
-    }
-  };
-
-  // El directorio trae también los consultorios dados de baja para nombrarlos en la tabla (S12),
-  // pero asignar o abrir un médico en una sala cerrada no es una opción que la pantalla deba
-  // ofrecer: los selectores usan solo los activos. Es un filtro barato sobre la misma lectura.
-  const consultoriosDisponibles = consultorios.filter((c) => c.activo);
-
-  // Selector del bloque (S13): solo los consultorios asignados que están activos, porque el backend
-  // rechaza con 409 un bloque en un consultorio de baja. La excepción es la edición: el consultorio
-  // actual del bloque se muestra aunque esté inactivo — corregir la hora no es moverlo, y sin esa
-  // opción el campo quedaría con un valor fuera de la lista.
-  const consultoriosActivosAsignados = consultoriosAsignados.filter((c) => c.activo);
-  const consultorioActualDelBloque = consultoriosAsignados.find(
-    (c) => c.id === horarioForm.consultorioId,
-  );
-  const consultoriosDelBloque =
-    editingHorarioId && consultorioActualDelBloque && !consultorioActualDelBloque.activo
-      ? [...consultoriosActivosAsignados, consultorioActualDelBloque]
-      : consultoriosActivosAsignados;
-
-  // Solo los consultorios activos de la organización que todavía no están asignados pueden
-  // ofrecerse: la lista de asignados es un conjunto, no un historial.
-  const consultoriosPorAsignar = useMemo(
-    () => consultorios.filter((c) => c.activo && !consultoriosAsignados.some((a) => a.id === c.id)),
-    [consultorios, consultoriosAsignados],
-  );
-
-  const filteredMedicos = useMemo(() => {
-    const term = search.toLowerCase();
-    return medicos.filter(
-      (m) =>
-        !term ||
-        m.nombre.toLowerCase().includes(term) ||
-        (m.especialidad || '').toLowerCase().includes(term) ||
-        (m.cedula || '').toLowerCase().includes(term),
-    );
-  }, [medicos, search]);
-
-  // El servicio solo devuelve médicos activos, así que un conteo de inactivos siempre daría 0:
-  // la segunda métrica se deriva de lo que sí llegó.
-  const stats = useMemo(() => {
-    const total = medicos.length;
-    const conCedula = medicos.filter((m) => (m.cedula || '').trim() !== '').length;
-    return { total, conCedula };
-  }, [medicos]);
-
-  const metrica = (valor: number): string | number => (isLoading || loadError ? '—' : valor);
 
   const medicoADesactivar = medicos.find((m) => m.id === deactivatingId);
   const medicoDeHorarios = medicos.find((m) => m.id === horariosDeId);
-  // La sección de asignados solo se pinta donde su lectura está permitida: ADMIN, o el MEDICO de
-  // su propia agenda. Con la de otro médico el backend respondería 403 y no hay nada que ofrecer.
-  const puedeConsultarAsignados =
-    horariosDeId !== null && puedeConsultarAsignadosDe(horariosDeId);
-  const horarioAEliminarDatos = horarios.find((h) => h.id === horarioAEliminar);
 
   return (
     <div className="space-y-6">
@@ -642,7 +194,7 @@ export function MedicosPage() {
         </Alert>
       )}
       {/* S1: la baja ocurre con el diálogo cerrado, así que su aviso se lee en la página. El del
-          alta y la edición se pinta dentro del modal (ver abajo). */}
+          alta y la edición se pinta dentro del modal (`MedicoForm`). */}
       {bajaError && (
         <Alert variant="error" title="No se pudo desactivar el médico">
           {bajaError}
@@ -654,317 +206,30 @@ export function MedicosPage() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
-                Total Médicos
-              </p>
-              <h3 className="text-2xl font-bold font-heading text-[#0B1C30] mt-1 tnum">
-                {metrica(stats.total)}
-              </h3>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-[#EFF4FF] text-[#0A4D68] flex items-center justify-center">
-              <Stethoscope className="w-5 h-5" />
-            </div>
-          </CardContent>
-        </Card>
+      <MedicoTable
+        medicos={medicos}
+        consultorios={consultorios}
+        isLoading={directorio.isLoading}
+        loadError={loadError}
+        onRetry={() => directorio.refetch()}
+        puedeEditarMedicos={puedeEditarMedicos}
+        sinConsultoriosDisponibles={consultoriosDisponibles.length === 0}
+        onEdit={openEditModal}
+        onReactivate={handleReactivar}
+        onDeactivateRequest={setDeactivatingId}
+        puedeAbrirAgendaDe={puedeAbrirAgendaDe}
+        onOpenHorarios={setHorariosDeId}
+      />
 
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#047857]">
-                Con cédula
-              </p>
-              <h3 className="text-2xl font-bold font-heading text-[#047857] mt-1 tnum">
-                {metrica(stats.conCedula)}
-              </h3>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center">
-              <IdCard className="w-5 h-5" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardContent className="p-4">
-          <Input
-            placeholder="Buscar por nombre, especialidad o cédula..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            leftIcon={<Search className="w-4 h-4" />}
-          />
-        </CardContent>
-      </Card>
-
-      <div className="space-y-3">
-        {!isLoading && !loadError && (
-          <div className="flex items-center justify-between text-xs text-[#64748B] px-1">
-            <span>
-              Mostrando <strong>{filteredMedicos.length}</strong> médicos registrados
-            </span>
-          </div>
-        )}
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Médico</TableHead>
-              <TableHead>Consultorio</TableHead>
-              <TableHead>Contacto</TableHead>
-              <TableHead>Tarifa base</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-12">
-                  <span
-                    role="status"
-                    aria-live="polite"
-                    className="inline-flex items-center gap-2 text-[#64748B]"
-                  >
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Cargando médicos...
-                  </span>
-                </TableCell>
-              </TableRow>
-            ) : loadError ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8">
-                  <Alert variant="error" title="No se pudieron cargar los médicos">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <span>{loadError}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRetry}
-                        leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                      >
-                        Reintentar
-                      </Button>
-                    </div>
-                  </Alert>
-                </TableCell>
-              </TableRow>
-            ) : filteredMedicos.length > 0 ? (
-              filteredMedicos.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell>
-                    <span className="font-semibold text-sm text-[#0B1C30] block">{m.nombre}</span>
-                    {m.especialidad && (
-                      <span className="text-[11px] text-[#64748B] block mt-0.5">
-                        {m.especialidad}
-                      </span>
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    <span className="text-xs text-[#41484D]">
-                      {consultorioPorId(m.consultorioId)?.nombre || '—'}
-                    </span>
-                  </TableCell>
-
-                  <TableCell>
-                    {m.telefono ? (
-                      <span className="text-xs text-[#41484D] flex items-center gap-1.5">
-                        <Phone className="w-3 h-3 text-[#64748B]" /> {m.telefono}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-[#94A3B8]">—</span>
-                    )}
-                    {m.cedula && (
-                      <span className="text-[11px] text-[#64748B] flex items-center gap-1.5 mt-0.5">
-                        <IdCard className="w-3 h-3" /> {m.cedula}
-                      </span>
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    <span className="text-xs text-[#41484D] tnum">
-                      {m.tarifaBase != null ? `$${m.tarifaBase.toFixed(2)}` : '—'}
-                    </span>
-                  </TableCell>
-
-                  <TableCell>
-                    <Badge variant={m.activo ? 'success' : 'default'} showDot>
-                      {m.activo ? 'Activo' : 'Inactivo'}
-                    </Badge>
-                  </TableCell>
-
-                  <TableCell className="text-right">
-                    <div className="inline-flex items-center gap-1.5">
-                      {puedeAbrirAgendaDe(m) && (
-                        <button
-                          type="button"
-                          onClick={() => openHorarios(m.id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#CBD5E1] text-[#0A4D68] hover:bg-[#EFF4FF] text-xs font-medium transition-all"
-                          title="Ver horarios de disponibilidad"
-                        >
-                          <CalendarClock className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Horarios</span>
-                        </button>
-                      )}
-                      {puedeEditarMedicos && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(m)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0A4D68] text-white hover:bg-[#00354a] text-xs font-medium transition-all shadow-2xs"
-                            title="Editar médico"
-                          >
-                            <Pencil className="w-3.5 h-3.5 text-[#88BDDC]" />
-                            <span className="hidden sm:inline">Editar</span>
-                          </button>
-                          {!m.activo && (
-                            <button
-                              type="button"
-                              onClick={() => handleReactivar(m)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#059669] text-white hover:bg-[#047857] text-xs font-medium transition-all shadow-2xs"
-                              title="Reactivar médico"
-                            >
-                              <UserCheck className="w-3.5 h-3.5 text-[#D1FAE5]" />
-                              <span className="hidden sm:inline">Reactivar</span>
-                            </button>
-                          )}
-                          {m.activo && (
-                            <button
-                              type="button"
-                              onClick={() => setDeactivatingId(m.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#FCA5A5] text-[#E11D48] hover:bg-[#FEF2F2] text-xs font-medium transition-all"
-                              title="Desactivar médico"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">Desactivar</span>
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-12">
-                  {search ? (
-                    <span className="text-[#94A3B8]">
-                      No se encontraron médicos con ese criterio.
-                    </span>
-                  ) : (
-                    <div className="space-y-1">
-                      <p className="flex items-center justify-center gap-2 text-[#41484D] font-semibold">
-                        <Stethoscope className="w-4 h-4 text-[#64748B]" />
-                        Aún no hay médicos registrados
-                      </p>
-                      {puedeEditarMedicos && (
-                        <p className="text-[#94A3B8]">
-                          {consultoriosDisponibles.length === 0
-                            ? 'Da de alta un consultorio primero: un médico siempre necesita uno asignado.'
-                            : 'Da de alta al primer médico con el botón «Nuevo Médico».'}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* ─────────────────────────────────────────
-          MODAL DE MÉDICO (CREAR / EDITAR)
-          ───────────────────────────────────────── */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={editingId ? 'Editar Médico' : 'Registrar Nuevo Médico'}
-        description="Datos profesionales del médico y el consultorio donde atiende."
-        maxWidth="md"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Nombre"
-            value={form.nombre}
-            onChange={(e) => actualizarCampo('nombre', e.target.value)}
-            error={erroresForm.nombre}
-            required
-            maxLength={120}
-          />
-          <Select
-            label="Consultorio"
-            value={form.consultorioId}
-            onChange={(e) => setForm((f) => ({ ...f, consultorioId: e.target.value }))}
-            options={consultoriosDisponibles.map((c) => ({ value: c.id, label: c.nombre }))}
-            placeholder="Selecciona..."
-            required
-            disabled={editingId !== null}
-            helperText={
-              editingId !== null
-                ? 'El consultorio no se puede cambiar una vez creado el médico.'
-                : undefined
-            }
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Especialidad"
-              value={form.especialidad}
-              onChange={(e) => actualizarCampo('especialidad', e.target.value)}
-              error={erroresForm.especialidad}
-              maxLength={80}
-            />
-            <Input
-              label="Cédula profesional"
-              value={form.cedula}
-              onChange={(e) => actualizarCampo('cedula', e.target.value)}
-              error={erroresForm.cedula}
-              leftIcon={<IdCard className="w-4 h-4" />}
-              maxLength={10}
-            />
-            <Input
-              label="Teléfono"
-              value={form.telefono}
-              onChange={(e) => actualizarCampo('telefono', e.target.value)}
-              error={erroresForm.telefono}
-              leftIcon={<Phone className="w-4 h-4" />}
-              maxLength={20}
-            />
-            <Input
-              label="Tarifa base"
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.tarifaBase}
-              onChange={(e) => setForm((f) => ({ ...f, tarifaBase: e.target.value }))}
-            />
-          </div>
-
-          {saveError && (
-            <Alert variant="error" title="No se pudo guardar el médico">
-              {saveError}
-            </Alert>
-          )}
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-[#F1F5F9]">
-            <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              isLoading={isSubmitting}
-              leftIcon={<Plus className="w-4 h-4 text-[#88BDDC]" />}
-            >
-              {editingId ? 'Guardar Cambios' : 'Registrar Médico'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {isModalOpen && (
+        <MedicoForm
+          key={formKey}
+          onClose={() => setIsModalOpen(false)}
+          editingMedico={editingMedico}
+          consultoriosDisponibles={consultoriosDisponibles}
+          onSubmit={handleFormSubmit}
+        />
+      )}
 
       {/* ─────────────────────────────────────────
           MODAL DE CONFIRMACIÓN DE BAJA
@@ -997,50 +262,6 @@ export function MedicosPage() {
       </Modal>
 
       {/* ─────────────────────────────────────────
-          MODAL DE CONFIRMACIÓN DE BORRADO DE BLOQUE
-          ───────────────────────────────────────── */}
-      {/* El borrado de un bloque es físico: `horario_medico` no tiene baja lógica, así que
-          confirmarlo es la única barrera antes de una pérdida irreversible. */}
-      <Modal
-        isOpen={horarioAEliminar !== null}
-        onClose={() => setHorarioAEliminar(null)}
-        title="Eliminar bloque de disponibilidad"
-        description="El bloque se elimina de forma definitiva: no se puede recuperar."
-        maxWidth="sm"
-        // Se abre desde dentro del panel de horarios: sin la capa superior quedaría debajo del
-        // panel y el aviso de confirmación no se vería.
-        nivelSuperior
-      >
-        <p className="text-sm text-[#41484D]">
-          {horarioAEliminarDatos ? (
-            <>
-              ¿Eliminar el bloque del{' '}
-              <strong>
-                {DIAS_SEMANA.find((d) => d.value === horarioAEliminarDatos.diaSemana)?.label}
-              </strong>{' '}
-              de {horarioAEliminarDatos.horaInicio.slice(0, 5)} a{' '}
-              {horarioAEliminarDatos.horaFin.slice(0, 5)}? No se puede deshacer.
-            </>
-          ) : (
-            '¿Eliminar este bloque? No se puede deshacer.'
-          )}
-        </p>
-        <div className="flex justify-end gap-2 pt-5">
-          <Button type="button" variant="outline" onClick={() => setHorarioAEliminar(null)}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="danger"
-            onClick={handleDeleteHorario}
-            leftIcon={<Trash2 className="w-4 h-4" />}
-          >
-            Eliminar bloque
-          </Button>
-        </div>
-      </Modal>
-
-      {/* ─────────────────────────────────────────
           PANEL DE HORARIOS DE DISPONIBILIDAD
           ───────────────────────────────────────── */}
       <Modal
@@ -1050,241 +271,9 @@ export function MedicosPage() {
         description="Bloques de disponibilidad semanal. Las citas se agendan dentro de estos horarios."
         maxWidth="lg"
       >
-        <div className="space-y-4">
-          {/* ─────────────────────────────────────────
-              CONSULTORIOS ASIGNADOS AL MÉDICO
-              ───────────────────────────────────────── */}
-          {/* Es el conjunto del que cada bloque elige uno: primero se asigna, después se agenda.
-              La lectura la ve también el propio médico; asignar y quitar son solo de ADMIN, igual
-              que en el backend. */}
-          {puedeConsultarAsignados && (
-            <section className="space-y-2">
-              <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-[#0B1C30]">
-                  Consultorios del médico
-                </h4>
-                <p className="text-[11px] text-[#64748B] mt-1">
-                  Cada bloque se dicta en uno de estos consultorios. El principal no se puede quitar.
-                </p>
-              </div>
-
-              {asignadosError && (
-                <Alert variant="error" title="Error">
-                  {asignadosError}
-                </Alert>
-              )}
-              {asignacionError && (
-                <Alert variant="error" title="No se pudo completar la operación">
-                  {asignacionError}
-                </Alert>
-              )}
-
-              {isLoadingAsignados ? (
-                <span
-                  role="status"
-                  aria-live="polite"
-                  className="inline-flex items-center gap-2 text-[#64748B] text-sm py-2"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Cargando consultorios asignados...
-                </span>
-              ) : consultoriosAsignados.length > 0 ? (
-                <ul aria-label="Consultorios asignados" className="space-y-1.5">
-                  {consultoriosAsignados.map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-center justify-between px-3 py-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]"
-                    >
-                      <span className="text-xs text-[#41484D] flex items-center gap-2">
-                        <MapPin className="w-3.5 h-3.5 text-[#64748B]" />
-                        <span className="text-[#0B1C30]">{c.nombre}</span>
-                        {medicoDeHorarios?.consultorioId === c.id && (
-                          <Badge variant="primary" showDot={false}>
-                            Principal
-                          </Badge>
-                        )}
-                      </span>
-                      {puedeAsignarConsultorios && (
-                        <button
-                          type="button"
-                          onClick={() => handleQuitarConsultorio(c.id)}
-                          disabled={quitandoConsultorioId === c.id}
-                          aria-label={`Quitar ${c.nombre}`}
-                          title="Quitar consultorio"
-                          className="p-1.5 rounded-md text-[#E11D48] hover:bg-[#FEF2F2] disabled:opacity-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-[#94A3B8] py-2">
-                  Este médico todavía no tiene consultorios asignados.
-                </p>
-              )}
-
-              {puedeAsignarConsultorios && consultoriosPorAsignar.length > 0 && (
-                <div className="flex flex-col sm:flex-row sm:items-end gap-2">
-                  <Select
-                    label="Consultorio a asignar"
-                    value={consultorioAAgregar}
-                    onChange={(e) => setConsultorioAAgregar(e.target.value)}
-                    options={consultoriosPorAsignar.map((c) => ({
-                      value: c.id,
-                      label: c.nombre,
-                    }))}
-                    placeholder="Selecciona..."
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleAsignarConsultorio}
-                    isLoading={isAsignandoConsultorio}
-                    disabled={!consultorioAAgregar}
-                    leftIcon={<Plus className="w-3.5 h-3.5" />}
-                  >
-                    Asignar consultorio
-                  </Button>
-                </div>
-              )}
-            </section>
-          )}
-
-          {horariosError && (
-            <Alert variant="error" title="Error">
-              {horariosError}
-            </Alert>
-          )}
-
-          {isLoadingHorarios ? (
-            <span
-              role="status"
-              aria-live="polite"
-              className="inline-flex items-center gap-2 text-[#64748B] text-sm py-4"
-            >
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Cargando horarios...
-            </span>
-          ) : horarios.length > 0 ? (
-            <ul aria-label="Bloques de disponibilidad" className="space-y-1.5">
-              {horarios.map((h) => (
-                <li
-                  key={h.id}
-                  className="flex items-center justify-between px-3 py-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]"
-                >
-                  <span className="text-xs text-[#41484D] flex items-center gap-2 flex-wrap">
-                    <Clock className="w-3.5 h-3.5 text-[#64748B]" />
-                    <strong className="text-[#0B1C30]">
-                      {DIAS_SEMANA.find((d) => d.value === h.diaSemana)?.label}
-                    </strong>
-                    {h.horaInicio.slice(0, 5)}–{h.horaFin.slice(0, 5)} · citas de{' '}
-                    {h.duracionConsulta} min
-                    <span className="text-[#0A4D68] flex items-center gap-1.5">
-                      <MapPin className="w-3 h-3" />
-                      {h.consultorioNombre}
-                    </span>
-                  </span>
-                  {puedeGestionarHorarios && (
-                    <div className="inline-flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => openEditHorario(h)}
-                        className="p-1.5 rounded-md text-[#0A4D68] hover:bg-[#E5EEFF]"
-                        title="Editar bloque"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHorarioAEliminar(h.id)}
-                        className="p-1.5 rounded-md text-[#E11D48] hover:bg-[#FEF2F2]"
-                        title="Eliminar bloque"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-[#94A3B8] py-2">
-              Este médico todavía no tiene bloques de disponibilidad registrados.
-            </p>
-          )}
-
-          {puedeGestionarHorarios && (
-            <form
-              onSubmit={handleHorarioSubmit}
-              className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-[#F1F5F9] items-end"
-            >
-              {horarioFormError && (
-                <div className="col-span-2 sm:col-span-4">
-                  <Alert variant="error">{horarioFormError}</Alert>
-                </div>
-              )}
-              <Select
-                label="Consultorio del bloque"
-                value={horarioForm.consultorioId}
-                onChange={(e) => setHorarioForm((f) => ({ ...f, consultorioId: e.target.value }))}
-                // Solo los asignados activos (S13) más el actual del bloque en edición: el backend
-                // rechaza con 409 un consultorio de baja para crear o mover un bloque.
-                options={consultoriosDelBloque.map((c) => ({ value: c.id, label: c.nombre }))}
-                disabled={consultoriosDelBloque.length === 0}
-              />
-              <Select
-                label="Día"
-                value={horarioForm.diaSemana}
-                onChange={(e) => setHorarioForm((f) => ({ ...f, diaSemana: e.target.value }))}
-                options={DIAS_SEMANA.map((d) => ({ value: d.value, label: d.label }))}
-              />
-              <Input
-                label="Hora inicio"
-                type="time"
-                value={horarioForm.horaInicio}
-                onChange={(e) => setHorarioForm((f) => ({ ...f, horaInicio: e.target.value }))}
-                required
-              />
-              <Input
-                label="Hora fin"
-                type="time"
-                value={horarioForm.horaFin}
-                onChange={(e) => setHorarioForm((f) => ({ ...f, horaFin: e.target.value }))}
-                required
-              />
-              <Select
-                label="Duración cita"
-                value={horarioForm.duracionConsulta}
-                onChange={(e) =>
-                  setHorarioForm((f) => ({ ...f, duracionConsulta: e.target.value }))
-                }
-                options={DURACIONES.map((d) => ({ value: d, label: `${d} min` }))}
-              />
-              <div className="col-span-2 sm:col-span-4 flex justify-end gap-2">
-                {editingHorarioId && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditingHorarioId(null);
-                      setHorarioForm(formularioDeHorarioVacio());
-                      setHorarioFormError(null);
-                    }}
-                  >
-                    Cancelar edición
-                  </Button>
-                )}
-                <Button type="submit" variant="primary" size="sm" isLoading={isSavingHorario}>
-                  {editingHorarioId ? 'Guardar bloque' : 'Agregar bloque'}
-                </Button>
-              </div>
-            </form>
-          )}
-        </div>
+        {horariosDeId && medicoDeHorarios && (
+          <HorarioEditor medico={medicoDeHorarios} consultoriosOrganizacion={consultorios} />
+        )}
       </Modal>
     </div>
   );
